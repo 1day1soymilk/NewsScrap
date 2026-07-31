@@ -16,7 +16,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // syntactically valid placeholders so the client constructs successfully; actual requests will
 // then fail at call time and surface through the app's existing error handling / empty state.
 // Do NOT change these back to '' — that reintroduces the module-level throw.
+// Use `||`, not `??`, deliberately: a declared-but-blank .env value (e.g. `VITE_SUPABASE_URL=`)
+// is read by Vite as `''`, not `undefined`/`null`, so `??` would let the empty string through
+// and reintroduce the same throw. `||` treats '' the same as missing, matching the falsy check
+// in the warning above. Do not "modernize" this back to `??`.
 export const supabase = createClient(
-  supabaseUrl ?? 'http://localhost:54321',
-  supabaseAnonKey ?? 'placeholder-anon-key',
+  supabaseUrl || 'http://localhost:54321',
+  supabaseAnonKey || 'placeholder-anon-key',
 )
