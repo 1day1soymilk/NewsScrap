@@ -25,31 +25,59 @@ function App() {
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [headlinesError, setHeadlinesError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchCategories().then(setCategories).catch((e) => setError(String(e)))
     fetchAvailableDates().then(setAvailableDates).catch((e) => setError(String(e)))
   }, [])
 
-  function loadWordCounts() {
+  function loadWordCounts(isCancelled: () => boolean = () => false) {
     setLoading(true)
     setError(null)
     fetchWordCounts(selectedDate, selectedCategory)
-      .then(setWordCounts)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false))
+      .then((data) => {
+        if (isCancelled()) return
+        setWordCounts(data)
+      })
+      .catch((e) => {
+        if (isCancelled()) return
+        setError(String(e))
+      })
+      .finally(() => {
+        if (isCancelled()) return
+        setLoading(false)
+      })
   }
 
-  useEffect(loadWordCounts, [selectedDate, selectedCategory])
+  useEffect(() => {
+    let cancelled = false
+    loadWordCounts(() => cancelled)
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, selectedCategory])
 
   useEffect(() => {
+    setHeadlinesError(null)
     if (!selectedWord) {
       setHeadlinesForWord([])
       return
     }
+    let cancelled = false
     fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
-      .then(setHeadlinesForWord)
-      .catch((e) => setError(String(e)))
+      .then((data) => {
+        if (cancelled) return
+        setHeadlinesForWord(data)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setHeadlinesError(String(e))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selectedWord, selectedDate, selectedCategory])
 
   return (
@@ -71,7 +99,7 @@ function App() {
       {error && (
         <div className="text-center">
           <p className="mb-2 text-red-600">{error}</p>
-          <button onClick={loadWordCounts} className="rounded border px-3 py-1 text-sm hover:bg-gray-100">
+          <button onClick={() => loadWordCounts()} className="rounded border px-3 py-1 text-sm hover:bg-gray-100">
             다시 시도
           </button>
         </div>
@@ -81,6 +109,11 @@ function App() {
         <WordCloud words={wordCounts} onWordClick={setSelectedWord} />
       )}
 
+      {selectedWord && headlinesError && (
+        <div className="fixed right-4 top-4 z-10 max-w-xs rounded border bg-white p-3 text-sm text-red-600 shadow-lg">
+          {headlinesError}
+        </div>
+      )}
       <HeadlinePanel word={selectedWord} headlines={headlinesForWord} onClose={() => setSelectedWord(null)} />
     </div>
   )
