@@ -24,11 +24,22 @@ test('reaches the real Supabase project', async ({ page }) => {
   // renders only once `!error && !loading`, and then shows either an <svg>
   // (words placed) or this empty-state paragraph (zero words for today) -
   // either one is proof fetchWordCounts resolved without error, regardless of
-  // whether the collector has run yet today.
-  const wordCloudSvg = page.locator('svg')
+  // whether the collector has run yet today. Whenever the svg exists it
+  // contains at least one <text>, because WordCloud renders the svg only when
+  // it placed at least one word - so `svg text` avoids a strict-mode
+  // violation the day a second, iconography <svg> is added to the page.
+  const wordCloudSvg = page.locator('svg text').first()
   const emptyState = page.getByText('아직 수집된 데이터가 없습니다.')
   await expect(wordCloudSvg.or(emptyState)).toBeVisible()
 
   // The retry button only renders when a query failed.
   await expect(page.getByRole('button', { name: '다시 시도' })).toHaveCount(0)
+
+  // fetchAvailableDates()/collected_dates only surfaces through the date
+  // input's min/max attributes, and the .or() above does not wait on it (it
+  // only catches a collected_dates failure if it lands within about a second
+  // of the word-count effect settling). Assert the max attribute deterministically
+  // instead; it is not pinned to a specific date because the real database
+  // accumulates dates over time.
+  await expect(page.locator('input[type="date"]')).toHaveAttribute('max', /^\d{4}-\d{2}-\d{2}$/)
 })

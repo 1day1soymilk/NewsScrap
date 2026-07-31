@@ -3,6 +3,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   reporter: 'list',
+  // These two settings are a pair: trace is only captured on a retry, so
+  // without retries > 0 'on-first-retry' never fires and no trace is ever recorded.
+  retries: 1,
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',

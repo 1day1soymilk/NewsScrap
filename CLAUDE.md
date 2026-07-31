@@ -52,7 +52,7 @@ with the repo, so a fresh clone needs them recreated.
 
 | File | Holds | Used by |
 | --- | --- | --- |
-| `.env` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | the frontend, at build time |
+| `.env` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | the frontend, at build time, and `e2e/smoke.spec.ts` |
 | `.env.functions` | `ETRI_API_KEY` | uploaded wholesale as the Edge Function environment |
 | `.env.supabase` | CLI access token, project ref, DB password | the Supabase CLI |
 
@@ -153,10 +153,19 @@ canvas, which jsdom does not implement. Their layout arithmetic is extracted int
 
 Five of those tests stub Supabase at the network layer
 (`e2e/support/mockSupabase.ts`), so they do not depend on what was collected that
-day. `e2e/smoke.spec.ts` is the only test that hits the real project, and it
+day. `e2e/smoke.spec.ts` is the only file that hits the real project, and it
 asserts the seeded category tabs rather than collected words — nothing exists for
 the current date between midnight and 13:00 KST, when the cron runs.
 
-Do not assert on how many words the cloud rendered. d3-cloud silently drops words
-that do not fit the canvas, so counts vary with font rendering. Assert that
-specific words are visible instead.
+`e2e/smoke.spec.ts` needs a real `.env` (recoverable with
+`npx vercel env pull .env --environment=development`); on a fresh clone without
+one, `npm run test:e2e` fails 1 of 7 with a bare count mismatch. Also note
+`playwright.config.ts` sets `reuseExistingServer: true`, so a dev server started
+before `.env` existed will be silently reused with stale environment variables —
+stop it first.
+
+Do not assert a positive total for how many words the cloud rendered. d3-cloud
+silently drops words that do not fit the canvas, so totals vary with font
+rendering. Asserting that a word is absent (`toHaveCount(0)`) is fine — absence
+does not have that problem. Assert that specific words are visible or absent
+instead of asserting a count.
