@@ -9,4 +9,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
-export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '')
+// createClient throws synchronously if given an empty string (e.g. `supabaseUrl is required.`),
+// and this module is imported at the top of the app's module graph, so that throw would happen
+// during module evaluation, before React ever mounts — the whole app would render as a blank
+// page instead of the documented empty-state UI. When the real env vars are absent, fall back to
+// syntactically valid placeholders so the client constructs successfully; actual requests will
+// then fail at call time and surface through the app's existing error handling / empty state.
+// Do NOT change these back to '' — that reintroduces the module-level throw.
+export const supabase = createClient(
+  supabaseUrl ?? 'http://localhost:54321',
+  supabaseAnonKey ?? 'placeholder-anon-key',
+)
