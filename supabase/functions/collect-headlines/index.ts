@@ -50,23 +50,30 @@ Deno.serve(async () => {
             { onConflict: 'category_id,link', ignoreDuplicates: true },
           )
           .select('id')
-          .single()
 
-        if (insertError || !inserted) {
+        if (insertError) {
+          console.error(`Failed to store headline "${headline.link}":`, insertError)
+          continue
+        }
+        if (!inserted || inserted.length === 0) {
           continue // already collected earlier today
         }
+        const headlineId = inserted[0].id
         storedCount += 1
 
         try {
           const etriResponse = await callEtriMorphAnalysis(headline.title, ETRI_API_KEY)
           const nouns = filterNouns(extractNouns(etriResponse))
           if (nouns.length > 0) {
-            await supabase
+            const { error: nounsError } = await supabase
               .from('headline_nouns')
-              .insert(nouns.map((word) => ({ headline_id: inserted.id, word })))
+              .insert(nouns.map((word) => ({ headline_id: headlineId, word })))
+            if (nounsError) {
+              console.error(`Failed to store nouns for headline ${headlineId}:`, nounsError)
+            }
           }
         } catch (etriError) {
-          console.error(`ETRI analysis failed for headline ${inserted.id}:`, etriError)
+          console.error(`ETRI analysis failed for headline ${headlineId}:`, etriError)
         }
       }
 
