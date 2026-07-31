@@ -39,6 +39,24 @@ describe('extractHeadlines', () => {
     expect(extractHeadlines('<html><body>no headlines here</body></html>')).toEqual([])
   })
 
+  it('matches anchors where sa_text_title is not the first class', () => {
+    const html = `
+<li class="sa_item">
+  <div class="sa_text">
+    <a href="https://n.news.naver.com/mnews/article/055/0001199999" class="_NLOG_IMPRESSION sa_text_title" data-clk="pol.clart">
+      <strong class="sa_text_strong">국회, 본회의 개최</strong>
+    </a>
+  </div>
+</li>
+`
+    expect(extractHeadlines(html)).toEqual([
+      {
+        title: '국회, 본회의 개최',
+        link: 'https://n.news.naver.com/mnews/article/055/0001199999',
+      },
+    ])
+  })
+
   it('deduplicates repeated links', () => {
     const html = SAMPLE_HTML + SAMPLE_HTML
     const result = extractHeadlines(html)

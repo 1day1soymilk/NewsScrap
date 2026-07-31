@@ -3,7 +3,8 @@ export interface ScrapedHeadline {
   link: string
 }
 
-const ANCHOR_RE = /<a\b([^>]*class="sa_text_title[^"]*"[^>]*)>([\s\S]*?)<\/a>/g
+// sa_text_title may appear anywhere in the class list, not just first.
+const ANCHOR_RE = /<a\b([^>]*class="[^"]*\bsa_text_title\b[^"]*"[^>]*)>([\s\S]*?)<\/a>/g
 const HREF_RE = /href="([^"]+)"/
 const STRONG_RE = /<strong[^>]*>([\s\S]*?)<\/strong>/
 

@@ -3,6 +3,11 @@ import cloud from 'd3-cloud'
 import { computeFontSizes, MIN_FONT_SIZE } from './wordCloudLayout'
 import type { WordCount } from '../lib/types'
 
+// cloud().start() is synchronous, so an unbounded word list blocks the main
+// thread for seconds; d3-cloud silently drops whatever does not fit anyway.
+// Words arrive sorted by count descending, so this keeps the most frequent ones.
+export const MAX_CLOUD_WORDS = 100
+
 interface PlacedWord {
   text: string
   fontSize: number
@@ -23,7 +28,7 @@ export function WordCloud({ words, onWordClick, width = 700, height = 450 }: Wor
 
   useEffect(() => {
     let cancelled = false
-    const sized = computeFontSizes(words)
+    const sized = computeFontSizes(words.slice(0, MAX_CLOUD_WORDS))
     if (sized.length === 0) {
       setPlaced([])
       return

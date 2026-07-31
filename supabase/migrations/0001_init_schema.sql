@@ -36,6 +36,35 @@ create policy "public read categories" on categories for select using (true);
 create policy "public read headlines" on headlines for select using (true);
 create policy "public read headline_nouns" on headline_nouns for select using (true);
 
+-- Aggregation views. The frontend reads these instead of raw rows so that
+-- PostgREST's db-max-rows cap (1000) can never silently truncate a result set.
+-- security_invoker = on makes the views run with the querying role's
+-- permissions, so the public-read policies above still apply.
+
+-- One row per (collected_date, category slug, word) plus, thanks to the
+-- grouping sets, an all-categories rollup row where category_slug is null.
+create view daily_word_counts with (security_invoker = on) as
+select
+  h.collected_date,
+  c.slug as category_slug,
+  n.word,
+  count(*)::int as count
+from headline_nouns n
+join headlines h on h.id = n.headline_id
+join categories c on c.id = h.category_id
+group by grouping sets (
+  (h.collected_date, c.slug, n.word),
+  (h.collected_date, n.word)
+);
+
+-- Distinct collection dates, so the date picker never reads every headline row.
+create view collected_dates with (security_invoker = on) as
+select distinct collected_date
+from headlines;
+
+grant select on daily_word_counts to anon, authenticated;
+grant select on collected_dates to anon, authenticated;
+
 insert into categories (slug, label, section_id) values
   ('politics', '정치', '100'),
   ('economy', '경제', '101'),

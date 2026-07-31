@@ -15,6 +15,14 @@ function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 }
 
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string') {
+    return (e as { message: string }).message
+  }
+  return String(e)
+}
+
 function App() {
   const [categories, setCategories] = useState<Category[]>([])
   const [availableDates, setAvailableDates] = useState<string[]>([])
@@ -23,13 +31,13 @@ function App() {
   const [wordCounts, setWordCounts] = useState<WordCount[]>([])
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [headlinesError, setHeadlinesError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchCategories().then(setCategories).catch((e) => setError(String(e)))
-    fetchAvailableDates().then(setAvailableDates).catch((e) => setError(String(e)))
+    fetchCategories().then(setCategories).catch((e) => setError(errorMessage(e)))
+    fetchAvailableDates().then(setAvailableDates).catch((e) => setError(errorMessage(e)))
   }, [])
 
   function loadWordCounts(isCancelled: () => boolean = () => false) {
@@ -42,7 +50,7 @@ function App() {
       })
       .catch((e) => {
         if (isCancelled()) return
-        setError(String(e))
+        setError(errorMessage(e))
       })
       .finally(() => {
         if (isCancelled()) return
@@ -73,7 +81,7 @@ function App() {
       })
       .catch((e) => {
         if (cancelled) return
-        setHeadlinesError(String(e))
+        setHeadlinesError(errorMessage(e))
       })
     return () => {
       cancelled = true
