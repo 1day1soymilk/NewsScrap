@@ -61,7 +61,7 @@ export async function fetchHeadlinesForWord(
 
   const seen = new Set<string>()
   const results: HeadlineSummary[] = []
-  for (const row of (data ?? []) as { headlines: HeadlineSummary }[]) {
+  for (const row of (data ?? []) as unknown as { headlines: HeadlineSummary }[]) {
     const headline = row.headlines
     if (seen.has(headline.id)) continue
     seen.add(headline.id)
