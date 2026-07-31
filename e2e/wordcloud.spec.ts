@@ -64,9 +64,10 @@ test('surfaces a query failure and recovers on retry', async ({ page }) => {
   const retry = page.getByRole('button', { name: '다시 시도' })
   await expect(retry).toBeVisible()
 
-  // queries.ts wraps the PostgREST error object into a real Error; without that
-  // wrapping the UI renders "[object Object]".
-  await expect(page.getByText(/mocked failure/)).toBeVisible()
+  // queryError() appends the PostgREST code to the message; this exact string
+  // only renders if queryError() ran, so it fails if that wrapping is removed.
+  // The [object Object] check is a cheap belt-and-braces addition on top.
+  await expect(page.getByText('mocked failure (PGRST500)', { exact: true })).toBeVisible()
   await expect(page.getByText('[object Object]')).toHaveCount(0)
 
   await mockSupabase(page)
