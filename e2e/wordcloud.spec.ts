@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { DEFAULT_WORD_COUNTS, ECONOMY_WORD_COUNTS } from './support/fixtures'
 import { mockSupabase } from './support/mockSupabase'
 
 test('renders every fixture word in the cloud', async ({ page }) => {
@@ -30,4 +31,20 @@ test('opens and closes the headline panel for a clicked word', async ({ page }) 
 
   await panel.getByRole('button', { name: '닫기' }).click()
   await expect(panel).toBeHidden()
+})
+
+test('swaps the cloud when a category is selected', async ({ page }) => {
+  await mockSupabase(page, {
+    daily_word_counts: (params) =>
+      params.get('category_slug') === 'eq.economy' ? ECONOMY_WORD_COUNTS : DEFAULT_WORD_COUNTS,
+  })
+  await page.goto('/')
+
+  const words = page.locator('svg text')
+  await expect(words.filter({ hasText: /^예산안$/ })).toBeVisible()
+
+  await page.getByRole('button', { name: '경제' }).click()
+
+  await expect(words.filter({ hasText: /^금리$/ })).toBeVisible()
+  await expect(words.filter({ hasText: /^예산안$/ })).toHaveCount(0)
 })
