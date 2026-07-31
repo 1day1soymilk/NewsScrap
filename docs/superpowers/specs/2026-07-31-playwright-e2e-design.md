@@ -194,6 +194,11 @@ await page.getByRole('button', { name: '다시 시도' }).click()
 | 4 | `wordcloud.spec.ts` | `daily_word_counts` 가 빈 배열 → `아직 수집된 데이터가 없습니다.` |
 | 5 | `wordcloud.spec.ts` | 쿼리 500 → 에러 문구 + `다시 시도` 노출, 성공 mock 덧씌운 뒤 클릭 → 클라우드 복구 |
 | 6 | `smoke.spec.ts` | **실제 DB**: `nav` 안의 버튼이 7개, `다시 시도` 버튼이 존재하지 않음 |
+| 7 | `smoke.spec.ts` | 백엔드와 무관하게 `<h1>` 이 렌더된다 |
+
+7번은 하네스를 세울 때 먼저 만드는 테스트다 — 모킹도 `.env` 도 필요 없으므로, 스위트가
+무너졌을 때 "브라우저 구동 자체가 실패한 것"과 "백엔드가 문제인 것"을 구분해 준다.
+그 진단 가치 때문에 하네스 검증용 임시 테스트로 쓰고 버리지 않고 남긴다.
 
 ### 스모크 테스트가 카테고리를 단언하는 이유
 
@@ -272,4 +277,4 @@ Vercel 프로젝트에 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` 가 세 �
 
 1. `npm run build` — E2E 코드까지 타입 체크되며 성공한다.
 2. `npm test` — Vitest 가 기존 테스트만 실행하고, `e2e/` 를 수집하지 않는다.
-3. `npm run test:e2e` — 6개 테스트가 모두 통과한다.
+3. `npm run test:e2e` — 7개 테스트가 모두 통과한다.
