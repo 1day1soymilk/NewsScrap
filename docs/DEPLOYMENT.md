@@ -9,9 +9,12 @@
    - Project Settings → API 에서 **Project URL**, **anon key**, **service_role key** 를 복사해 둔다.
    - Project Settings → General 의 **Reference ID** 도 복사해 둔다 (`<project-ref>`).
 
-2. **ETRI API 키 발급** — [aiopen.etri.re.kr](https://aiopen.etri.re.kr)
-   - 무료 키는 하루 호출 한도가 있다. 이 함수는 1회 실행당 최대 240회
-     (6 카테고리 × 40 헤드라인) 호출하므로 일 1회 스케줄이면 한도 안에 들어온다.
+2. **ETRI API 키 발급** — [epretx.etri.re.kr](https://epretx.etri.re.kr) 회원가입 후 발급
+   - 구 포털 `aiopen.etri.re.kr` 은 **2025-06-30 운영 종료**됐다 (현재 인증서도 만료 상태).
+     e-PreTX 가 공식 후속 플랫폼이고 WiseNLU 를 동일한 요청/응답 스키마로 제공한다.
+     엔드포인트만 `http://epretx.etri.re.kr:8000/api/WiseNLU` 로 바뀌었다.
+   - 한도는 5,000 호출/일. 이 함수는 1회 실행당 최대 240회
+     (6 카테고리 × 40 헤드라인) 호출하므로 일 1회 스케줄이면 여유가 크다.
 
 3. **`.env` 작성** — 저장소 루트에 `.env.example` 을 복사해서 채운다.
 

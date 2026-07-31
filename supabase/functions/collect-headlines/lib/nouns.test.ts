@@ -47,7 +47,7 @@ describe('callEtriMorphAnalysis', () => {
     const result = await callEtriMorphAnalysis('여야 예산안 처리', 'test-key')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://aiopen.etri.re.kr:8000/WiseNLU',
+      'http://epretx.etri.re.kr:8000/api/WiseNLU',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'test-key' }),

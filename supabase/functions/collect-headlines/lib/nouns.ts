@@ -14,7 +14,10 @@ export interface EtriResponse {
 
 const NOUN_TYPES = new Set(['NNG', 'NNP'])
 const STOPWORDS = new Set(['기자', '사진', '종합', '단독', '속보', '영상'])
-const ETRI_ENDPOINT = 'http://aiopen.etri.re.kr:8000/WiseNLU'
+// aiopen.etri.re.kr shut down on 2025-06-30. e-PreTX is ETRI's successor
+// platform and serves the same WiseNLU API with an unchanged request/response
+// schema — only the host and the /api path prefix differ. Limit: 5,000 req/day.
+const ETRI_ENDPOINT = 'http://epretx.etri.re.kr:8000/api/WiseNLU'
 
 export function extractNouns(response: EtriResponse): string[] {
   const sentences = response.return_object?.sentence ?? []
