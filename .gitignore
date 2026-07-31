@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .env
+# Edge Function secrets, fed to `supabase secrets set --env-file`.
+.env.functions
 
 # Editor directories and files
 .vscode/*
