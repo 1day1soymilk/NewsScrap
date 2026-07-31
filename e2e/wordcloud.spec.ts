@@ -48,3 +48,29 @@ test('swaps the cloud when a category is selected', async ({ page }) => {
   await expect(words.filter({ hasText: /^금리$/ })).toBeVisible()
   await expect(words.filter({ hasText: /^예산안$/ })).toHaveCount(0)
 })
+
+test('shows the empty state when the day has no words', async ({ page }) => {
+  await mockSupabase(page, { daily_word_counts: [] })
+  await page.goto('/')
+
+  await expect(page.getByText('아직 수집된 데이터가 없습니다.')).toBeVisible()
+  await expect(page.locator('svg text')).toHaveCount(0)
+})
+
+test('surfaces a query failure and recovers on retry', async ({ page }) => {
+  await mockSupabase(page, { failOn: 'daily_word_counts' })
+  await page.goto('/')
+
+  const retry = page.getByRole('button', { name: '다시 시도' })
+  await expect(retry).toBeVisible()
+
+  // queries.ts wraps the PostgREST error object into a real Error; without that
+  // wrapping the UI renders "[object Object]".
+  await expect(page.getByText(/mocked failure/)).toBeVisible()
+  await expect(page.getByText('[object Object]')).toHaveCount(0)
+
+  await mockSupabase(page)
+  await retry.click()
+
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+})
