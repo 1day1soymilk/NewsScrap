@@ -14,6 +14,8 @@ dist-ssr
 .env
 # Edge Function secrets, fed to `supabase secrets set --env-file`.
 .env.functions
+# Supabase CLI personal access token.
+.env.supabase
 
 # Editor directories and files
 .vscode/*
