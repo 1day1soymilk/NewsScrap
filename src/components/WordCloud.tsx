@@ -22,6 +22,7 @@ export function WordCloud({ words, onWordClick, width = 700, height = 450 }: Wor
   const [placed, setPlaced] = useState<PlacedWord[]>([])
 
   useEffect(() => {
+    let cancelled = false
     const sized = computeFontSizes(words)
     if (sized.length === 0) {
       setPlaced([])
@@ -36,6 +37,7 @@ export function WordCloud({ words, onWordClick, width = 700, height = 450 }: Wor
       .font('sans-serif')
       .fontSize((d) => (d as { size: number }).size)
       .on('end', (output) => {
+        if (cancelled) return
         setPlaced(
           output.map((word) => ({
             text: word.text ?? '',
@@ -48,6 +50,10 @@ export function WordCloud({ words, onWordClick, width = 700, height = 450 }: Wor
       })
 
     layout.start()
+
+    return () => {
+      cancelled = true
+    }
   }, [words, width, height])
 
   if (placed.length === 0) {
