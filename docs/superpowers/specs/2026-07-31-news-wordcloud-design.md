@@ -13,7 +13,7 @@
 ```
 pg_cron (매일 지정 시각, KST)
    └─ Supabase Edge Function `collect-headlines` 호출
-        ├─ 카테고리별 네이버 뉴스 RSS 파싱 → 헤드라인(제목/링크/일시) 수집
+        ├─ 카테고리별 네이버 뉴스 섹션 페이지(news.naver.com/section/{sid}) HTML 파싱 → 헤드라인(제목/링크) 수집
         ├─ 헤드라인마다 ETRI 형태소분석 API 호출 → 명사(NNG/NNP)만 추출
         └─ Postgres에 저장 (headlines, headline_nouns), 카테고리 하나 실패해도 나머지는 계속 진행
 
@@ -24,19 +24,21 @@ pg_cron (매일 지정 시각, KST)
 
 RLS는 read-only 공개 접근으로 충분 (로그인 불필요).
 
+> **데이터 소스 변경 (2026-07-31):** 최초 설계에서는 네이버 뉴스 RSS 피드를 쓰기로 했으나, 네이버는 2021~2022년경 뉴스 섹션 RSS를 공식 폐지했고 `rss.naver.com`/`newssearch.naver.com` 도메인 자체가 더 이상 존재하지 않는 것을 확인했다. 대신 `news.naver.com/section/{sid}` 섹션 페이지를 직접 HTML 파싱하는 방식으로 변경한다. 실제 페이지를 fetch해 확인한 섹션 ID: `100`=정치, `101`=경제, `102`=사회, `103`=생활/문화, `104`=세계, `105`=IT/과학. 헤드라인 기사는 `<a class="sa_text_title" href="https://n.news.naver.com/mnews/article/{oid}/{aid}"><strong class="sa_text_strong">제목</strong></a>` 구조로 렌더링된다.
+
 ## Data Model (Supabase Postgres)
 
-- **`categories`**: `id`, `slug`(politics/economy/society/it/world/culture 등), `label`(한글명), `rss_url`. 시딩 데이터 — 구현 단계에서 실제 네이버 뉴스 RSS 엔드포인트 URL을 확인해 채운다.
+- **`categories`**: `id`, `slug`(politics/economy/society/culture/world/it), `label`(한글명), `section_id`(네이버 섹션 ID, 위 매핑 참조). 시딩 데이터.
 - **`headlines`**: `id`, `category_id` FK → categories, `title`, `link`, `published_at`, `collected_date`(KST 기준 조회용 날짜). `(category_id, link)` unique 제약으로 같은 날 중복 수집 방지.
 - **`headline_nouns`**: `headline_id` FK → headlines, `word`. 헤드라인당 여러 행. 워드클라우드 빈도 집계와 "이 단어 포함 헤드라인 목록" 조회를 이 테이블 하나의 GROUP BY / JOIN으로 처리 (개인 프로젝트 트래픽 규모엔 사전 집계 테이블 불필요).
 
 ## Edge Function `collect-headlines`
 
 1. pg_cron이 매일 지정 시각(예: 07:00 KST)에 함수 호출.
-2. 카테고리별로 RSS fetch → XML 파싱 (Deno 호환 경량 XML 파서).
+2. 카테고리별로 `https://news.naver.com/section/{section_id}`를 fetch하고, `sa_text_title` 클래스를 가진 앵커 태그에서 헤드라인 제목과 기사 링크(href)를 정규식으로 추출.
 3. 헤드라인 제목마다 ETRI 형태소분석 Open API(POST, API 키는 Supabase 함수 시크릿으로 관리)를 호출해 NNG/NNP 태그 단어만 추출. 2글자 미만 단어 및 소규모 불용어(예: "기자", "사진", "종합") 필터링.
 4. `headlines` + `headline_nouns` upsert (링크 중복 시 스킵).
-5. 카테고리 하나가 RSS/ETRI 호출에 실패해도 나머지 카테고리는 계속 진행, 실패는 함수 로그에 남긴다.
+5. 카테고리 하나가 페이지 fetch/ETRI 호출에 실패해도 나머지 카테고리는 계속 진행, 실패는 함수 로그에 남긴다.
 
 ## Frontend
 
@@ -53,12 +55,12 @@ RLS는 read-only 공개 접근으로 충분 (로그인 불필요).
 
 ## Testing
 
-- Edge Function: RSS 파싱 / ETRI 응답 파싱 / 명사 필터링을 순수 함수로 분리해 Deno test로 단위 테스트 (샘플 XML/JSON 픽스처 사용)
+- Edge Function: HTML 헤드라인 파싱 / ETRI 응답 파싱 / 명사 필터링을 Deno·Node 양쪽에서 동작하는 순수 함수(외부 라이브러리 의존 없음)로 분리해 Vitest로 단위 테스트 (저장해둔 샘플 HTML/JSON 픽스처 사용)
 - 프론트엔드: 워드클라우드 크기 계산, 클릭 시 헤드라인 필터링 로직을 Vitest로 단위 테스트
-- 엔드투엔드 검증: Edge Function을 로컬(Supabase CLI)로 한 번 수동 실행해 실제 데이터가 테이블에 쌓이는지 확인 후, `npm run dev`로 프론트엔드에서 해당 날짜 워드클라우드가 렌더링되는지 확인
+- 엔드투엔드 검증: Edge Function을 Supabase CLI로 한 번 수동 실행(또는 로컬에서 pure 함수 스크립트 실행)해 실제 데이터가 테이블에 쌓이는지 확인 후, `npm run dev`로 프론트엔드에서 해당 날짜 워드클라우드가 렌더링되는지 확인
 
 ## Open Items for Implementation Phase
 
-- 카테고리별 실제 네이버 뉴스 RSS 엔드포인트 URL 확인
 - ETRI Open API 무료 키 발급 (사용자가 aiopen.etri.re.kr에서 직접 발급 필요) 및 Supabase 함수 시크릿 등록
 - Supabase 프로젝트가 아직 없다면 프로젝트 생성 및 `.env`에 URL/anon key 채우기, pg_cron 확장 활성화
+- 네이버가 섹션 페이지 HTML 구조를 변경하면 파싱 정규식이 깨질 수 있음 — 실패 시 로그로 조기 발견
