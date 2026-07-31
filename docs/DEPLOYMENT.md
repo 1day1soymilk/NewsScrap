@@ -13,8 +13,9 @@
    - 구 포털 `aiopen.etri.re.kr` 은 **2025-06-30 운영 종료**됐다 (현재 인증서도 만료 상태).
      e-PreTX 가 공식 후속 플랫폼이고 WiseNLU 를 동일한 요청/응답 스키마로 제공한다.
      엔드포인트만 `http://epretx.etri.re.kr:8000/api/WiseNLU` 로 바뀌었다.
-   - 한도는 5,000 호출/일. 이 함수는 1회 실행당 최대 240회
-     (6 카테고리 × 40 헤드라인) 호출하므로 일 1회 스케줄이면 여유가 크다.
+   - 한도는 5,000 호출/일. 이 함수는 1회 실행당 최대 900회
+     (6 카테고리 × 150 헤드라인) 호출한다. 첫 실행만 900건 전부가 신규이고
+     이후에는 중복이 ETRI 호출 없이 걸러지므로 일 1회 스케줄이면 여유가 있다.
 
 3. **`.env` 작성** — 저장소 루트에 `.env.example` 을 복사해서 채운다.
 
@@ -54,11 +55,17 @@ curl -X POST https://<project-ref>.supabase.co/functions/v1/collect-headlines \
 응답 JSON 의 `summary` 에 6개 카테고리가 모두 `ok: ... seen, ... processed, ... new` 형태로
 나와야 한다. 어느 하나라도 `failed:` 면 그 메시지가 원인이다.
 
-**타임아웃 주의:** 헤드라인 1건당 ETRI 왕복 ~0.5초 + DB 호출 몇 번이 순차로 일어난다.
-최초 실행은 240건 전부가 신규라 가장 오래 걸린다. Edge Function 의 wall-clock 제한에 걸려
-응답이 끊기면 `supabase/functions/collect-headlines/index.ts` 의
-`MAX_HEADLINES_PER_CATEGORY` (현재 40) 를 20 정도로 낮추고 재배포한다. 2회차부터는 중복
-헤드라인을 건너뛰므로 훨씬 빨라진다.
+**실행 시간:** 카테고리당 150건, 총 900건을 동시성 8로 처리해 90초 안팎을 예상한다.
+Edge Function wall-clock 한도는 무료 150초 / 유료 400초다.
+
+함수는 예산을 초과하면 죽는 대신 스스로 멈춘다. `RUN_BUDGET_MS`(110초)를 카테고리 6개로
+나눠 각자 몫을 주므로, 느린 실행에서도 특정 카테고리만 계속 굶는 일은 없다. 처리하지 못한
+헤드라인은 다음 실행이 이어받는다 (중복은 ETRI 호출 없이 걸러지므로 2회차부터 빠르다).
+
+`summary` 에 `skipped: run budget exhausted` 가 보이거나 `processed` 가 `collected` 보다
+한참 적으면 `supabase/functions/collect-headlines/index.ts` 에서 조절한다:
+- 유료 플랜이면 `RUN_BUDGET_MS` 를 `360_000` 으로 올린다
+- 무료 플랜이면 `MAX_HEADLINES_PER_CATEGORY` 를 100 정도로 낮춘다
 
 ### 2. 데이터 확인 (SQL Editor)
 

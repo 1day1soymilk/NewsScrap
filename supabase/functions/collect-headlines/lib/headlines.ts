@@ -45,3 +45,29 @@ export function extractHeadlines(html: string): ScrapedHeadline[] {
 
   return results
 }
+
+export interface ListCursor {
+  hasNext: boolean
+  cursor: string
+  pageNo: number
+}
+
+// The section list container carries its paging state as data attributes. The
+// cursor is a YYYYMMDDHHMMSS stamp of the oldest article on the page, and the
+// "더보기" endpoint takes it plus the page number to return the next batch.
+const CURSOR_RE = /data-has-next="(true|false)"[^>]*data-cursor="(\d*)"[^>]*data-page-no="(\d+)"/
+
+export function extractListCursor(html: string): ListCursor | null {
+  const match = CURSOR_RE.exec(html)
+  if (!match) return null
+  return { hasNext: match[1] === 'true', cursor: match[2], pageNo: Number(match[3]) }
+}
+
+// The pagination endpoint answers with JSON that wraps the same list markup the
+// first page ships inline, so extractHeadlines can parse it unchanged.
+export function extractTemplateListHtml(payload: unknown): string {
+  const rendered = (payload as { renderedComponent?: Record<string, unknown> } | null)
+    ?.renderedComponent
+  const html = rendered?.SECTION_ARTICLE_LIST
+  return typeof html === 'string' ? html : ''
+}

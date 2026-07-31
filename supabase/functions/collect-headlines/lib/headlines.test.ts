@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractHeadlines } from './headlines'
+import { extractHeadlines, extractListCursor, extractTemplateListHtml } from './headlines'
 
 const SAMPLE_HTML = `
 <li class="sa_item">
@@ -61,5 +61,48 @@ describe('extractHeadlines', () => {
     const html = SAMPLE_HTML + SAMPLE_HTML
     const result = extractHeadlines(html)
     expect(result).toHaveLength(2)
+  })
+})
+
+// Taken verbatim from a live section page; the paging state rides on the list
+// container as data attributes.
+const LIST_CONTAINER =
+  '<div class="section_latest_article _CONTENT_LIST _PERSIST_META" data-sid="100" data-sid2="" ' +
+  'data-cluid="" data-has-next="true" data-cursor-name="next" data-cursor="20260731135814" ' +
+  'data-page-no="1" data-date="" data-template="SECTION_ARTICLE_LIST">'
+
+describe('extractListCursor', () => {
+  it('reads the paging state off the list container', () => {
+    expect(extractListCursor(LIST_CONTAINER)).toEqual({
+      hasNext: true,
+      cursor: '20260731135814',
+      pageNo: 1,
+    })
+  })
+
+  it('reports hasNext false on the last page', () => {
+    const lastPage = LIST_CONTAINER.replace('data-has-next="true"', 'data-has-next="false"')
+    expect(extractListCursor(lastPage)).toEqual({
+      hasNext: false,
+      cursor: '20260731135814',
+      pageNo: 1,
+    })
+  })
+
+  it('returns null when the container is absent', () => {
+    expect(extractListCursor('<div>no list here</div>')).toBeNull()
+  })
+})
+
+describe('extractTemplateListHtml', () => {
+  it('unwraps the rendered list markup', () => {
+    const payload = { renderedComponent: { SECTION_ARTICLE_LIST: '<div>markup</div>' } }
+    expect(extractTemplateListHtml(payload)).toBe('<div>markup</div>')
+  })
+
+  it('returns an empty string for payloads without the list component', () => {
+    expect(extractTemplateListHtml({ renderedComponent: {} })).toBe('')
+    expect(extractTemplateListHtml({})).toBe('')
+    expect(extractTemplateListHtml(null)).toBe('')
   })
 })
