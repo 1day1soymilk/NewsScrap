@@ -106,7 +106,7 @@ Dashboard → Database → Extensions 에서 `pg_cron`, `pg_net` 을 켠 뒤 SQL
 ```sql
 select cron.schedule(
   'collect-headlines-daily',
-  '0 22 * * *', -- UTC 22:00 = KST 07:00
+  '0 4 * * *', -- UTC 04:00 = KST 13:00
   $$
   select net.http_post(
     url := 'https://<project-ref>.supabase.co/functions/v1/collect-headlines',
@@ -120,6 +120,14 @@ select cron.schedule(
 
 ```sql
 select jobid, schedule, jobname, active from cron.job;
+```
+
+시간대를 바꿀 때는 지우고 다시 등록하지 말고 기존 잡을 고친다 — `cron.schedule` 을
+다시 부르면 같은 이름의 잡이 갱신되지만, jobid 로 직접 고치는 편이 명령문(평문 키가
+들어 있는)을 다시 붙여넣지 않아도 되어 안전하다.
+
+```sql
+select cron.alter_job(job_id := 1, schedule := '0 4 * * *');
 ```
 
 이 SQL 에는 service_role key 가 평문으로 들어간다. SQL Editor 에서만 실행하고 저장소에는
