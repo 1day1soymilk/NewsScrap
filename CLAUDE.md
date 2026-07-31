@@ -14,8 +14,9 @@ headlines it came from.
 
 ```bash
 npm run dev            # Vite dev server
-npm run build          # tsc -b (all three projects) then vite build
+npm run build          # tsc -b (all four projects) then vite build
 npm test               # full Vitest suite
+npm run test:e2e       # Playwright suite (Chromium, boots the dev server itself)
 npm run lint           # oxlint
 
 npx vitest run src/lib/queries.test.ts    # one test file
@@ -146,5 +147,16 @@ environment.
 
 `WordCloud.tsx` and `App.tsx` have no unit tests: d3-cloud measures text on a
 canvas, which jsdom does not implement. Their layout arithmetic is extracted into
-`src/components/wordCloudLayout.ts`, which is tested. Verifying the rendered cloud
-means driving a real browser.
+`src/components/wordCloudLayout.ts`, which is tested. The rendered cloud and the
+`App.tsx` wiring around it are covered by the Playwright suite in `e2e/` instead —
+`npm run test:e2e`, which boots its own dev server.
+
+Five of those tests stub Supabase at the network layer
+(`e2e/support/mockSupabase.ts`), so they do not depend on what was collected that
+day. `e2e/smoke.spec.ts` is the only test that hits the real project, and it
+asserts the seeded category tabs rather than collected words — nothing exists for
+the current date between midnight and 13:00 KST, when the cron runs.
+
+Do not assert on how many words the cloud rendered. d3-cloud silently drops words
+that do not fit the canvas, so counts vary with font rendering. Assert that
+specific words are visible instead.
