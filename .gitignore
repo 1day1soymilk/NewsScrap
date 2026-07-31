@@ -35,3 +35,7 @@ supabase/.temp/
 
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 .superpowers/
+
+# Playwright output.
+test-results/
+playwright-report/
