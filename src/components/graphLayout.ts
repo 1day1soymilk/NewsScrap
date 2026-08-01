@@ -1,4 +1,11 @@
-import { forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force'
+import {
+  forceLink,
+  forceManyBody,
+  forceRadial,
+  forceSimulation,
+  forceX,
+  forceY,
+} from 'd3-force'
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import type { GraphEdge } from '../lib/types'
 
@@ -98,7 +105,22 @@ const DEFAULT_SEED = 0x5eed
 // consumes — a clearance either side plus a minimum drawable length — or two
 // clustered words end up close enough that the whole line between them is cut
 // away and the edge silently disappears.
-const DEFAULT_PADDING = 12
+// Raising this is the only thing that actually puts air between neighbouring
+// labels: a taller canvas spreads the events apart but leaves local density
+// alone, because what two adjacent words rest at is this number and not the
+// room around them. Measured on 2026-08-01 — 12 gave a mean nearest-neighbour
+// gap of 46px on screen and a taller canvas did not move it.
+const DEFAULT_PADDING = 16
+
+// Where the edgeless words are sent, as fractions of the shorter canvas side.
+// A band of concentric rings rather than one circle: a single radius is not
+// long enough to hold them side by side, so they stack on it and overlap.
+const ISOLATED_RING_INNER = 0.36
+const ISOLATED_RING_OUTER = 0.52
+const ISOLATED_RINGS = 3
+// Hard enough to clear the middle, soft enough that collision can still slide
+// them along their ring rather than pile them up on it.
+const ISOLATED_PULL = 0.3
 
 // A rendered label is taller than its font size: getBBox on the drawn <text>
 // reports about 1.2em for Hangul in a sans-serif, since the box spans ascender
@@ -251,6 +273,14 @@ export function computeGraphLayout(
   // together rather than discovering the grouping after the fact.
   const communities = detectCommunities(words, links)
 
+  const degrees = new Map<string, number>()
+  for (const l of links) {
+    degrees.set(l.a, (degrees.get(l.a) ?? 0) + 1)
+    degrees.set(l.b, (degrees.get(l.b) ?? 0) + 1)
+  }
+  const hubs = chooseHubs(words, communities, degrees)
+  const ringRadius = isolatedRings(words, degrees, width, height)
+
   const simulation = forceSimulation(nodes)
     .randomSource(seededRandom(seed))
     .force(
@@ -284,8 +314,20 @@ export function computeGraphLayout(
     // edges that justify the grouping — 0.35 against a padding of 6 removed half
     // the lines on screen. Too weak and the members scatter, so the hull drawn
     // round them swallows unrelated words.
-    .force('cluster', clusterCohesion(communities, 0.25))
+    .force('cluster', clusterCohesion(communities, hubs, 0.25))
     .force('collide', rectCollide(padding, 0.8))
+    // 42 of the day's 110 words hold no edge at all, and the most connected word
+    // holds six. Left to the centring forces those 42 settle in among the events
+    // and are most of what makes the middle look crowded, so they are pushed out
+    // to a ring: events in the middle, unattached words around them.
+    .force(
+      'unattached',
+      forceRadial<LayoutNode>(
+        (n) => ringRadius.get(n.word) ?? 0,
+        width / 2,
+        height / 2,
+      ).strength((n) => (ringRadius.has(n.word) ? ISOLATED_PULL : 0)),
+    )
     // Weaker across the long axis, or the graph settles into a circular blob in
     // the middle of a wide canvas and leaves the sides empty.
     .force('x', forceX<LayoutNode>(width / 2).strength(0.03))
@@ -342,34 +384,100 @@ export function computeGraphLayout(
   }
 }
 
+// Which words get pushed out of the middle, and how far. Only the ones holding
+// no edge at all — 42 of the day's 110 on 2026-08-01, and most of what makes the
+// centre look crowded.
+//
+// Empty when nothing is connected: with no events there is no middle to clear,
+// and pressing every word outward would only ring an empty canvas.
+function isolatedRings(
+  words: MeasuredWord[],
+  degrees: Map<string, number>,
+  width: number,
+  height: number,
+): Map<string, number> {
+  const radii = new Map<string, number>()
+  if (degrees.size === 0) return radii
+
+  const short = Math.min(width, height)
+  const inner = short * ISOLATED_RING_INNER
+  const span = short * (ISOLATED_RING_OUTER - ISOLATED_RING_INNER)
+
+  // Consecutive words land on different rings, so neighbours in the list are not
+  // competing for the same circumference.
+  let index = 0
+  for (const word of words) {
+    if (degrees.has(word.word)) continue
+    radii.set(word.word, inner + span * ((index % ISOLATED_RINGS) / (ISOLATED_RINGS - 1)))
+    index += 1
+  }
+
+  return radii
+}
+
+// The word each event is arranged around: the member holding the most edges,
+// which is the one the other members have in common. Ties break on headline
+// count and then on the word, so the same day always picks the same hub and the
+// layout stays reproducible.
+function chooseHubs(
+  words: MeasuredWord[],
+  communities: Map<string, number>,
+  degrees: Map<string, number>,
+): Map<number, string> {
+  const best = new Map<number, MeasuredWord>()
+
+  for (const word of words) {
+    const id = communities.get(word.word)
+    if (id === undefined) continue
+    const held = best.get(id)
+    if (!held || beatsAsHub(word, held, degrees)) best.set(id, word)
+  }
+
+  return new Map([...best].map(([id, word]) => [id, word.word]))
+}
+
+function beatsAsHub(a: MeasuredWord, b: MeasuredWord, degrees: Map<string, number>): boolean {
+  const da = degrees.get(a.word) ?? 0
+  const db = degrees.get(b.word) ?? 0
+  if (da !== db) return da > db
+  if (a.count !== b.count) return a.count > b.count
+  return a.word < b.word
+}
+
 // Holds each event's words together on the canvas. Without it the layout knows
 // only about individual edges, so a cluster's members end up scattered with
 // unrelated words between them — and then the hull drawn around them swallows
-// those strangers and the blobs pile up on each other. Pulling members toward
-// their own centroid is what turns the partition into something visible.
-function clusterCohesion(communities: Map<string, number>, strength: number) {
+// those strangers and the blobs pile up on each other.
+//
+// Members are pulled toward their event's **hub** — the member holding the most
+// edges — rather than toward the centroid. Both hold a cluster together, but a
+// centroid is an empty point that no word occupies, so the words ring a gap and
+// the reader has nothing to read the event from. Anchoring on the hub puts the
+// word the event is actually about in the middle of it.
+function clusterCohesion(
+  communities: Map<string, number>,
+  hubs: Map<number, string>,
+  strength: number,
+) {
   let nodes: LayoutNode[] = []
   let sized = new Set<number>()
 
   function force(alpha: number) {
-    const sums = new Map<number, { x: number; y: number; n: number }>()
+    const anchors = new Map<number, LayoutNode>()
     for (const n of nodes) {
       const id = communities.get(n.word)
       if (id === undefined || !sized.has(id)) continue
-      const acc = sums.get(id) ?? { x: 0, y: 0, n: 0 }
-      acc.x += n.x ?? 0
-      acc.y += n.y ?? 0
-      acc.n += 1
-      sums.set(id, acc)
+      if (hubs.get(id) === n.word) anchors.set(id, n)
     }
 
     for (const n of nodes) {
       const id = communities.get(n.word)
       if (id === undefined) continue
-      const acc = sums.get(id)
-      if (!acc) continue
-      n.vx = (n.vx ?? 0) + (acc.x / acc.n - (n.x ?? 0)) * strength * alpha
-      n.vy = (n.vy ?? 0) + (acc.y / acc.n - (n.y ?? 0)) * strength * alpha
+      const anchor = anchors.get(id)
+      // The hub anchors the event, so it is not pulled toward itself.
+      if (!anchor || anchor === n) continue
+      n.vx = (n.vx ?? 0) + ((anchor.x ?? 0) - (n.x ?? 0)) * strength * alpha
+      n.vy = (n.vy ?? 0) + ((anchor.y ?? 0) - (n.y ?? 0)) * strength * alpha
     }
   }
 

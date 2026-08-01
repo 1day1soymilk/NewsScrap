@@ -232,6 +232,24 @@ Three things there were arrived at by looking at real days, not by reasoning:
 - **The viewport is cropped to the labels**, not to the canvas the simulation ran
   in. Few words cannot generate enough mutual repulsion to resist the centring
   forces, so they clump; cropping beats tuning the forces per node count.
+- **Crowding is `DEFAULT_PADDING`, not canvas size.** Raising `MAX_HEIGHT` from
+  640 to 820 spread the events apart and moved the mean nearest-neighbour gap by
+  half a pixel, because what two adjacent labels rest at is the collision
+  padding. Padding is the lever; the taller canvas is what stops the events
+  landing on top of each other once they have room. Do not raise padding past
+  ~16 either: at 22 a 40-word canvas can no longer resolve its collisions and
+  labels overlap, which `graphLayout.test.ts` catches.
+- **Widening buys nothing.** The svg is drawn at its own cropped size and then
+  `max-w-full` scales it down to the container, so spreading sideways shrinks
+  everything by the same factor. Height is the only free axis.
+- **The 42 words with no edges are what makes the middle look crowded.** Of the
+  110 drawn on 2026-08-01, 42 hold no edge at all and the best-connected word
+  holds six — there is no hub, and a single-centre mind map would assert a
+  structure the data does not have. Those 42 are pushed out to a band of three
+  concentric rings (`isolatedRings`), leaving the middle to the events. The band
+  is three rings rather than one circle because a single radius is not long
+  enough to hold them side by side, and they stack on it — again caught by the
+  overlap test. With nothing connected at all the push is skipped entirely.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -289,6 +307,18 @@ Communities are found from the edge list **before** the simulation runs, since
 they depend only on topology. That ordering matters: it lets a cohesion force
 hold each event's words together, without which a cluster's members scatter and
 the hull drawn around them swallows unrelated words.
+
+**Each event is arranged around its hub** — the member holding the most edges,
+ties broken on headline count then on the word so the pick is reproducible.
+Cohesion pulls members toward that word rather than toward the centroid. Both
+hold a cluster together, but a centroid is an empty point no word occupies, so
+the members ring a gap and there is nothing at the middle to read the event
+from.
+
+In the all-categories view an edge is stroked with a **gradient between its two
+endpoints' section colours**, which is what makes a crossing readable without
+tracing it end to end. Inside a single category every word is the same colour,
+so the gradient is dropped there and edges fall back to the neutral ink.
 
 Only the biggest few clusters get a shaded blob (`clusterLimit`, default 6). The
 day splits into 26 communities and shading all of them tints most of the canvas.

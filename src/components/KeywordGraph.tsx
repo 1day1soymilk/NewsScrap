@@ -10,7 +10,12 @@ import type { Surge } from '../lib/surge'
 const FONT_FAMILY = 'sans-serif'
 
 const MIN_HEIGHT = 380
-const MAX_HEIGHT = 640
+// Width is fixed by the container and the svg is scaled down to fit it, so
+// spreading the words sideways buys nothing — the whole picture just shrinks by
+// the same factor. Height is the only free axis, and giving the simulation more
+// of it is what actually puts air between the labels.
+const MAX_HEIGHT = 820
+const HEIGHT_RATIO = 0.78
 const FALLBACK_WIDTH = 700
 
 // scoring_weights.demote_factor is 0.3, but the RPC ships only the boolean
@@ -108,7 +113,7 @@ export function KeywordGraph({
     return () => observer.disconnect()
   }, [])
 
-  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * 0.62)))
+  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_RATIO)))
 
   const measured = useMemo<MeasuredWord[]>(() => {
     // computeFontSizes is the word cloud's, reused unchanged: size stays
@@ -213,6 +218,33 @@ export function KeywordGraph({
         aria-label="키워드 관계망"
         className="mx-auto block max-w-full select-none"
       >
+        {/* An edge running between two sections fades from one section's ink to
+            the other's, so a stroke says which words it joins without being
+            traced end to end. That is what makes crossings readable enough to
+            allow. Only in the all-categories view: inside one section every
+            word is the same colour, so a gradient there would encode nothing. */}
+        {colorByCategory && (
+          <defs>
+            {layout.edges.map((edge, index) => {
+              const curve = edge.curve
+              if (!curve) return null
+              return (
+                <linearGradient
+                  key={`${edge.a}--${edge.b}`}
+                  id={gradientId(index)}
+                  gradientUnits="userSpaceOnUse"
+                  x1={curve.x1}
+                  y1={curve.y1}
+                  x2={curve.x2}
+                  y2={curve.y2}
+                >
+                  <stop offset="0%" stopColor={categoryColor(signalsByWord.get(edge.a))} />
+                  <stop offset="100%" stopColor={categoryColor(signalsByWord.get(edge.b))} />
+                </linearGradient>
+              )
+            })}
+          </defs>
+        )}
         <g>
           {layout.clusters.map((cluster, index) => (
             // Filled and stroked in the same colour: the stroke is what rounds
@@ -231,7 +263,7 @@ export function KeywordGraph({
           ))}
         </g>
         <g>
-          {layout.edges.map((edge) => {
+          {layout.edges.map((edge, index) => {
             // One relationship, one stroke. This used to be several <line>s per
             // edge, the leftovers of cutting each label box out of a straight
             // line, and several collinear dashes read as several relationships.
@@ -244,7 +276,7 @@ export function KeywordGraph({
                 key={`${edge.a}--${edge.b}`}
                 d={`M${curve.x1} ${curve.y1}Q${curve.cx} ${curve.cy} ${curve.x2} ${curve.y2}`}
                 fill="none"
-                style={{ stroke: EDGE_COLOR }}
+                style={{ stroke: colorByCategory ? `url(#${gradientId(index)})` : EDGE_COLOR }}
                 strokeLinecap="round"
                 strokeWidth={1.4 + 2.6 * edge.npmi}
                 // Stronger association draws a heavier, darker line; that is the
@@ -264,10 +296,7 @@ export function KeywordGraph({
         <g>
           {layout.nodes.map((node) => {
             const signals = signalsByWord.get(node.word)
-            const color =
-              colorByCategory && signals
-                ? (CATEGORY_COLORS[signals.category_slug] ?? NEUTRAL_COLOR)
-                : NEUTRAL_COLOR
+            const color = colorByCategory ? categoryColor(signals) : NEUTRAL_COLOR
             const surge = surges.get(node.word)
             const opacity = nodeOpacity(node.word, node.faded)
 
@@ -336,6 +365,17 @@ export function KeywordGraph({
       </svg>
     </div>
   )
+}
+
+// Scoped by the edge's index rather than by its words: an id has to be unique
+// in the document and a Korean word is not a safe fragment identifier.
+function gradientId(index: number): string {
+  return `edge-ink-${index}`
+}
+
+function categoryColor(signals: KeywordGraphData['nodes'][number] | undefined): string {
+  if (!signals) return NEUTRAL_COLOR
+  return CATEGORY_COLORS[signals.category_slug] ?? NEUTRAL_COLOR
 }
 
 function tooltip(
