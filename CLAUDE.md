@@ -183,6 +183,33 @@ the label set has been extended four times and each extension moves them.
 Compare configurations against each other inside one run, never against a number
 someone wrote down.
 
+### Design tokens
+
+Every colour on screen is defined once, in the `@theme` block in
+`src/index.css`. Components hold `var(--color-*)` strings, never hex — a second
+copy of a hex value is how the six section colours drifted into an 80-degree
+band, four of them indistinguishable in the all-categories view.
+
+`src/lib/theme.test.ts` reads that block back and fails the build if the
+palette breaks either rule it was chosen to satisfy: **no two sections within
+40° of hue**, and **4.5:1 against the ground** (4.5 rather than the 3:1 for
+large text, because `MIN_FONT_SIZE` is 14). The surge colour is held 40° clear
+of all six as well, because the marker is drawn touching its word.
+
+**Ordinary clusters are achromatic and the top story is not.** Distinguishing
+them by opacity failed: two overlapping washes at 0.07 double to 0.14, landing
+on exactly the strength meant to single the top story out. Grey cannot stack
+into blue, so do not reintroduce a coloured tint for ordinary clusters.
+
+The cluster wash is a true grey (`#737373`), **not slate**. Slate-500 is the
+obvious thing to reach for and it is wrong here: its hue is 215° against the
+top story's 221°, six degrees apart, which puts the wash back in the same hue
+as the thing it exists to be told apart from.
+
+SVG `fill` and `stroke` go through inline `style`, not presentation attributes —
+`var()` is unreliable in the latter. `opacity` and `stroke-opacity` stay
+attributes: `e2e/keywordGraph.spec.ts` asserts on them directly.
+
 ### Drawing the graph
 
 `src/components/KeywordGraph.tsx` measures each label on a canvas and hands the
