@@ -1,0 +1,25 @@
+-- supabase/migrations/0006_render_cap_70.sql
+--
+-- Draw the top 70 words instead of the top 130.
+--
+-- render_cap is not a sieve threshold — it does not decide which words qualify,
+-- only how many of the ranked survivors reach the canvas — so this does not go
+-- through scripts/analysis/10_sieve_eval.sql. It moves the drawn set onto the
+-- measured one: the harness reports precision and recall over the top 70, and
+-- that is now exactly what is on screen.
+--
+-- What it removes is ranks 71 to 130, which arrive with faded = true and render
+-- at 0.38 opacity and the minimum font size. On 2026-08-01 that is 40 of the 110
+-- drawn words, all of them 3-headline words, and they were sitting in every gap
+-- between the words worth reading. The graph is a word cloud: it spends size and
+-- hue on every label, so the cost of an extra word is much higher here than on a
+-- node-link diagram where a label is uniform ink beside a small dot.
+--
+-- faded keeps its meaning and its rendering. With render_cap equal to
+-- node_limit the rank clause can no longer fire, so a faded word now always
+-- means a word_overrides 'demote' entry — which is the case worth showing
+-- faintly rather than hiding, since it is a judgement call rather than a rank.
+--
+-- Reversible with one update; no redeploy is involved.
+
+update scoring_weights set value = 70 where key = 'render_cap';

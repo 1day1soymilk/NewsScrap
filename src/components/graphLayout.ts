@@ -707,9 +707,16 @@ const CLUSTER_PADDING = 14
 export const CLUSTER_ROUNDING = 28
 // The all-categories view of 2026-08-01 splits into 26 communities. Shading all
 // of them tints most of the canvas and the shading stops meaning anything, so
-// only the day's biggest stories get a blob; the rest are still grouped by the
+// only the day's biggest story gets a blob; the rest are still grouped by the
 // layout, just not outlined.
-const DEFAULT_CLUSTER_LIMIT = 6
+//
+// This was 6, and six overlapping washes were the single dirtiest thing on the
+// canvas: they are hulls, so they are angular, and where two of them met the
+// page read as a smudge rather than as two events. Community is already carried
+// by position — the cohesion force is what puts an event's words together — so
+// the other five blobs were a third encoding of something said twice already.
+// One shape pointing at the day's biggest story is a claim; six are wallpaper.
+const DEFAULT_CLUSTER_LIMIT = 1
 
 // Connected components are not enough, which is worth stating because they look
 // like they would be. On a category tab they give clean events, but on the

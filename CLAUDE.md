@@ -112,7 +112,7 @@ drawn words into false "new"s. Two rules follow, and `fetchWordCountsFor` /
 `fetchHeadlineCount` in `src/lib/queries.ts` exist to enforce them:
 
 - **Name the words you want** (`.in('word', …)`). The graph draws at most
-  `render_cap` (130) of them, so a response bounded by that list cannot be cut.
+  `render_cap` (70) of them, so a response bounded by that list cannot be cut.
 - **Never sum a response to get a denominator.** Day totals come from a
   `head: true, count: 'exact'` query, which returns no rows at all and so cannot
   be truncated. `computeSurges` takes the total as an argument rather than
@@ -140,6 +140,14 @@ at 1000. It returns `{nodes, edges}` as JSON. SQL functions default to
 both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
 tuning that measures a hand-copied second copy is measuring the wrong thing, the
 same hazard as the rule above.
+
+`render_cap` is **70, and it is a display cap rather than a sieve threshold** —
+it does not decide which words qualify, only how many of the ranked survivors are
+drawn, so changing it does not go through `10_sieve_eval.sql`. It was 130, and
+ranks 71 to 130 arrived faded at the minimum font size and sat in every gap
+between the words worth reading. At 70 the drawn set is exactly the set the
+harness measures. With it equal to `node_limit`, `faded` can now only mean a
+`word_overrides` 'demote' entry.
 
 Word selection is a **sieve** (thresholds in series), not a weighted score.
 Blending the signals measurably makes it worse: each one catches a different kind
@@ -196,15 +204,27 @@ palette breaks either rule it was chosen to satisfy: **no two sections within
 large text, because `MIN_FONT_SIZE` is 14). The surge colour is held 40° clear
 of all six as well, because the marker is drawn touching its word.
 
-**Ordinary clusters are achromatic and the top story is not.** Distinguishing
-them by opacity failed: two overlapping washes at 0.07 double to 0.14, landing
-on exactly the strength meant to single the top story out. Grey cannot stack
-into blue, so do not reintroduce a coloured tint for ordinary clusters.
+**Nothing is shaded on the canvas any more** — see "Event clusters" below for
+why the blobs went. `--color-cluster` and `--color-top-story` survive the change:
+the top story's blue is now the dot in the caption that names it, and the
+achromatic grey is kept, unused, with its test, because the finding is about the
+palette rather than about the shape it was picked for. Two washes distinguished
+by opacity alone failed — 0.07 and 0.07 stack to exactly the 0.14 that was meant
+to single the top story out — and grey cannot stack into blue. The grey is a true
+grey (`#737373`), **not slate**: slate-500's hue is 215° against the top story's
+221°, six degrees from the thing it exists to be told apart from.
 
-The cluster wash is a true grey (`#737373`), **not slate**. Slate-500 is the
-obvious thing to reach for and it is wrong here: its hue is 215° against the
-top story's 221°, six degrees apart, which puts the wash back in the same hue
-as the thing it exists to be told apart from.
+**The tab row is the canvas's colour key.** Section ink appears in exactly two
+places, the words and the dot on the tab that filters for them, and
+`src/lib/sectionColors.ts` is the one definition both read. A key that names a
+different green from the one on screen is worse than no key, so
+`e2e/keywordGraph.spec.ts` asserts the two resolve to the same rgb.
+
+`--font-display` (Noto Serif KR) is used on the masthead date and the panel
+heading and **nowhere else**. The graph measures its labels on a canvas against
+`FONT_FAMILY` in `KeywordGraph.tsx`, so the canvas stays on the system stack: a
+webfont there would be measured before it loaded and every label box would be the
+wrong width.
 
 SVG `fill` and `stroke` go through inline `style`, not presentation attributes —
 `var()` is unreliable in the latter. `opacity` and `stroke-opacity` stay
@@ -241,11 +261,21 @@ Three things there were arrived at by looking at real days, not by reasoning:
   labels overlap, which `graphLayout.test.ts` catches.
 - **Widening buys nothing.** The svg is drawn at its own cropped size and then
   `max-w-full` scales it down to the container, so spreading sideways shrinks
-  everything by the same factor. Height is the only free axis.
-- **The 42 words with no edges are what makes the middle look crowded.** Of the
-  110 drawn on 2026-08-01, 42 hold no edge at all and the best-connected word
+  everything by the same factor. Height is the only free axis — on a desktop.
+- **`h-auto` on the svg, not `max-w-full` alone.** The element carries `width`
+  and `height` attributes, so capping the width leaves the height at the box the
+  simulation ran in and the drawing is letterboxed inside it. That put a 141px
+  band of empty canvas above and below the graph on a phone.
+- **Width is the constrained axis on a phone, and the fix is height.** A 14px
+  label is 14px whatever the viewport, so the area 70 of them need does not
+  shrink with the screen: at 358px the desktop ratio gives a 358×279 canvas, the
+  collision pass cannot resolve that, and the words land on top of each other.
+  Below `NARROW_WIDTH` the canvas grows with the word count instead
+  (`NARROW_HEIGHT_PER_WORD`), and the page scrolls, which a phone does anyway.
+- **The 20 words with no edges are what makes the middle look crowded.** Of the
+  70 drawn on 2026-08-01, 20 hold no edge at all and the best-connected word
   holds six — there is no hub, and a single-centre mind map would assert a
-  structure the data does not have. Those 42 are pushed out to a band of three
+  structure the data does not have. Those 20 are pushed out to a band of three
   concentric rings (`isolatedRings`), leaving the middle to the events. The band
   is three rings rather than one circle because a single radius is not long
   enough to hold them side by side, and they stack on it — again caught by the
@@ -259,7 +289,14 @@ collision height left neighbouring rows grazing by a pixel.
 
 **One relationship, one stroke.** Each edge is a single quadratic Bézier that
 bows around whatever labels sit in its way. Strength is carried by width and
-opacity (`1.4 + 2.6·npmi`), never by the number of strokes.
+opacity (`0.9 + 1.3·npmi`), never by the number of strokes.
+
+**Every edge is the same neutral grey, in both views.** They used to be stroked
+with a gradient between their two endpoints' section colours, which did make a
+crossing readable without tracing it — and cost too much. A word cloud already
+spends hue and size on every label, so a line that carries colour of its own is a
+third layer of it, and the words at each end already say which sections a stroke
+joins. Do not reintroduce the gradient.
 
 This replaced a routing that subtracted every label box from the centre-to-centre
 line and drew the remainder. That kept the strokes off the text, but it split one
@@ -290,7 +327,8 @@ Three things there were settled by measurement, not by argument:
 Communities come from **modularity** — Louvain's local-moving phase, in
 `graphLayout.ts`. Connected components are the obvious choice and are wrong: on a
 category tab they give clean events, but on the all-categories view 130 words and
-85 edges chain through shared words (대통령 — 한동훈 — 민주당 — 레버리지 — 곽상언)
+85 edges — the graph as it was when this was measured, before `render_cap` came
+down to 70 — chain through shared words (대통령 — 한동훈 — 민주당 — 레버리지 — 곽상언)
 and one component swallowed nine words spanning four unrelated stories. No edge
 threshold fixes it, because the problem is topological rather than one of edge
 strength.
@@ -315,16 +353,21 @@ hold a cluster together, but a centroid is an empty point no word occupies, so
 the members ring a gap and there is nothing at the middle to read the event
 from.
 
-In the all-categories view an edge is stroked with a **gradient between its two
-endpoints' section colours**, which is what makes a crossing readable without
-tracing it end to end. Inside a single category every word is the same colour,
-so the gradient is dropped there and edges fall back to the neutral ink.
+**Clusters are never drawn.** They decide the cohesion force, the hub each event
+rings, and which story the caption names — and nothing on the canvas.
 
-Only the biggest few clusters get a shaded blob (`clusterLimit`, default 6). The
-day splits into 26 communities and shading all of them tints most of the canvas.
-The top story gets its own hue rather than more of the same one, because adjacent
-stories overlap and two stacked tints land on exactly the strength that was meant
-to single it out.
+They used to be shaded, six of them (`clusterLimit`), and both halves of that
+were wrong. Six overlapping washes were the dirtiest thing on screen: a hull is
+angular, and where two met the page read as a smudge rather than as two events.
+Cutting to one made it worse rather than better, because it turned noise into a
+false claim — **a blob is the convex hull of its members' label boxes, so
+anything that happens to lie between them is inside it.** On 2026-08-01 the hull
+for 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명,
+four words from other events. A hull is only honest when its members are already
+adjacent, which is exactly when it adds least. The caption names the story
+instead, and `clusterLimit` still defaults to 1 because that is all the caption
+needs; `graphLayout.test.ts` passes it explicitly where the partition itself is
+under test.
 
 The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture
