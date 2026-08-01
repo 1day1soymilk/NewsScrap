@@ -37,6 +37,9 @@ const NEUTRAL_COLOR = 'var(--color-ink)'
 // They can afford to be this solid because routing stops them short of every
 // label — nothing is drawn underneath a word for them to fight with.
 const EDGE_COLOR = 'var(--color-edge)'
+// Applied to an edge that had to be routed under a label because the field was
+// too crowded for any single curve to miss everything.
+const CROWDED_EDGE_FADE = 0.5
 
 // Ordinary clusters are achromatic and the top story is not. Two overlapping
 // washes double to 0.14, which is why distinguishing them by opacity failed:
@@ -229,25 +232,33 @@ export function KeywordGraph({
         </g>
         <g>
           {layout.edges.map((edge) => {
+            // One relationship, one stroke. This used to be several <line>s per
+            // edge, the leftovers of cutting each label box out of a straight
+            // line, and several collinear dashes read as several relationships.
+            const curve = edge.curve
+            if (!curve) return null
             const touchesSelection =
               !selectedWord || edge.a === selectedWord || edge.b === selectedWord
-            return edge.segments.map((segment, index) => (
-              // One edge can survive as several pieces when it passes behind a
-              // word on its way, so the key carries the piece's index.
-              <line
-                key={`${edge.a}--${edge.b}--${index}`}
-                x1={segment.x1}
-                y1={segment.y1}
-                x2={segment.x2}
-                y2={segment.y2}
+            return (
+              <path
+                key={`${edge.a}--${edge.b}`}
+                d={`M${curve.x1} ${curve.y1}Q${curve.cx} ${curve.cy} ${curve.x2} ${curve.y2}`}
+                fill="none"
                 style={{ stroke: EDGE_COLOR }}
                 strokeLinecap="round"
                 strokeWidth={1.4 + 2.6 * edge.npmi}
                 // Stronger association draws a heavier, darker line; that is the
                 // only job NPMI has here, having failed as a word-quality signal.
-                strokeOpacity={touchesSelection ? 0.45 + 0.4 * edge.npmi : 0.12}
+                //
+                // A stroke the routing could not keep off the labels is drawn
+                // fainter, so it stops competing with the words it runs under.
+                // That is the price of never dropping a relationship.
+                strokeOpacity={
+                  (touchesSelection ? 0.45 + 0.4 * edge.npmi : 0.12) *
+                  (curve.clear ? 1 : CROWDED_EDGE_FADE)
+                }
               />
-            ))
+            )
           })}
         </g>
         <g>

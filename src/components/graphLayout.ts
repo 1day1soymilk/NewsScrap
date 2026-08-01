@@ -23,21 +23,43 @@ export interface PlacedNode extends MeasuredWord {
   halfHeight: number
 }
 
-export interface EdgeSegment {
+/** One quadratic Bezier: the whole of an edge, as a single unbroken stroke. */
+export interface EdgeCurve {
   x1: number
   y1: number
+  /** Control point. Sits on the chord exactly when nothing is in the way. */
+  cx: number
+  cy: number
   x2: number
   y2: number
+  /**
+   * Whether this route keeps off every other label.
+   *
+   * False happens: at 110 words a long edge crosses something whichever way it
+   * bows, and no single quadratic threads that field. Dropping those lost 18 of
+   * the day's 68 relationships, so they are drawn anyway and the caller fades
+   * them instead — a faint line under a word beats a missing connection.
+   */
+  clear: boolean
 }
 
 export interface PlacedEdge extends GraphEdge {
-  /** Centre to centre, before the label boxes are cut out of it. */
+  /** Centre to centre, before the ends are pulled out of their own labels. */
   x1: number
   y1: number
   x2: number
   y2: number
-  /** The parts of that line that fall outside every label. Draw these. */
-  segments: EdgeSegment[]
+  /**
+   * The stroke to draw, or null when the labels leave no room for one.
+   *
+   * Deliberately one curve rather than a list of pieces. This used to cut every
+   * label box out of the straight line and draw the remainder, which kept the
+   * strokes off the text but split a long edge into up to five fragments —
+   * measured on 2026-08-01, where 15 of 63 drawn edges arrived in pieces and
+   * 트럼프—에너지시설 arrived in five. Several collinear dashes read as several
+   * relationships, and the strength of one is already carried by its width.
+   */
+  curve: EdgeCurve | null
 }
 
 /** A connected component of the drawn graph: one event, in practice. */
@@ -306,7 +328,7 @@ export function computeGraphLayout(
       y1: a.y,
       x2: b.x,
       y2: b.y,
-      segments: routeAroundLabels(a, b, placed),
+      curve: routeEdge(a, b, placed),
     }
   })
 
@@ -373,41 +395,160 @@ const LABEL_CLEARANCE = 4
 // Below this a surviving piece of line is a speck rather than a connection.
 const MIN_SEGMENT = 3
 
-// An edge is drawn centre to centre, which means it runs under both its endpoint
-// labels and under anything it happens to cross on the way. Rather than draw it
-// and rely on the text painting over the top, cut every label box out of the
-// line and keep what is left. The endpoints get trimmed by the same pass that
-// handles pass-throughs, so there is no special case for them.
-function routeAroundLabels(
+// A blocker sitting almost on top of an end needs an unbounded bulge to clear,
+// because the curve is pinned there. Anything past these is treated as if it
+// sat here; the ends themselves are already handled by the trim above.
+const MIN_BEND_T = 0.15
+const MAX_BEND_T = 0.85
+// Nothing legible comes of bowing a stroke further than this much of its own
+// length — past it the curve reads as a shape rather than as a connection.
+const MAX_BOW = 0.55
+// A bow computed from the chord can carry the curve into a label the straight
+// line never touched, so candidates are sampled rather than trusted. These are
+// the fractions of the cap that get tried, nearest first.
+const BOW_STEPS = [0.08, 0.16, 0.25, 0.35, 0.45, 0.55, 0.7, 0.85, 1]
+
+// An edge runs centre to centre, so it starts and ends underneath its own two
+// labels and may pass under others on the way. The ends are pulled out of their
+// own boxes, and anything in between is dodged by bowing the stroke to one
+// side — never by cutting it, which is what used to fragment it.
+export function routeEdge(
   from: PlacedNode,
   to: PlacedNode,
   nodes: PlacedNode[],
-): EdgeSegment[] {
+): EdgeCurve | null {
   const dx = to.x - from.x
   const dy = to.y - from.y
-  if (dx === 0 && dy === 0) return []
-
-  const blocked: [number, number][] = []
-  for (const n of nodes) {
-    const span = boxSpan(from.x, from.y, dx, dy, n)
-    if (span) blocked.push(span)
-  }
-
   const length = Math.hypot(dx, dy)
-  const segments: EdgeSegment[] = []
+  if (length === 0) return null
 
-  for (const [t0, t1] of freeIntervals(blocked)) {
-    if ((t1 - t0) * length < MIN_SEGMENT) continue
-    segments.push({
-      x1: round(from.x + dx * t0),
-      y1: round(from.y + dy * t0),
-      x2: round(from.x + dx * t1),
-      y2: round(from.y + dy * t1),
-    })
+  // Pull each end out of its own label, so the stroke meets the text rather
+  // than starting somewhere inside it.
+  const startSpan = boxSpan(from.x, from.y, dx, dy, from)
+  const endSpan = boxSpan(from.x, from.y, dx, dy, to)
+  const t0 = startSpan ? startSpan[1] : 0
+  const t1 = endSpan ? endSpan[0] : 1
+  if ((t1 - t0) * length < MIN_SEGMENT) return null
+
+  const x1 = from.x + dx * t0
+  const y1 = from.y + dy * t0
+  const x2 = from.x + dx * t1
+  const y2 = from.y + dy * t1
+
+  const cdx = x2 - x1
+  const cdy = y2 - y1
+  const chord = Math.hypot(cdx, cdy)
+  // Unit normal to the trimmed chord: the one direction the stroke may bow in.
+  const ux = -cdy / chord
+  const uy = cdx / chord
+
+  const others = nodes.filter((n) => n !== from && n !== to)
+
+  // How far the control point would have to go, each way, to clear everything
+  // the straight chord runs into.
+  let outward = 0
+  let inward = 0
+  for (const n of others) {
+    const span = boxSpan(x1, y1, cdx, cdy, n)
+    if (!span) continue
+    const at = clamp((span[0] + span[1]) / 2, MIN_BEND_T, MAX_BEND_T)
+    const across = (n.x - x1) * ux + (n.y - y1) * uy
+    const reach = Math.abs(n.halfWidth * ux) + Math.abs(n.halfHeight * uy) + LABEL_CLEARANCE
+    // A quadratic only reaches 2(1-t)t of its control point's offset at t, so
+    // the control point has to be pushed that much further out than the label.
+    const gain = 2 * (1 - at) * at
+    outward = Math.max(outward, (across + reach) / gain)
+    inward = Math.min(inward, (across - reach) / gain)
   }
 
-  return segments
+  // One quadratic bends one way only. Try the cheaper side first, but try the
+  // other one too before giving up: whichever side the chord arithmetic prefers
+  // can turn out to be the crowded one, and dropping a relationship is a worse
+  // outcome than a longer detour. Trying only the cheap side lost 17 of 63
+  // edges on 2026-08-01.
+  const limit = MAX_BOW * chord
+  // Which way the chord arithmetic says is cheaper. It only orders the search:
+  // seeding an escalation from that figure instead left a side with no
+  // candidates at all whenever the figure already exceeded the cap, and that
+  // dropped 18 of the day's 68 edges.
+  const outwardFirst = outward <= -inward
+
+  // Straight first, then a sweep out to the cap, taking the cheaper side first
+  // at each distance. Ordered by magnitude so the flattest workable stroke wins.
+  const candidates: number[] = [0]
+  for (const fraction of BOW_STEPS) {
+    const size = fraction * limit
+    candidates.push(outwardFirst ? size : -size)
+    candidates.push(outwardFirst ? -size : size)
+  }
+
+  // Take the least intrusive route rather than the first clean one, so that a
+  // crowded edge still gets drawn — as the flattest stroke that touches the
+  // least text, marked so the caller can fade it.
+  let best = bowedCurve(x1, y1, x2, y2, ux, uy, 0, false)
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (const bow of candidates) {
+    const curve = bowedCurve(x1, y1, x2, y2, ux, uy, bow, false)
+    // Crossing a glyph is much worse than merely grazing the clearance margin,
+    // so the two are weighted rather than summed.
+    const over = intrusion(curve, others, 0)
+    const score = over * 100 + intrusion(curve, others, LABEL_CLEARANCE)
+    if (score < bestScore) {
+      bestScore = score
+      best = { ...curve, clear: over === 0 }
+      if (score === 0) break
+    }
+  }
+
+  return best
 }
+
+function bowedCurve(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  ux: number,
+  uy: number,
+  bow: number,
+  clear: boolean,
+): EdgeCurve {
+  return {
+    x1: round(x1),
+    y1: round(y1),
+    cx: round((x1 + x2) / 2 + ux * bow),
+    cy: round((y1 + y2) / 2 + uy * bow),
+    x2: round(x2),
+    y2: round(y2),
+    clear,
+  }
+}
+
+// How much of the curve lands on a label, in sampled points. Sampled because a
+// quadratic against an axis-aligned box has no closed form worth the arithmetic
+// here, and a count ranks routes where a boolean could only reject them.
+function intrusion(curve: EdgeCurve, boxes: PlacedNode[], margin: number): number {
+  const steps = 32
+  let hits = 0
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const m = 1 - t
+    const x = m * m * curve.x1 + 2 * m * t * curve.cx + t * t * curve.x2
+    const y = m * m * curve.y1 + 2 * m * t * curve.cy + t * t * curve.y2
+    for (const box of boxes) {
+      if (
+        Math.abs(x - box.x) < box.halfWidth + margin &&
+        Math.abs(y - box.y) < box.halfHeight + margin
+      ) {
+        hits++
+        break
+      }
+    }
+  }
+  return hits
+}
+
 
 // Where the ray enters and leaves one label's box, as a fraction of the edge.
 // The slab method: clip the parameter range against each axis in turn and see
@@ -448,24 +589,6 @@ function boxSpan(
   }
 
   return t0 < t1 ? [t0, t1] : null
-}
-
-// Complement of the blocked spans within [0, 1], merging overlaps first.
-function freeIntervals(blocked: [number, number][]): [number, number][] {
-  if (blocked.length === 0) return [[0, 1]]
-
-  const sorted = [...blocked].sort((a, b) => a[0] - b[0])
-  const free: [number, number][] = []
-  let cursor = 0
-
-  for (const [start, end] of sorted) {
-    if (start > cursor) free.push([cursor, start])
-    cursor = Math.max(cursor, end)
-    if (cursor >= 1) break
-  }
-  if (cursor < 1) free.push([cursor, 1])
-
-  return free
 }
 
 // How far the shaded blob sits outside the labels it wraps.

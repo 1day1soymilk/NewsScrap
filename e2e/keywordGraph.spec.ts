@@ -46,10 +46,14 @@ test('draws an edge between words that share headlines', async ({ page }) => {
   await mockSupabase(page)
   await page.goto('/')
 
-  // One edge in the fixture (예산안—여야), so exactly one line. How many edges
+  // One edge in the fixture (예산안—여야), so exactly one stroke. How many edges
   // are drawn is a property of the data rather than of what fits on the canvas,
   // so unlike a word count it is safe to assert precisely.
-  await expect(page.locator('svg line')).toHaveCount(1)
+  //
+  // One <path> per edge is the point: the routing used to cut every label box
+  // out of a straight line and draw the remainder, so a single relationship
+  // could arrive as up to five separate strokes.
+  await expect(page.locator('svg path')).toHaveCount(1)
 })
 
 test('names the day’s biggest event and shades it', async ({ page }) => {

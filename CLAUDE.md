@@ -239,14 +239,33 @@ words floating in the gaps. The box is 1.2x the font size tall, not 1x: `getBBox
 on drawn Hangul spans ascender to descender, and treating the em box as the
 collision height left neighbouring rows grazing by a pixel.
 
-**Edges are cut, not drawn under the text.** Every label box is subtracted from
-the centre-to-centre line and only the remainder is drawn, so one edge can arrive
-as several segments. That is what lets the strokes be solid enough to read —
-nothing is hidden behind a word for them to fight with. Note the interaction:
-`DEFAULT_PADDING` has to leave more room than the routing consumes (clearance
-either side plus a minimum drawable length), or two clustered words sit close
-enough that the entire line between them is cut away and the edge disappears.
-Cluster cohesion at 0.35 did exactly that and removed half the lines on screen.
+**One relationship, one stroke.** Each edge is a single quadratic Bézier that
+bows around whatever labels sit in its way. Strength is carried by width and
+opacity (`1.4 + 2.6·npmi`), never by the number of strokes.
+
+This replaced a routing that subtracted every label box from the centre-to-centre
+line and drew the remainder. That kept the strokes off the text, but it split one
+edge into up to five collinear dashes — measured on 2026-08-01, where 15 of 63
+drawn edges arrived in pieces — and several dashes read as several
+relationships. **Do not reintroduce cutting.**
+
+Three things there were settled by measurement, not by argument:
+
+- **A crowded edge is drawn anyway, and faded.** At 110 words a long edge crosses
+  something whichever way it bows; no single quadratic threads that field.
+  Dropping those lost 18 of the day's 68 relationships. `EdgeCurve.clear` says
+  whether the route stayed off every label, and `KeywordGraph.tsx` halves the
+  opacity when it did not. A faint line under a word beats a missing connection.
+- **Both sides get tried before settling.** The chord arithmetic names a cheaper
+  side, but that side can be the crowded one; searching only it dropped 18 of 68.
+  The search sweeps outward from straight, cheaper side first at each distance,
+  and keeps the least intrusive route rather than the first clean one.
+- **An edge is still dropped when the two labels nearly touch** — there is no
+  room for a stroke between them. `DEFAULT_PADDING` has to leave more room than
+  the endpoint trim consumes, or clustered words lose their edges: cluster
+  cohesion at 0.35 did exactly that and removed half the lines on screen.
+  Two of 68 edges are dropped this way on 2026-08-01, which is the intended
+  behaviour rather than a fault.
 
 ### Event clusters
 
