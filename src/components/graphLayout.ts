@@ -23,16 +23,37 @@ export interface PlacedNode extends MeasuredWord {
   halfHeight: number
 }
 
-export interface PlacedEdge extends GraphEdge {
+export interface EdgeSegment {
   x1: number
   y1: number
   x2: number
   y2: number
 }
 
+export interface PlacedEdge extends GraphEdge {
+  /** Centre to centre, before the label boxes are cut out of it. */
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  /** The parts of that line that fall outside every label. Draw these. */
+  segments: EdgeSegment[]
+}
+
+/** A connected component of the drawn graph: one event, in practice. */
+export interface PlacedCluster {
+  words: string[]
+  /** Total headlines across the member words, which is how clusters rank. */
+  headlines: number
+  /** Convex hull of the member label boxes, for a background blob. */
+  hull: { x: number; y: number }[]
+}
+
 export interface GraphLayout {
   nodes: PlacedNode[]
   edges: PlacedEdge[]
+  /** Biggest first, so the day's top story is clusters[0]. Singletons omitted. */
+  clusters: PlacedCluster[]
   /** Tight box around the drawn labels, for cropping the viewport to them. */
   bounds: { x: number; y: number; width: number; height: number }
 }
@@ -45,11 +66,17 @@ export interface LayoutOptions {
   seed?: number
   /** Gap kept between two label boxes. */
   padding?: number
+  /** How many of the biggest clusters get a shaded blob. */
+  clusterLimit?: number
 }
 
 const DEFAULT_TICKS = 300
 const DEFAULT_SEED = 0x5eed
-const DEFAULT_PADDING = 6
+// Labels rest this far apart. It has to leave more room than the edge routing
+// consumes — a clearance either side plus a minimum drawable length — or two
+// clustered words end up close enough that the whole line between them is cut
+// away and the edge silently disappears.
+const DEFAULT_PADDING = 12
 
 // A rendered label is taller than its font size: getBBox on the drawn <text>
 // reports about 1.2em for Hangul in a sans-serif, since the box spans ascender
@@ -164,7 +191,12 @@ export function computeGraphLayout(
   options: LayoutOptions,
 ): GraphLayout {
   if (words.length === 0) {
-    return { nodes: [], edges: [], bounds: { x: 0, y: 0, width: 0, height: 0 } }
+    return {
+      nodes: [],
+      edges: [],
+      clusters: [],
+      bounds: { x: 0, y: 0, width: 0, height: 0 },
+    }
   }
 
   const {
@@ -173,6 +205,7 @@ export function computeGraphLayout(
     ticks = DEFAULT_TICKS,
     seed = DEFAULT_SEED,
     padding = DEFAULT_PADDING,
+    clusterLimit = DEFAULT_CLUSTER_LIMIT,
   } = options
 
   const nodes: LayoutNode[] = words.map((w, i) => ({
@@ -190,6 +223,11 @@ export function computeGraphLayout(
   const links: LayoutLink[] = edges
     .filter((e) => byWord.has(e.a) && byWord.has(e.b))
     .map((e) => ({ ...e, source: e.a, target: e.b }))
+
+  // Communities come from the edge topology alone, so they can be found before
+  // anything is positioned — which is what lets the layout hold each event
+  // together rather than discovering the grouping after the fact.
+  const communities = detectCommunities(words, links)
 
   const simulation = forceSimulation(nodes)
     .randomSource(seededRandom(seed))
@@ -218,6 +256,10 @@ export function computeGraphLayout(
         // the bounds clamp, where they pile up into a column stuck to the wall.
         .distanceMax(Math.max(width, height) / 2),
     )
+    // Gentle on purpose. Strong cohesion drags a cluster's words into contact,
+    // and then the edges between them are entirely consumed by label clearance
+    // and vanish — the graph loses the lines that justify the grouping.
+    .force('cluster', clusterCohesion(communities, 0.15))
     .force('collide', rectCollide(padding, 0.8))
     // Weaker across the long axis, or the graph settles into a circular blob in
     // the middle of a wide canvas and leaves the sides empty.
@@ -249,15 +291,367 @@ export function computeGraphLayout(
 
   const placedByWord = new Map(placed.map((n) => [n.word, n]))
 
+  const placedEdges: PlacedEdge[] = links.map((l) => {
+    const a = placedByWord.get(l.a)!
+    const b = placedByWord.get(l.b)!
+    return {
+      a: l.a,
+      b: l.b,
+      cooc: l.cooc,
+      npmi: l.npmi,
+      x1: a.x,
+      y1: a.y,
+      x2: b.x,
+      y2: b.y,
+      segments: routeAroundLabels(a, b, placed),
+    }
+  })
+
+  const clusters = findClusters(placed, communities).slice(0, clusterLimit)
+
   return {
     nodes: placed,
-    edges: links.map((l) => {
-      const a = placedByWord.get(l.a)!
-      const b = placedByWord.get(l.b)!
-      return { a: l.a, b: l.b, cooc: l.cooc, npmi: l.npmi, x1: a.x, y1: a.y, x2: b.x, y2: b.y }
-    }),
-    bounds: boundingBox(placed, padding),
+    edges: placedEdges,
+    clusters,
+    bounds: boundingBox(placed, clusters, padding),
   }
+}
+
+// Holds each event's words together on the canvas. Without it the layout knows
+// only about individual edges, so a cluster's members end up scattered with
+// unrelated words between them — and then the hull drawn around them swallows
+// those strangers and the blobs pile up on each other. Pulling members toward
+// their own centroid is what turns the partition into something visible.
+function clusterCohesion(communities: Map<string, number>, strength: number) {
+  let nodes: LayoutNode[] = []
+  let sized = new Set<number>()
+
+  function force(alpha: number) {
+    const sums = new Map<number, { x: number; y: number; n: number }>()
+    for (const n of nodes) {
+      const id = communities.get(n.word)
+      if (id === undefined || !sized.has(id)) continue
+      const acc = sums.get(id) ?? { x: 0, y: 0, n: 0 }
+      acc.x += n.x ?? 0
+      acc.y += n.y ?? 0
+      acc.n += 1
+      sums.set(id, acc)
+    }
+
+    for (const n of nodes) {
+      const id = communities.get(n.word)
+      if (id === undefined) continue
+      const acc = sums.get(id)
+      if (!acc) continue
+      n.vx = (n.vx ?? 0) + (acc.x / acc.n - (n.x ?? 0)) * strength * alpha
+      n.vy = (n.vy ?? 0) + (acc.y / acc.n - (n.y ?? 0)) * strength * alpha
+    }
+  }
+
+  force.initialize = (n: LayoutNode[]) => {
+    nodes = n
+    // A word alone in its community has no one to be pulled toward, and
+    // including it would only add a no-op centroid at its own position.
+    const counts = new Map<number, number>()
+    for (const node of nodes) {
+      const id = communities.get(node.word)
+      if (id === undefined) continue
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+    sized = new Set([...counts].filter(([, c]) => c > 1).map(([id]) => id))
+  }
+
+  return force
+}
+
+// Gap left between a line and the label it passes. Also what pulls an edge back
+// off its own endpoints, since a node's centre is inside its own box.
+const LABEL_CLEARANCE = 4
+// Below this a surviving piece of line is a speck rather than a connection.
+const MIN_SEGMENT = 3
+
+// An edge is drawn centre to centre, which means it runs under both its endpoint
+// labels and under anything it happens to cross on the way. Rather than draw it
+// and rely on the text painting over the top, cut every label box out of the
+// line and keep what is left. The endpoints get trimmed by the same pass that
+// handles pass-throughs, so there is no special case for them.
+function routeAroundLabels(
+  from: PlacedNode,
+  to: PlacedNode,
+  nodes: PlacedNode[],
+): EdgeSegment[] {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (dx === 0 && dy === 0) return []
+
+  const blocked: [number, number][] = []
+  for (const n of nodes) {
+    const span = boxSpan(from.x, from.y, dx, dy, n)
+    if (span) blocked.push(span)
+  }
+
+  const length = Math.hypot(dx, dy)
+  const segments: EdgeSegment[] = []
+
+  for (const [t0, t1] of freeIntervals(blocked)) {
+    if ((t1 - t0) * length < MIN_SEGMENT) continue
+    segments.push({
+      x1: round(from.x + dx * t0),
+      y1: round(from.y + dy * t0),
+      x2: round(from.x + dx * t1),
+      y2: round(from.y + dy * t1),
+    })
+  }
+
+  return segments
+}
+
+// Where the ray enters and leaves one label's box, as a fraction of the edge.
+// The slab method: clip the parameter range against each axis in turn and see
+// whether anything survives.
+function boxSpan(
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+  box: PlacedNode,
+): [number, number] | null {
+  let t0 = 0
+  let t1 = 1
+
+  const minX = box.x - box.halfWidth - LABEL_CLEARANCE
+  const maxX = box.x + box.halfWidth + LABEL_CLEARANCE
+  const minY = box.y - box.halfHeight - LABEL_CLEARANCE
+  const maxY = box.y + box.halfHeight + LABEL_CLEARANCE
+
+  // A ray parallel to an axis either sits inside that slab for its whole length
+  // or misses the box entirely; dividing by zero would say neither.
+  if (dx === 0) {
+    if (x < minX || x > maxX) return null
+  } else {
+    const a = (minX - x) / dx
+    const b = (maxX - x) / dx
+    t0 = Math.max(t0, Math.min(a, b))
+    t1 = Math.min(t1, Math.max(a, b))
+  }
+
+  if (dy === 0) {
+    if (y < minY || y > maxY) return null
+  } else {
+    const a = (minY - y) / dy
+    const b = (maxY - y) / dy
+    t0 = Math.max(t0, Math.min(a, b))
+    t1 = Math.min(t1, Math.max(a, b))
+  }
+
+  return t0 < t1 ? [t0, t1] : null
+}
+
+// Complement of the blocked spans within [0, 1], merging overlaps first.
+function freeIntervals(blocked: [number, number][]): [number, number][] {
+  if (blocked.length === 0) return [[0, 1]]
+
+  const sorted = [...blocked].sort((a, b) => a[0] - b[0])
+  const free: [number, number][] = []
+  let cursor = 0
+
+  for (const [start, end] of sorted) {
+    if (start > cursor) free.push([cursor, start])
+    cursor = Math.max(cursor, end)
+    if (cursor >= 1) break
+  }
+  if (cursor < 1) free.push([cursor, 1])
+
+  return free
+}
+
+// How far the shaded blob sits outside the labels it wraps.
+const CLUSTER_PADDING = 14
+// Width of the stroke that rounds the hull's corners. Drawn in the same colour
+// as the fill, so it reads as one soft shape rather than as a polygon; half of
+// it spills outside the hull, which the bounding box has to allow for.
+export const CLUSTER_ROUNDING = 28
+// The all-categories view of 2026-08-01 splits into 26 communities. Shading all
+// of them tints most of the canvas and the shading stops meaning anything, so
+// only the day's biggest stories get a blob; the rest are still grouped by the
+// layout, just not outlined.
+const DEFAULT_CLUSTER_LIMIT = 6
+
+// Connected components are not enough, which is worth stating because they look
+// like they would be. On a category tab they give clean events, but on the
+// all-categories view the day's 130 words and 85 edges chain through shared
+// words: 대통령 links to 한동훈 links to 민주당 links to 레버리지 links to
+// 곽상언, and one "cluster" swallowed nine words spanning four unrelated
+// stories. Any threshold that breaks that chain also disconnects the real
+// clusters, because the problem is topological rather than one of edge strength.
+//
+// So this is modularity — Louvain's first phase, run to convergence — which is
+// what the plan reserved clustering coefficient and chi-squared for. Both of
+// those measure "which event does this word belong to" for a single word;
+// modularity answers the same question for the partition as a whole, and cuts
+// the chain at the words that bridge two dense neighbourhoods.
+//
+// Clusters rank on total headline count rather than on chi-squared. Chi-squared
+// was rejected as a word score precisely because the day's biggest event
+// dominates it, which for ranking events is the wanted behaviour rather than a
+// fault — but headline count measures that directly and needs no second
+// statistic shipped from the database.
+function findClusters(
+  nodes: PlacedNode[],
+  communities: Map<string, number>,
+): PlacedCluster[] {
+  const members = new Map<number, PlacedNode[]>()
+  for (const n of nodes) {
+    const id = communities.get(n.word)
+    if (id === undefined) continue
+    const group = members.get(id)
+    if (group) group.push(n)
+    else members.set(id, [n])
+  }
+
+  const clusters: PlacedCluster[] = []
+  for (const group of members.values()) {
+    // A word joined to nothing is not an event.
+    if (group.length < 2) continue
+
+    const corners: { x: number; y: number }[] = []
+    for (const n of group) {
+      const left = n.x - n.halfWidth - CLUSTER_PADDING
+      const right = n.x + n.halfWidth + CLUSTER_PADDING
+      const top = n.y - n.halfHeight - CLUSTER_PADDING
+      const bottom = n.y + n.halfHeight + CLUSTER_PADDING
+      corners.push({ x: left, y: top }, { x: right, y: top })
+      corners.push({ x: right, y: bottom }, { x: left, y: bottom })
+    }
+
+    clusters.push({
+      words: group.map((n) => n.word),
+      headlines: group.reduce((sum, n) => sum + n.count, 0),
+      hull: convexHull(corners),
+    })
+  }
+
+  // Biggest story first. Ties break on the first word so a rerun of the same day
+  // marks the same cluster.
+  return clusters.sort(
+    (a, b) => b.headlines - a.headlines || a.words[0].localeCompare(b.words[0]),
+  )
+}
+
+// Louvain's local-moving phase (Blondel et al. 2008), iterated until no word
+// changes community. The aggregation phase is skipped: a day tops out around 130
+// words and 150 edges, and on graphs that small the first phase already
+// converges to the same partition.
+//
+// Every node starts alone. Each pass offers each word to the community of each
+// neighbour and keeps the move with the largest modularity gain, which for a
+// single node reduces to maximising
+//
+//     (weight from the word into that community) - (community degree * word degree) / 2m
+//
+// The subtracted term is what stops a hub joining everything it touches: a
+// community that is already large has to earn a new member with proportionally
+// stronger ties.
+//
+// Deterministic throughout — words are visited in the order they were drawn,
+// which is frequency order, and ties go to the lowest community id.
+function detectCommunities(
+  nodes: { word: string }[],
+  edges: GraphEdge[],
+): Map<string, number> {
+  const index = new Map<string, number>()
+  nodes.forEach((n, i) => index.set(n.word, i))
+
+  const neighbours: { node: number; weight: number }[][] = nodes.map(() => [])
+  const degree = new Array(nodes.length).fill(0)
+  let totalWeight = 0
+
+  for (const e of edges) {
+    const a = index.get(e.a)
+    const b = index.get(e.b)
+    if (a === undefined || b === undefined || a === b) continue
+    // NPMI can in principle be negative; a non-positive weight would make the
+    // gain arithmetic meaningless, so the floor keeps every drawn edge a real
+    // pull of some size.
+    const weight = Math.max(0.01, e.npmi)
+    neighbours[a].push({ node: b, weight })
+    neighbours[b].push({ node: a, weight })
+    degree[a] += weight
+    degree[b] += weight
+    totalWeight += weight
+  }
+
+  const community = nodes.map((_, i) => i)
+  const communityDegree = [...degree]
+  if (totalWeight === 0) return new Map(nodes.map((n, i) => [n.word, i]))
+
+  const twoM = 2 * totalWeight
+
+  // Converges in a handful of passes at this size; the cap only guarantees
+  // termination if two moves ever trade places.
+  for (let pass = 0; pass < 20; pass++) {
+    let moved = false
+
+    for (let i = 0; i < nodes.length; i++) {
+      if (neighbours[i].length === 0) continue
+
+      const from = community[i]
+      communityDegree[from] -= degree[i]
+
+      const weightTo = new Map<number, number>()
+      weightTo.set(from, 0)
+      for (const { node, weight } of neighbours[i]) {
+        weightTo.set(community[node], (weightTo.get(community[node]) ?? 0) + weight)
+      }
+
+      let best = from
+      let bestGain = -Infinity
+      for (const [candidate, weight] of weightTo) {
+        const gain = weight - (communityDegree[candidate] * degree[i]) / twoM
+        if (gain > bestGain || (gain === bestGain && candidate < best)) {
+          bestGain = gain
+          best = candidate
+        }
+      }
+
+      communityDegree[best] += degree[i]
+      if (best !== from) {
+        community[i] = best
+        moved = true
+      }
+    }
+
+    if (!moved) break
+  }
+
+  return new Map(nodes.map((n, i) => [n.word, community[i]]))
+}
+
+// Andrew's monotone chain. Returns the hull counter-clockwise; collinear points
+// are dropped, which keeps the rendered polygon free of zero-length edges.
+export function convexHull(points: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (points.length < 3) return [...points]
+
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
+  const cross = (
+    o: { x: number; y: number },
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+  ) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+
+  const half = (input: { x: number; y: number }[]) => {
+    const out: { x: number; y: number }[] = []
+    for (const p of input) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) {
+        out.pop()
+      }
+      out.push(p)
+    }
+    out.pop()
+    return out
+  }
+
+  return [...half(sorted), ...half([...sorted].reverse())]
 }
 
 // Few words cannot generate enough mutual repulsion to resist the centring
@@ -265,7 +659,7 @@ export function computeGraphLayout(
 // otherwise empty frame. Rather than tune the forces per node count — which
 // trades one bad case for another — the caller crops the viewport to whatever
 // was actually drawn.
-function boundingBox(nodes: PlacedNode[], padding: number) {
+function boundingBox(nodes: PlacedNode[], clusters: PlacedCluster[], padding: number) {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -276,6 +670,19 @@ function boundingBox(nodes: PlacedNode[], padding: number) {
     minY = Math.min(minY, n.y - n.halfHeight)
     maxX = Math.max(maxX, n.x + n.halfWidth)
     maxY = Math.max(maxY, n.y + n.halfHeight)
+  }
+
+  // Cluster blobs reach further out than the words they wrap — CLUSTER_PADDING
+  // to the hull, then half the rounding stroke beyond that — and cropping to the
+  // labels alone would shave their edges off.
+  const reach = CLUSTER_ROUNDING / 2
+  for (const c of clusters) {
+    for (const p of c.hull) {
+      minX = Math.min(minX, p.x - reach)
+      minY = Math.min(minY, p.y - reach)
+      maxX = Math.max(maxX, p.x + reach)
+      maxY = Math.max(maxY, p.y + reach)
+    }
   }
 
   return {

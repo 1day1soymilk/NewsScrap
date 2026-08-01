@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { computeGraphLayout } from './graphLayout'
+import { computeGraphLayout, CLUSTER_ROUNDING } from './graphLayout'
 import type { MeasuredWord } from './graphLayout'
 import { computeFontSizes } from './wordCloudLayout'
 import type { KeywordGraphData } from '../lib/types'
@@ -30,6 +30,21 @@ const CATEGORY_COLORS: Record<string, string> = {
   it: '#4338ca',
 }
 const NEUTRAL_COLOR = '#1f2937'
+// Edges read as structure rather than as text, so they get their own colour.
+// They can afford to be this solid because routing stops them short of every
+// label — nothing is drawn underneath a word for them to fight with.
+const EDGE_COLOR = '#64748b'
+// Event clusters. Provisional along with everything else here; Phase 4 settles
+// the palette.
+//
+// The top story gets its own hue rather than more of the same one. Adjacent
+// stories overlap — 트럼프·이스라엘·하마스 sits against 공습·에너지시설·미사일 —
+// and two stacked tints at 0.07 land on exactly the 0.14 that was meant to mark
+// the top story, so strength alone cannot say which blob is which.
+const CLUSTER_TINT = '#6366f1'
+const CLUSTER_OPACITY = 0.07
+const TOP_STORY_TINT = '#f59e0b'
+const TOP_STORY_OPACITY = 0.18
 
 let measureContext: CanvasRenderingContext2D | null | undefined
 
@@ -124,8 +139,23 @@ export function KeywordGraph({
     return UNFOCUSED_OPACITY
   }
 
+  const topStory = layout.clusters[0]
+
   return (
     <div ref={containerRef} className="mx-auto w-full max-w-5xl">
+      {/* Named in text rather than drawn on the canvas. A caption floating over
+          the graph would have to dodge the labels, and the words it names are
+          already the ones inside the strongest blob. */}
+      {topStory && (
+        <p className="mb-3 text-center text-sm text-gray-500">
+          <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+            오늘의 톱 스토리
+          </span>
+          {topStory.words.join(' · ')}
+          <span className="ml-2 text-gray-400">{topStory.headlines}건</span>
+        </p>
+      )}
+
       {/* Cropped to the labels rather than to the canvas the simulation ran in,
           and rendered at that box's own size so nothing is magnified. A day
           with eight words in one category gets a small frame instead of a clump
@@ -139,23 +169,41 @@ export function KeywordGraph({
         className="mx-auto block max-w-full select-none"
       >
         <g>
+          {layout.clusters.map((cluster, index) => (
+            // Filled and stroked in the same colour: the stroke is what rounds
+            // the hull's corners into a blob instead of a polygon.
+            <polygon
+              key={cluster.words[0]}
+              points={cluster.hull.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill={index === 0 ? TOP_STORY_TINT : CLUSTER_TINT}
+              stroke={index === 0 ? TOP_STORY_TINT : CLUSTER_TINT}
+              strokeWidth={CLUSTER_ROUNDING}
+              strokeLinejoin="round"
+              opacity={index === 0 ? TOP_STORY_OPACITY : CLUSTER_OPACITY}
+            />
+          ))}
+        </g>
+        <g>
           {layout.edges.map((edge) => {
             const touchesSelection =
               !selectedWord || edge.a === selectedWord || edge.b === selectedWord
-            return (
+            return edge.segments.map((segment, index) => (
+              // One edge can survive as several pieces when it passes behind a
+              // word on its way, so the key carries the piece's index.
               <line
-                key={`${edge.a}--${edge.b}`}
-                x1={edge.x1}
-                y1={edge.y1}
-                x2={edge.x2}
-                y2={edge.y2}
-                stroke={NEUTRAL_COLOR}
-                strokeWidth={1 + 2 * edge.npmi}
-                // Stronger association draws a heavier line; that is the only
-                // job NPMI has here, having failed as a word-quality signal.
-                strokeOpacity={touchesSelection ? 0.15 + 0.35 * edge.npmi : 0.05}
+                key={`${edge.a}--${edge.b}--${index}`}
+                x1={segment.x1}
+                y1={segment.y1}
+                x2={segment.x2}
+                y2={segment.y2}
+                stroke={EDGE_COLOR}
+                strokeLinecap="round"
+                strokeWidth={1.4 + 2.6 * edge.npmi}
+                // Stronger association draws a heavier, darker line; that is the
+                // only job NPMI has here, having failed as a word-quality signal.
+                strokeOpacity={touchesSelection ? 0.45 + 0.4 * edge.npmi : 0.12}
               />
-            )
+            ))
           })}
         </g>
         <g>

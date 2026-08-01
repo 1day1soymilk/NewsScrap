@@ -30,6 +30,22 @@ test('draws an edge between words that share headlines', async ({ page }) => {
   await expect(page.locator('svg line')).toHaveCount(1)
 })
 
+test('names the day’s biggest event and shades it', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // 예산안 and 여야 are the only connected pair in the fixture, so they are the
+  // one event, and their headline counts (5 and 3) are what rank it.
+  const caption = page.getByText('오늘의 톱 스토리')
+  await expect(caption).toBeVisible()
+  await expect(page.getByText('예산안 · 여야')).toBeVisible()
+  await expect(page.getByText('8건')).toBeVisible()
+
+  // One connected pair, so one blob. 국회 and 한파 are joined to nothing and
+  // are not events.
+  await expect(page.locator('svg polygon')).toHaveCount(1)
+})
+
 test('dims everything outside the clicked word’s neighbourhood', async ({ page }) => {
   await mockSupabase(page)
   await page.goto('/')

@@ -189,7 +189,47 @@ Three things there were arrived at by looking at real days, not by reasoning:
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
-words floating in the gaps.
+words floating in the gaps. The box is 1.2x the font size tall, not 1x: `getBBox`
+on drawn Hangul spans ascender to descender, and treating the em box as the
+collision height left neighbouring rows grazing by a pixel.
+
+**Edges are cut, not drawn under the text.** Every label box is subtracted from
+the centre-to-centre line and only the remainder is drawn, so one edge can arrive
+as several segments. That is what lets the strokes be solid enough to read —
+nothing is hidden behind a word for them to fight with. Note the interaction:
+`DEFAULT_PADDING` has to leave more room than the routing consumes (clearance
+either side plus a minimum drawable length), or two clustered words sit close
+enough that the entire line between them is cut away and the edge disappears.
+Cluster cohesion at 0.35 did exactly that and removed half the lines on screen.
+
+### Event clusters
+
+Communities come from **modularity** — Louvain's local-moving phase, in
+`graphLayout.ts`. Connected components are the obvious choice and are wrong: on a
+category tab they give clean events, but on the all-categories view 130 words and
+85 edges chain through shared words (대통령 — 한동훈 — 민주당 — 레버리지 — 곽상언)
+and one component swallowed nine words spanning four unrelated stories. No edge
+threshold fixes it, because the problem is topological rather than one of edge
+strength.
+
+The plan reserved clustering coefficient and chi-squared for this. Neither is
+used: both score a single word's belonging, while modularity scores the whole
+partition and cuts the chain at the bridging words. Clusters rank by total
+headline count rather than by chi-squared — chi-squared is dominated by the day's
+biggest event, which is the wanted behaviour for ranking events rather than a
+fault, but headline count measures it directly with nothing extra shipped from
+the database.
+
+Communities are found from the edge list **before** the simulation runs, since
+they depend only on topology. That ordering matters: it lets a cohesion force
+hold each event's words together, without which a cluster's members scatter and
+the hull drawn around them swallows unrelated words.
+
+Only the biggest few clusters get a shaded blob (`clusterLimit`, default 6). The
+day splits into 26 communities and shading all of them tints most of the canvas.
+The top story gets its own hue rather than more of the same one, because adjacent
+stories overlap and two stacked tints land on exactly the strength that was meant
+to single it out.
 
 The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture
