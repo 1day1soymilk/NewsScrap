@@ -107,6 +107,46 @@ all-categories rollup keyed by a null `category_slug`. **Do not rewrite it with
 aggregates the entire history before applying the date filter. Migration
 `0002_word_counts_pushdown.sql` explains the measurements.
 
+### Word scoring and the keyword graph
+
+`keyword_graph(p_date, p_category)` is an RPC rather than a view because the node
+and edge cuts and the NPMI arithmetic have to happen server side — a day's word
+pairs run to thousands of rows even after grouping, and PostgREST would truncate
+at 1000. It returns `{nodes, edges}` as JSON. SQL functions default to
+`SECURITY INVOKER`, so the select-only policies still apply; `anon` needs
+`execute` on both it and `keyword_signals`.
+
+`keyword_signals(p_date)` computes the four per-word signals and is called by
+both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
+tuning that measures a hand-copied second copy is measuring the wrong thing, the
+same hazard as the rule above.
+
+Word selection is a **sieve** (thresholds in series), not a weighted score.
+Blending the signals measurably makes it worse: each one catches a different kind
+of bad word, and averaging dilutes each where it is strong. Ranking is by
+frequency alone — the sieve only decides who is drawn, and size stays
+proportional to headline count.
+
+Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
+(`exclude` / `demote` / `allow`), so retuning needs no redeploy. **Never change a
+threshold without running `scripts/analysis/10_sieve_eval.sql` first** — its
+README records five ways this has already gone wrong. Two findings that cost real
+time and should not be rediscovered:
+
+- **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
+  signal's maximum of 1). Rescuing a word for being confined to one section
+  admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
+  and 순회 all score a perfect 1.00, for the same reason the fragment 알뜰 does.
+  Turning it off gained 6.8 and 14.2 F1 points on the two measured days.
+- **Category specificity must be computed across all six sections**, never within
+  the filtered view. Inside one category every word sits in one bucket, entropy
+  collapses to zero, and every word scores a perfect 1.
+
+Measured precision of the top 70 words: 24.3% for frequency alone, 71.4% / 67.1%
+for the sieve. Those figures come from `analysis.word_labels` and are **not
+comparable to any percentage quoted elsewhere** — a different label set moves them
+several points.
+
 ### Edge Function run budget
 
 The function paginates each section's "더보기" endpoint to 150 headlines, six
@@ -169,3 +209,22 @@ silently drops words that do not fit the canvas, so totals vary with font
 rendering. Asserting that a word is absent (`toHaveCount(0)`) is fine — absence
 does not have that problem. Assert that specific words are visible or absent
 instead of asserting a count.
+
+### Word quality is measured, not eyeballed
+
+`scripts/analysis/` holds the sieve harness, run through `run.sh` because there is
+no local Postgres. It scores threshold configurations against a hand-labelled word
+set and prints precision, recall, F1 and the rank of the day's biggest story.
+
+Two habits it enforces, both learned the hard way:
+
+- **Every word on screen must be labelled.** Ranking inside a labelled subset makes
+  a tighter sieve look better for free — labelled words get filtered out and
+  unlabelled ones move up to fill the gap, invisible to the metric. The harness
+  prints an `unlabeled` column; if it is not 0 the row is meaningless. Widening the
+  configuration list promotes deeper-ranked words onto the screen, so **re-run
+  `20_unlabeled.sql` after any edit to `02_sieve_configs.sql`** and label what it
+  finds. That fired three times in one sitting.
+- **Never optimise precision alone.** It does not punish discarding good words, so
+  maximising it converges on dropping the day's biggest story — measured, not
+  hypothetical. Judge on F1 and the `heatwave` column together.

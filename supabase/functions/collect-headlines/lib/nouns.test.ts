@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { callEtriMorphAnalysis, extractNouns, filterNouns } from './nouns'
 
+// ETRI numbers morphemes sequentially within a sentence, and each eojeol spans
+// an inclusive range of those ids. These helpers keep the fixtures readable.
+function morp(lemma: string, type: string, id: number) {
+  return { id, lemma, type, position: id, weight: 1 }
+}
+
+function word(id: number, text: string, begin: number, end: number) {
+  return { id, text, type: '', begin, end }
+}
+
 describe('extractNouns', () => {
   it('collects NNG/NNP lemmas across all sentences', () => {
     const response = {
@@ -8,17 +18,90 @@ describe('extractNouns', () => {
         sentence: [
           {
             morp: [
-              { id: 0, lemma: '여야', type: 'NNG', position: 0, weight: 1 },
-              { id: 1, lemma: '예산안', type: 'NNG', position: 1, weight: 1 },
-              { id: 2, lemma: '처리', type: 'NNG', position: 2, weight: 1 },
-              { id: 3, lemma: '하', type: 'VV', position: 3, weight: 1 },
+              morp('여야', 'NNG', 0),
+              morp('예산안', 'NNG', 1),
+              morp('처리', 'NNG', 2),
+              morp('하', 'VV', 3),
             ],
+            word: [word(0, '여야', 0, 0), word(1, '예산안', 1, 1), word(2, '처리하다', 2, 3)],
           },
         ],
       },
     }
 
     expect(extractNouns(response)).toEqual(['여야', '예산안', '처리'])
+  })
+
+  it('merges adjacent noun morphemes inside one eojeol but not across eojeol', () => {
+    const response = {
+      return_object: {
+        sentence: [
+          {
+            morp: [
+              morp('SK', 'SL', 0),
+              morp('하이닉스', 'NNP', 1),
+              morp('반', 'NNG', 2),
+              morp('도체', 'NNG', 3),
+              morp('무인', 'NNG', 4),
+              morp('기', 'NNG', 5),
+              morp('수출', 'NNG', 6),
+            ],
+            word: [
+              word(0, 'SK하이닉스', 0, 1),
+              word(1, '반도체', 2, 3),
+              word(2, '무인기', 4, 5),
+              word(3, '수출', 6, 6),
+            ],
+          },
+        ],
+      },
+    }
+
+    expect(extractNouns(response)).toEqual(['SK하이닉스', '반도체', '무인기', '수출'])
+  })
+
+  it('splits a run wherever a non-mergeable morpheme interrupts it', () => {
+    const response = {
+      return_object: {
+        sentence: [
+          {
+            morp: [
+              morp('정부', 'NNG', 0),
+              morp('의', 'JKG', 1),
+              morp('대책', 'NNG', 2),
+            ],
+            word: [word(0, '정부의대책', 0, 2)],
+          },
+        ],
+      },
+    }
+
+    expect(extractNouns(response)).toEqual(['정부', '대책'])
+  })
+
+  it('drops runs that carry no NNG/NNP of their own', () => {
+    const response = {
+      return_object: {
+        sentence: [
+          {
+            morp: [morp('2026', 'SN', 0), morp('년', 'NNB', 1), morp('폭염', 'NNG', 2)],
+            word: [word(0, '2026년', 0, 1), word(1, '폭염', 2, 2)],
+          },
+        ],
+      },
+    }
+
+    expect(extractNouns(response)).toEqual(['폭염'])
+  })
+
+  it('falls back to individual morphemes when a sentence carries no eojeol spans', () => {
+    const response = {
+      return_object: {
+        sentence: [{ morp: [morp('반', 'NNG', 0), morp('도체', 'NNG', 1)] }],
+      },
+    }
+
+    expect(extractNouns(response)).toEqual(['반', '도체'])
   })
 
   it('returns an empty array when return_object is missing', () => {
