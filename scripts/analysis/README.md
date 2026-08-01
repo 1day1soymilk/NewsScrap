@@ -47,9 +47,17 @@ Postgres — see CLAUDE.md. It needs `.env.supabase`.
 
 ## Labels
 
-367 words, covering everything drawn by every configuration in
-`02_sieve_configs.sql` across 2026-07-31 and 2026-08-01. `20_unlabeled.sql`
-returns nothing, so rule 4 is satisfied.
+452 words, covering everything drawn by every configuration in
+`02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across
+2026-07-31 and 2026-08-01. `20_unlabeled.sql` and `21_unlabeled_category.sql`
+both return nothing, so rule 4 is satisfied.
+
+**Rule 4 breaks when the data moves, not only when the sweep widens.** 2026-08-01
+was collected twice — once by hand and once by the 13:00 KST cron, since the
+150-per-category cap applies per run — and the day went from 873 headlines to
+1,382 partway through a session. The harness immediately started reporting up to
+13 unlabelled words per row. Re-run `20_unlabeled.sql` after any collection, not
+just after editing `02_sieve_configs.sql`.
 
 Only about 60 of them survive from the planning stage — those were recovered by
 reading the plan document, because the 343 labels it cites lived in a chat
@@ -73,8 +81,39 @@ what it finds before trusting the harness.** That happened three times here:
 | `02_sieve_configs.sql` | The configurations under comparison — read by both scripts below |
 | `03_labels_wide_sweep.sql` | Labels the widened sweep exposed |
 | `04_labels_round2.sql` | Labels the specificity-off round exposed |
+| `05_labels_second_collection.sql` | Labels the second collection of 2026-08-01 exposed |
+| `06_labels_category.sql` | Labels the category variants exposed |
 | `10_sieve_eval.sql` | The harness: precision, recall, F1 and the 폭염 rank per configuration |
+| `11_category_eval.sql` | The same for one category tab at a time |
 | `20_unlabeled.sql` | Words on screen with no label — must be empty before the harness counts |
+| `21_unlabeled_category.sql` | The same worklist for `11_category_eval.sql` |
+
+## The category question, settled
+
+The category tabs used to draw almost nothing — 생활/문화 showed 6 words on
+2026-07-31, 경제 showed 8 on the first collection of 2026-08-01. Sieve 1 was the
+only clause counting headlines *within* the filtered view while every other
+signal was day-wide, so a word in three of the day's headlines split across two
+sections was in neither section's graph.
+
+`11_category_eval.sql` measured three ways to set that cut over six categories
+and two days:
+
+| sieve 1 counts | mean F1 |
+| --- | --- |
+| headlines in the category (before) | 40.4 |
+| **headlines in the day** ← adopted, migration `0004` | **61.2** |
+| headlines in the day, and at least 2 in the category | 50.7 |
+
+Day-wide wins in all twelve cells rather than on average. Precision drops in some
+of them — 세계 on 2026-07-31 goes 90.0 to 75.8 — while recall rises much further,
+48.6 to 67.6, which is rule 5 doing its job.
+
+A fourth option, lowering the per-category cut to 2, is **unmeasured**. Pricing
+it under rule 4 costs 180 more labels, and a sample of what it draws is mostly
+Naver's own column titles: 마켓프리즘, 디브리핑, 더차트, 급리포트,
+데일리국제금융. Measure it before adopting it; the sample is a reason to
+prioritise it low, not a result.
 
 `analysis` is a separate schema, so none of this is reachable from the browser —
 PostgREST only exposes `public`.

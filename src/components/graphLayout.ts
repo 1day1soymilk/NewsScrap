@@ -51,6 +51,12 @@ const DEFAULT_TICKS = 300
 const DEFAULT_SEED = 0x5eed
 const DEFAULT_PADDING = 6
 
+// A rendered label is taller than its font size: getBBox on the drawn <text>
+// reports about 1.2em for Hangul in a sans-serif, since the box spans ascender
+// to descender. Treating the em box as the collision height left neighbouring
+// rows grazing each other by a pixel — measured at 1px on the 정치 and IT tabs.
+const LINE_HEIGHT = 1.2
+
 interface LayoutNode extends SimulationNodeDatum, MeasuredWord {
   halfWidth: number
   halfHeight: number
@@ -172,7 +178,7 @@ export function computeGraphLayout(
   const nodes: LayoutNode[] = words.map((w, i) => ({
     ...w,
     halfWidth: w.textWidth / 2,
-    halfHeight: w.fontSize / 2,
+    halfHeight: (w.fontSize * LINE_HEIGHT) / 2,
     ...initialPosition(i, words.length, width, height, padding),
   }))
 

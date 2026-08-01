@@ -133,8 +133,11 @@ proportional to headline count.
 
 Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
 (`exclude` / `demote` / `allow`), so retuning needs no redeploy. **Never change a
-threshold without running `scripts/analysis/10_sieve_eval.sql` first** — its
-README records five ways this has already gone wrong. Two findings that cost real
+threshold without running `scripts/analysis/10_sieve_eval.sql` first** (or
+`11_category_eval.sql` when the question is about a category tab) — its README
+records five ways this has already gone wrong. Note that the labels go stale when
+the *data* moves and not only when the sweep widens: collecting a date twice put
+13 unlabelled words on screen and silently invalidated a run. Two findings that cost real
 time and should not be rediscovered:
 
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
@@ -145,6 +148,16 @@ time and should not be rediscovered:
 - **Category specificity must be computed across all six sections**, never within
   the filtered view. Inside one category every word sits in one bucket, entropy
   collapses to zero, and every word scores a perfect 1.
+- **Every sieve clause counts over the whole day, including sieve 1.** That last
+  part was not true until migration `0004`: `min_headlines` counted headlines
+  inside the category on screen while every other signal was day-wide, so a word
+  in three of the day's headlines split across two sections appeared in neither
+  section's graph. Category tabs drew 6 to 20 words. Moving the count day-wide
+  took mean F1 from 40.4 to 61.2 across six categories and two days, winning in
+  all twelve cells (`scripts/analysis/11_category_eval.sql`). The category filter
+  now decides only which of the day's words are shown and how big they are, never
+  which ones qualify. The all-categories view is unaffected by construction —
+  with no filter the scoped set is the whole day.
 
 Measured precision of the top 70 words: 24.3% for frequency alone, 71.4% / 67.1%
 for the sieve. Those figures come from `analysis.word_labels` and are **not
