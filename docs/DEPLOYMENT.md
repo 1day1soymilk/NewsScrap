@@ -106,7 +106,7 @@ Dashboard → Database → Extensions 에서 `pg_cron`, `pg_net` 을 켠 뒤 SQL
 ```sql
 select cron.schedule(
   'collect-headlines-daily',
-  '0 4 * * *', -- UTC 04:00 = KST 13:00
+  '0 22 * * *', -- UTC 22:00 = KST 07:00 다음 날
   $$
   select net.http_post(
     url := 'https://<project-ref>.supabase.co/functions/v1/collect-headlines',
@@ -127,8 +127,17 @@ select jobid, schedule, jobname, active from cron.job;
 들어 있는)을 다시 붙여넣지 않아도 되어 안전하다.
 
 ```sql
-select cron.alter_job(job_id := 1, schedule := '0 4 * * *');
+select cron.alter_job(job_id := 1, schedule := '0 22 * * *');
 ```
+
+pg_cron 은 UTC 로 돈다. UTC 22:00 은 KST 로 **다음 날** 07:00 이지만, 함수가
+`todayInSeoul()` 로 날짜를 정하므로 저장되는 `collected_date` 는 서울 날짜 그대로다 —
+UTC 날짜로 찍었다면 하루 전 날짜에 쌓였을 자리다.
+
+수집이 오전으로 옮겨진 이유는 하루 두 번 쌓이는 것을 막기 위해서다. 13:00 이었을 때는
+오전에 작업하려면 손으로 한 번 돌려야 했고, 그러면 그날 13:00 크론이 두 번째 수집을
+얹었다. 2026-08-01 이 정확히 그렇게 1,382 행이 되었고 (07-31 은 900), 라벨 세트가
+조용히 무효화되었다 — `scripts/analysis/README.md` 의 규칙 4 를 볼 것.
 
 이 SQL 에는 service_role key 가 평문으로 들어간다. SQL Editor 에서만 실행하고 저장소에는
 커밋하지 않는다.
