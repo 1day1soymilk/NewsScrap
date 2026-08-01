@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 const mockSupabase = {
   from: vi.fn(),
+  rpc: vi.fn(),
 }
 
 vi.mock('./supabaseClient', () => ({ supabase: mockSupabase }))
 
-const { fetchAvailableDates, fetchHeadlinesForWord, fetchWordCounts } = await import('./queries')
+const { fetchAvailableDates, fetchHeadlinesForWord, fetchKeywordGraph, fetchWordCounts } =
+  await import('./queries')
 
 function makeQueryChain(result: { data: unknown; error: unknown }) {
   const chain = {
@@ -81,6 +83,62 @@ describe('fetchAvailableDates', () => {
     expect(mockSupabase.from).toHaveBeenCalledWith('collected_dates')
     expect(chain.order).toHaveBeenCalledWith('collected_date', { ascending: false })
     expect(result).toEqual(['2026-07-31', '2026-07-30'])
+  })
+})
+
+describe('fetchKeywordGraph', () => {
+  const node = {
+    word: '폭염',
+    count: 45,
+    spec: 0.478,
+    standalone: 0.6,
+    neighbors_per_doc: 2.733,
+    assoc: 0.62,
+    passed_by: 'allow',
+    category_slug: 'culture',
+    faded: false,
+  }
+
+  it('passes the date and category through as RPC arguments', async () => {
+    mockSupabase.rpc.mockResolvedValue({ data: { nodes: [node], edges: [] }, error: null })
+
+    const result = await fetchKeywordGraph('2026-07-31', 'economy')
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('keyword_graph', {
+      p_date: '2026-07-31',
+      p_category: 'economy',
+    })
+    expect(result.nodes).toEqual([node])
+  })
+
+  it('keeps a null signal null rather than turning it into a measured zero', async () => {
+    // assoc is null for a word that shares no headline with any other word.
+    // Number(null) is 0, which would read as "measured, and it was zero".
+    mockSupabase.rpc.mockResolvedValue({
+      data: { nodes: [{ ...node, assoc: null }], edges: [] },
+      error: null,
+    })
+
+    const result = await fetchKeywordGraph('2026-07-31', null)
+
+    expect(result.nodes[0].assoc).toBeNull()
+  })
+
+  it('tolerates a day with no rows at all', async () => {
+    mockSupabase.rpc.mockResolvedValue({ data: { nodes: [], edges: [] }, error: null })
+
+    await expect(fetchKeywordGraph('2026-01-01', null)).resolves.toEqual({ nodes: [], edges: [] })
+  })
+
+  it('throws a real Error carrying the PostgREST message', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: { message: 'permission denied for function keyword_graph', code: '42501' },
+    })
+
+    await expect(fetchKeywordGraph('2026-07-31', null)).rejects.toThrow(
+      'permission denied for function keyword_graph (42501)',
+    )
   })
 })
 

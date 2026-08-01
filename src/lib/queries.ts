@@ -1,5 +1,12 @@
 import { supabase } from './supabaseClient'
-import type { Category, HeadlineSummary, WordCount } from './types'
+import type {
+  Category,
+  GraphEdge,
+  GraphNode,
+  HeadlineSummary,
+  KeywordGraphData,
+  WordCount,
+} from './types'
 
 interface PostgrestErrorLike {
   message?: string
@@ -56,6 +63,52 @@ export async function fetchWordCounts(
   return rows
     .map((row) => ({ word: row.word, count: Number(row.count) }))
     .sort((a, b) => b.count - a.count)
+}
+
+// An RPC rather than a view because the node and edge cuts and the NPMI
+// arithmetic have to happen server side: a day's word pairs run to thousands of
+// rows even after grouping, and PostgREST would truncate at 1000.
+//
+// Postgres renders numeric as a bare JSON number, so these arrive as JS numbers
+// already; the coercion is here for the same reason fetchWordCounts has it —
+// nothing downstream should have to wonder.
+export async function fetchKeywordGraph(
+  date: string,
+  categorySlug: string | null,
+): Promise<KeywordGraphData> {
+  const { data, error } = await supabase.rpc('keyword_graph', {
+    p_date: date,
+    p_category: categorySlug,
+  })
+  if (error) throw queryError(error)
+
+  const raw = (data ?? { nodes: [], edges: [] }) as {
+    nodes?: GraphNode[]
+    edges?: GraphEdge[]
+  }
+
+  return {
+    nodes: (raw.nodes ?? []).map((node) => ({
+      ...node,
+      count: Number(node.count),
+      spec: numeric(node.spec),
+      standalone: numeric(node.standalone),
+      neighbors_per_doc: numeric(node.neighbors_per_doc),
+      assoc: numeric(node.assoc),
+    })),
+    edges: (raw.edges ?? []).map((edge) => ({
+      ...edge,
+      cooc: Number(edge.cooc),
+      npmi: Number(edge.npmi),
+    })),
+  }
+}
+
+// assoc is null for a word that never shares a headline, and spec is null when
+// the categories table holds a single row. Number(null) is 0, which would read
+// as a measured zero rather than as "not measured".
+function numeric(value: number | null): number | null {
+  return value === null || value === undefined ? null : Number(value)
 }
 
 export async function fetchHeadlinesForWord(

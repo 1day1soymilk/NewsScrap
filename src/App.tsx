@@ -2,14 +2,16 @@
 import { useEffect, useState } from 'react'
 import { CategoryTabs } from './components/CategoryTabs'
 import { HeadlinePanel } from './components/HeadlinePanel'
-import { WordCloud } from './components/WordCloud'
+import { KeywordGraph } from './components/KeywordGraph'
 import {
   fetchAvailableDates,
   fetchCategories,
   fetchHeadlinesForWord,
-  fetchWordCounts,
+  fetchKeywordGraph,
 } from './lib/queries'
-import type { Category, HeadlineSummary, WordCount } from './lib/types'
+import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
+
+const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 
 function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
@@ -28,7 +30,7 @@ function App() {
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState(todayInSeoul())
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [wordCounts, setWordCounts] = useState<WordCount[]>([])
+  const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [selectedWord, setSelectedWord] = useState<string | null>(null)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,13 +42,13 @@ function App() {
     fetchAvailableDates().then(setAvailableDates).catch((e) => setError(errorMessage(e)))
   }, [])
 
-  function loadWordCounts(isCancelled: () => boolean = () => false) {
+  function loadGraph(isCancelled: () => boolean = () => false) {
     setLoading(true)
     setError(null)
-    fetchWordCounts(selectedDate, selectedCategory)
+    fetchKeywordGraph(selectedDate, selectedCategory)
       .then((data) => {
         if (isCancelled()) return
-        setWordCounts(data)
+        setGraph(data)
       })
       .catch((e) => {
         if (isCancelled()) return
@@ -60,7 +62,7 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
-    loadWordCounts(() => cancelled)
+    loadGraph(() => cancelled)
     return () => {
       cancelled = true
     }
@@ -107,14 +109,20 @@ function App() {
       {error && (
         <div className="text-center">
           <p className="mb-2 text-red-600">{error}</p>
-          <button onClick={() => loadWordCounts()} className="rounded border px-3 py-1 text-sm hover:bg-gray-100">
+          <button onClick={() => loadGraph()} className="rounded border px-3 py-1 text-sm hover:bg-gray-100">
             다시 시도
           </button>
         </div>
       )}
       {!error && loading && <p className="text-center text-gray-500">불러오는 중...</p>}
       {!error && !loading && (
-        <WordCloud words={wordCounts} onWordClick={setSelectedWord} />
+        <KeywordGraph
+          graph={graph}
+          selectedWord={selectedWord}
+          // Clicking a lit word again clears the focus and closes the panel.
+          onWordClick={(word) => setSelectedWord((current) => (current === word ? null : word))}
+          colorByCategory={selectedCategory === null}
+        />
       )}
 
       {selectedWord && headlinesError && (

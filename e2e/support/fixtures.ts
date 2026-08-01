@@ -1,5 +1,4 @@
 export type CategoryRow = { id: string; slug: string; label: string }
-export type WordCountRow = { word: string; count: number }
 export type CollectedDateRow = { collected_date: string }
 export type HeadlineNounRow = {
   word: string
@@ -30,18 +29,62 @@ export const CATEGORIES: CategoryRow[] = [
 
 export const COLLECTED_DATES: CollectedDateRow[] = [{ collected_date: todayInSeoul() }]
 
-// Three short words only: d3-cloud drops whatever does not fit the canvas, and
-// short strings at 700x450 are certain to be placed.
-export const DEFAULT_WORD_COUNTS: WordCountRow[] = [
-  { word: '예산안', count: 5 },
-  { word: '여야', count: 3 },
-  { word: '국회', count: 1 },
-]
+// Shape matches the json_build_object in keyword_graph. The signal fields are
+// not read by the layout, only shown in the tooltip, but they are here so the
+// fixture stays a faithful copy of what the RPC returns.
+export type GraphNodeRow = {
+  word: string
+  count: number
+  spec: number | null
+  standalone: number | null
+  neighbors_per_doc: number | null
+  assoc: number | null
+  passed_by: string
+  category_slug: string
+  faded: boolean
+}
+export type GraphEdgeRow = { a: string; b: string; cooc: number; npmi: number }
+export type GraphPayload = { nodes: GraphNodeRow[]; edges: GraphEdgeRow[] }
 
-export const ECONOMY_WORD_COUNTS: WordCountRow[] = [
-  { word: '금리', count: 4 },
-  { word: '환율', count: 2 },
-]
+function node(
+  word: string,
+  count: number,
+  category_slug: string,
+  overrides: Partial<GraphNodeRow> = {},
+): GraphNodeRow {
+  return {
+    word,
+    count,
+    spec: 0.5,
+    standalone: 0.9,
+    neighbors_per_doc: 1.5,
+    assoc: 0.6,
+    passed_by: 'length',
+    category_slug,
+    faded: false,
+    ...overrides,
+  }
+}
+
+// 국회 is deliberately left out of the edge list: the focus-mode test needs a
+// word that is not a neighbour of 예산안, and on real days most words are
+// isolated anyway (34 of 74 had any edge on 2026-08-01).
+export const DEFAULT_GRAPH: GraphPayload = {
+  nodes: [
+    node('예산안', 5, 'politics'),
+    node('여야', 3, 'politics'),
+    node('국회', 2, 'politics'),
+    node('한파', 2, 'society', { faded: true, passed_by: 'neighbors' }),
+  ],
+  edges: [{ a: '예산안', b: '여야', cooc: 3, npmi: 0.8 }],
+}
+
+export const ECONOMY_GRAPH: GraphPayload = {
+  nodes: [node('금리', 4, 'economy'), node('환율', 2, 'economy')],
+  edges: [],
+}
+
+export const EMPTY_GRAPH: GraphPayload = { nodes: [], edges: [] }
 
 // Shape matches the nested select in fetchHeadlinesForWord().
 export const HEADLINE_ROWS: HeadlineNounRow[] = [

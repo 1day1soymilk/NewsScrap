@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A personal Naver-news word cloud. A Supabase Edge Function scrapes six Naver news
-sections daily, extracts Korean nouns via ETRI's morphological-analysis API, and
-stores them in Postgres. A Vite + React frontend reads that data and renders a
-d3-cloud word cloud filterable by date and category; clicking a word lists the
-headlines it came from.
+A personal Naver-news keyword graph. A Supabase Edge Function scrapes six Naver
+news sections daily, extracts Korean nouns via ETRI's morphological-analysis API,
+and stores them in Postgres. A Vite + React frontend reads that data and renders a
+d3-force graph filterable by date and category: words that share headlines are
+joined by an edge, size stays proportional to headline count, and clicking a word
+dims everything outside its neighbourhood and lists the headlines it came from.
 
 ## Commands
 
@@ -83,8 +84,8 @@ Keep logic worth testing on the `lib/` side of that line.
 
 ### TypeScript projects
 
-`tsconfig.json` references three projects: `app` (`src`), `node`
-(`vite.config.ts`), and `functions` (`supabase/functions/**/lib/**`). Test files
+`tsconfig.json` references four projects: `app` (`src`), `node`
+(`vite.config.ts`), `functions` (`supabase/functions/**/lib/**`), and `e2e`. Test files
 are inside the checked scope on purpose — jest-dom matchers resolve through
 `"types": [..., "@testing-library/jest-dom/vitest"]` in `tsconfig.app.json`.
 
@@ -98,8 +99,11 @@ errors.
 all encode the same column names. Changing one means changing all three.
 
 The frontend never aggregates in the client and never reads raw rows for counts —
-it queries the `daily_word_counts` and `collected_dates` views, which exist so
-PostgREST's 1000-row cap cannot silently truncate a result set.
+it queries the `keyword_graph` RPC and the `collected_dates` view, which exist so
+PostgREST's 1000-row cap cannot silently truncate a result set. `daily_word_counts`
+is no longer on the graph's path; `fetchWordCounts` is kept for the day-over-day
+comparison Phase 3 needs and because the view is the documented way to read counts
+without hitting that cap.
 
 `daily_word_counts` is a `UNION ALL` of a per-category aggregate and an
 all-categories rollup keyed by a null `category_slug`. **Do not rewrite it with
@@ -147,6 +151,37 @@ for the sieve. Those figures come from `analysis.word_labels` and are **not
 comparable to any percentage quoted elsewhere** — a different label set moves them
 several points.
 
+### Drawing the graph
+
+`src/components/KeywordGraph.tsx` measures each label on a canvas and hands the
+widths to `src/components/graphLayout.ts`, which owns all the arithmetic. That
+split is what makes the layout testable: jsdom has no canvas, so anything calling
+`measureText` cannot be unit-tested. Same pattern as `wordCloudLayout.ts`, whose
+`computeFontSizes` the graph still reuses unchanged — the sieve decides who is
+drawn, never how big.
+
+Three things there were arrived at by looking at real days, not by reasoning:
+
+- **Initial positions are seeded explicitly.** d3-force places any node without an
+  x/y on a phyllotaxis spiral centred on the origin — the canvas's top-left — and
+  relies on the centring forces to carry it in. At these force strengths 300 ticks
+  does not cover half a canvas, so a category with eight words settled up and to
+  the left with the rest of the frame empty.
+- **`forceManyBody`'s `distanceMax` must stay capped** at half the canvas. Letting
+  repulsion act across the whole frame pushes the outermost words into the bounds
+  clamp, where they pile up into a column stuck to the wall.
+- **The viewport is cropped to the labels**, not to the canvas the simulation ran
+  in. Few words cannot generate enough mutual repulsion to resist the centring
+  forces, so they clump; cropping beats tuning the forces per node count.
+
+Collision is rectangular rather than d3's circular `forceCollide`, because a
+circle around a wide label is roughly three times taller than the text and leaves
+words floating in the gaps.
+
+The layout is deterministic — seeded positions, a fixed tick count, and ties
+broken on the word server side — so the same day always renders the same picture
+and the e2e suite can assert on it.
+
 ### Edge Function run budget
 
 The function paginates each section's "더보기" endpoint to 150 headlines, six
@@ -185,30 +220,34 @@ environment.
 
 ## Testing notes
 
-`WordCloud.tsx` and `App.tsx` have no unit tests: d3-cloud measures text on a
+`KeywordGraph.tsx` and `App.tsx` have no unit tests: the graph measures text on a
 canvas, which jsdom does not implement. Their layout arithmetic is extracted into
-`src/components/wordCloudLayout.ts`, which is tested. The rendered cloud and the
-`App.tsx` wiring around it are covered by the Playwright suite in `e2e/` instead —
-`npm run test:e2e`, which boots its own dev server.
+`src/components/graphLayout.ts` and `src/components/wordCloudLayout.ts`, which are
+tested. The rendered graph and the `App.tsx` wiring around it are covered by the
+Playwright suite in `e2e/` instead — `npm run test:e2e`, which boots its own dev
+server.
 
-Five of those tests stub Supabase at the network layer
-(`e2e/support/mockSupabase.ts`), so they do not depend on what was collected that
-day. `e2e/smoke.spec.ts` is the only file that hits the real project, and it
-asserts the seeded category tabs rather than collected words — nothing exists for
-the current date between midnight and 13:00 KST, when the cron runs.
+`e2e/keywordGraph.spec.ts` stubs Supabase at the network layer
+(`e2e/support/mockSupabase.ts`), so it does not depend on what was collected that
+day. Note that `keyword_graph` is an RPC: it arrives as a POST with its arguments
+in the body, so a handler keying off `p_category` must read
+`route.request().postDataJSON()`, not the query string. `e2e/smoke.spec.ts` is the
+only file that hits the real project, and it asserts the seeded category tabs
+rather than collected words — nothing exists for the current date between midnight
+and 13:00 KST, when the cron runs.
 
 `e2e/smoke.spec.ts` needs a real `.env` (recoverable with
 `npx vercel env pull .env --environment=development`); on a fresh clone without
-one, `npm run test:e2e` fails 1 of 7 with a bare count mismatch. Also note
+one, `npm run test:e2e` fails 1 of 11 with a bare count mismatch. Also note
 `playwright.config.ts` sets `reuseExistingServer: true`, so a dev server started
 before `.env` existed will be silently reused with stale environment variables —
 stop it first.
 
-Do not assert a positive total for how many words the cloud rendered. d3-cloud
-silently drops words that do not fit the canvas, so totals vary with font
-rendering. Asserting that a word is absent (`toHaveCount(0)`) is fine — absence
-does not have that problem. Assert that specific words are visible or absent
-instead of asserting a count.
+Asserting how many words were drawn is now safe in a way it was not under
+d3-cloud, which silently dropped whatever did not fit: a force layout draws every
+node it is given. Prefer naming specific words anyway — a count assertion says
+nothing about which words the sieve let through, and that is the thing worth
+protecting.
 
 ### Word quality is measured, not eyeballed
 
