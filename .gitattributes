@@ -1,0 +1,4 @@
+# Shell scripts must keep LF even when checked out on Windows. With the CRLF
+# conversion git warns about, the shebang picks up a trailing \r and the script
+# dies with "bash: $'\r': command not found" before it runs a line.
+*.sh text eol=lf
