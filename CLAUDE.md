@@ -470,3 +470,21 @@ Two habits it enforces, both learned the hard way:
 - **Never optimise precision alone.** It does not punish discarding good words, so
   maximising it converges on dropping the day's biggest story — measured, not
   hypothetical. Judge on F1 and the `heatwave` column together.
+
+`30_word_scores.sql` and `31_fragments.sql` are the other half: they explain one
+day's screen word by word rather than comparing configurations. **They are
+diagnostics and never grounds for moving a threshold** — that is still
+`10_sieve_eval.sql`'s job, and adjusting a number because one day's dump looks
+wrong is the habit the rules above exist to stop. `30`'s `chk` column cross-checks
+its own copy of the sieve against `keyword_graph`'s node list and prints `!` on
+disagreement, for the same reason the harness prints `unlabeled`; a `!` means the
+script is wrong, not the sieve.
+
+Two things they found on the first run, both still open and both recorded in
+`scripts/analysis/README.md`: the compound merge does not restore 반도체, 무인기,
+상한가 or 유조선 because ETRI tags their prefixes `XPN` and their suffixes `XSN`
+and `MERGEABLE_TYPES` holds neither; and the `standalone` cut loses more whole
+words to a following 조사 (유시민, 골리앗, 앤트로픽) than it catches fragments.
+The archive also **spans the merge's own deploy** — 1,773 of 2,282 headlines were
+analysed before it shipped — so a word count that crosses 2026-08-01 13:00 KST
+blends two analysers.
