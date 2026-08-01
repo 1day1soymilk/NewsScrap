@@ -232,6 +232,24 @@ Three things there were arrived at by looking at real days, not by reasoning:
 - **The viewport is cropped to the labels**, not to the canvas the simulation ran
   in. Few words cannot generate enough mutual repulsion to resist the centring
   forces, so they clump; cropping beats tuning the forces per node count.
+- **Crowding is `DEFAULT_PADDING`, not canvas size.** Raising `MAX_HEIGHT` from
+  640 to 820 spread the events apart and moved the mean nearest-neighbour gap by
+  half a pixel, because what two adjacent labels rest at is the collision
+  padding. Padding is the lever; the taller canvas is what stops the events
+  landing on top of each other once they have room. Do not raise padding past
+  ~16 either: at 22 a 40-word canvas can no longer resolve its collisions and
+  labels overlap, which `graphLayout.test.ts` catches.
+- **Widening buys nothing.** The svg is drawn at its own cropped size and then
+  `max-w-full` scales it down to the container, so spreading sideways shrinks
+  everything by the same factor. Height is the only free axis.
+- **The 42 words with no edges are what makes the middle look crowded.** Of the
+  110 drawn on 2026-08-01, 42 hold no edge at all and the best-connected word
+  holds six — there is no hub, and a single-centre mind map would assert a
+  structure the data does not have. Those 42 are pushed out to a band of three
+  concentric rings (`isolatedRings`), leaving the middle to the events. The band
+  is three rings rather than one circle because a single radius is not long
+  enough to hold them side by side, and they stack on it — again caught by the
+  overlap test. With nothing connected at all the push is skipped entirely.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -239,14 +257,33 @@ words floating in the gaps. The box is 1.2x the font size tall, not 1x: `getBBox
 on drawn Hangul spans ascender to descender, and treating the em box as the
 collision height left neighbouring rows grazing by a pixel.
 
-**Edges are cut, not drawn under the text.** Every label box is subtracted from
-the centre-to-centre line and only the remainder is drawn, so one edge can arrive
-as several segments. That is what lets the strokes be solid enough to read —
-nothing is hidden behind a word for them to fight with. Note the interaction:
-`DEFAULT_PADDING` has to leave more room than the routing consumes (clearance
-either side plus a minimum drawable length), or two clustered words sit close
-enough that the entire line between them is cut away and the edge disappears.
-Cluster cohesion at 0.35 did exactly that and removed half the lines on screen.
+**One relationship, one stroke.** Each edge is a single quadratic Bézier that
+bows around whatever labels sit in its way. Strength is carried by width and
+opacity (`1.4 + 2.6·npmi`), never by the number of strokes.
+
+This replaced a routing that subtracted every label box from the centre-to-centre
+line and drew the remainder. That kept the strokes off the text, but it split one
+edge into up to five collinear dashes — measured on 2026-08-01, where 15 of 63
+drawn edges arrived in pieces — and several dashes read as several
+relationships. **Do not reintroduce cutting.**
+
+Three things there were settled by measurement, not by argument:
+
+- **A crowded edge is drawn anyway, and faded.** At 110 words a long edge crosses
+  something whichever way it bows; no single quadratic threads that field.
+  Dropping those lost 18 of the day's 68 relationships. `EdgeCurve.clear` says
+  whether the route stayed off every label, and `KeywordGraph.tsx` halves the
+  opacity when it did not. A faint line under a word beats a missing connection.
+- **Both sides get tried before settling.** The chord arithmetic names a cheaper
+  side, but that side can be the crowded one; searching only it dropped 18 of 68.
+  The search sweeps outward from straight, cheaper side first at each distance,
+  and keeps the least intrusive route rather than the first clean one.
+- **An edge is still dropped when the two labels nearly touch** — there is no
+  room for a stroke between them. `DEFAULT_PADDING` has to leave more room than
+  the endpoint trim consumes, or clustered words lose their edges: cluster
+  cohesion at 0.35 did exactly that and removed half the lines on screen.
+  Two of 68 edges are dropped this way on 2026-08-01, which is the intended
+  behaviour rather than a fault.
 
 ### Event clusters
 
@@ -270,6 +307,18 @@ Communities are found from the edge list **before** the simulation runs, since
 they depend only on topology. That ordering matters: it lets a cohesion force
 hold each event's words together, without which a cluster's members scatter and
 the hull drawn around them swallows unrelated words.
+
+**Each event is arranged around its hub** — the member holding the most edges,
+ties broken on headline count then on the word so the pick is reproducible.
+Cohesion pulls members toward that word rather than toward the centroid. Both
+hold a cluster together, but a centroid is an empty point no word occupies, so
+the members ring a gap and there is nothing at the middle to read the event
+from.
+
+In the all-categories view an edge is stroked with a **gradient between its two
+endpoints' section colours**, which is what makes a crossing readable without
+tracing it end to end. Inside a single category every word is the same colour,
+so the gradient is dropped there and edges fall back to the neutral ink.
 
 Only the biggest few clusters get a shaded blob (`clusterLimit`, default 6). The
 day splits into 26 communities and shading all of them tints most of the canvas.

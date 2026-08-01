@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { computeGraphLayout, convexHull, seededRandom } from './graphLayout'
-import type { EdgeSegment, MeasuredWord, PlacedNode } from './graphLayout'
+import { computeGraphLayout, convexHull, routeEdge, seededRandom } from './graphLayout'
+import type { EdgeCurve, MeasuredWord, PlacedNode } from './graphLayout'
 import type { GraphEdge } from '../lib/types'
 
 const SIZE = { width: 800, height: 500 }
@@ -38,15 +38,16 @@ function overlaps(a: PlacedNode, b: PlacedNode): boolean {
   )
 }
 
-// Samples the segment rather than solving it: the routing already uses the slab
-// method, so checking it with the same arithmetic would only prove the code
-// agrees with itself. A tolerance of one pixel keeps rounding out of it.
-function crossesBox(segment: EdgeSegment, box: PlacedNode): boolean {
+// Samples the curve rather than solving it: the routing bends by its own
+// arithmetic, so checking it with that same arithmetic would only prove the
+// code agrees with itself. A tolerance of one pixel keeps rounding out of it.
+function curveCrossesBox(curve: EdgeCurve, box: PlacedNode): boolean {
   const steps = 200
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
-    const x = segment.x1 + (segment.x2 - segment.x1) * t
-    const y = segment.y1 + (segment.y2 - segment.y1) * t
+    const m = 1 - t
+    const x = m * m * curve.x1 + 2 * m * t * curve.cx + t * t * curve.x2
+    const y = m * m * curve.y1 + 2 * m * t * curve.cy + t * t * curve.y2
     if (
       Math.abs(x - box.x) < box.halfWidth - 1 &&
       Math.abs(y - box.y) < box.halfHeight - 1
@@ -55,6 +56,30 @@ function crossesBox(segment: EdgeSegment, box: PlacedNode): boolean {
     }
   }
   return false
+}
+
+// How far the control point sits off the chord. Zero means the quadratic has
+// degenerated to the straight line, which is what "not bent" means here.
+function bowOf(curve: EdgeCurve): number {
+  const dx = curve.x2 - curve.x1
+  const dy = curve.y2 - curve.y1
+  const length = Math.hypot(dx, dy)
+  if (length === 0) return 0
+  return Math.abs((curve.cx - curve.x1) * dy - (curve.cy - curve.y1) * dx) / length
+}
+
+function node(text: string, x: number, y: number, halfWidth = 20, halfHeight = 12): PlacedNode {
+  return {
+    word: text,
+    count: 5,
+    fontSize: 20,
+    textWidth: halfWidth * 2,
+    faded: false,
+    x,
+    y,
+    halfWidth,
+    halfHeight,
+  }
 }
 
 // Winding-agnostic point-in-polygon, so it cannot pass merely because it shares
@@ -107,6 +132,52 @@ describe('seededRandom', () => {
       expect(value).toBeGreaterThanOrEqual(0)
       expect(value).toBeLessThan(1)
     }
+  })
+})
+
+describe('routeEdge', () => {
+  // Placed by hand rather than through the simulation: the point is a label
+  // sitting squarely on the straight line, which the force layout will not
+  // reliably produce on demand.
+  const left = node('가가', 100, 200)
+  const right = node('다다', 400, 200)
+  const middle = node('나나', 250, 200)
+
+  it('bends around a label sitting on the straight line', () => {
+    const curve = routeEdge(left, right, [left, middle, right])
+    expect(curve).not.toBeNull()
+
+    // The test is only worth anything if the straight line really would have
+    // hit 나나 — otherwise there was nothing to bend around.
+    expect(Math.abs((left.y + right.y) / 2 - middle.y)).toBeLessThan(middle.halfHeight)
+
+    expect(curveCrossesBox(curve!, middle)).toBe(false)
+    expect(bowOf(curve!)).toBeGreaterThan(middle.halfHeight)
+  })
+
+  it('stays straight when the same two words have a clear run', () => {
+    const curve = routeEdge(left, right, [left, right])
+    expect(bowOf(curve!)).toBeLessThan(1)
+  })
+
+  it('draws a route it could not keep clear, and says so', () => {
+    // A wall of labels straight across the gap: no single quadratic gets past
+    // it within the bow cap. The stroke is still drawn, flagged so the renderer
+    // can fade it rather than let it fight the words it runs under.
+    const wall = Array.from({ length: 9 }, (_, i) => node(`벽${i}`, 250, 60 + i * 45, 60, 22))
+    const curve = routeEdge(left, right, [left, right, ...wall])
+
+    expect(curve).not.toBeNull()
+    expect(curve!.clear).toBe(false)
+  })
+
+  it('bends the short way round', () => {
+    // 나나 sits above the chord, so the stroke has to dip below it — a bow
+    // towards the label would have to travel past the whole box instead.
+    const above = node('나나', 250, 188)
+    const curve = routeEdge(left, right, [left, above, right])!
+    const side = (curve.cy - curve.y1) * (right.x - left.x)
+    expect(side).toBeGreaterThan(0)
   })
 })
 
@@ -215,9 +286,9 @@ describe('computeGraphLayout', () => {
     expect([edges[0].x2, edges[0].y2]).toEqual([find(nodes, '양산').x, find(nodes, '양산').y])
   })
 
-  it('keeps every drawn segment clear of every label box', () => {
-    // The property the routing exists for: no piece of any line overlaps any
-    // word, including the two words the line connects.
+  it('keeps the whole curve clear of every label box', () => {
+    // The property the routing exists for: no part of any stroke overlaps any
+    // word, including the two words the stroke connects.
     const words = ['폭염', '양산', '코스피', '트럼프', '국힘', '하이닉스'].map((w) => word(w, 28))
     const { nodes, edges } = computeGraphLayout(
       words,
@@ -225,25 +296,56 @@ describe('computeGraphLayout', () => {
       SIZE,
     )
 
-    expect(edges.flatMap((e) => e.segments).length).toBeGreaterThan(0)
+    const drawn = edges.map((e) => e.curve).filter((c) => c !== null)
+    expect(drawn.length).toBeGreaterThan(0)
 
-    for (const segment of edges.flatMap((e) => e.segments)) {
+    for (const curve of drawn) {
       for (const node of nodes) {
-        expect(crossesBox(segment, node)).toBe(false)
+        expect(curveCrossesBox(curve, node), `${node.word}`).toBe(false)
       }
     }
+  })
+
+  // The complaint this routing was rewritten for. Cutting the label boxes out
+  // of a straight line split one relationship into as many as five collinear
+  // dashes, which reads as several relationships; strength is already carried
+  // by the stroke width.
+  it('keeps drawing a long edge across a crowded canvas', () => {
+    // Thirty words in this canvas is dense enough that a stroke spanning it
+    // cannot miss every label. Being unable to route cleanly is not a reason to
+    // drop the relationship — that lost 18 of 68 edges when it was tried.
+    const words = Array.from({ length: 30 }, (_, i) => word(`단어${i}`, 24))
+    const { edges } = computeGraphLayout(
+      words,
+      [edge('단어0', '단어17'), edge('단어3', '단어28'), edge('단어9', '단어22')],
+      SIZE,
+    )
+
+    expect(edges).toHaveLength(3)
+    for (const e of edges) {
+      expect(e.curve, `${e.a}—${e.b}`).not.toBeNull()
+    }
+  })
+
+  it('leaves the stroke straight when nothing is in the way', () => {
+    // Two words alone on the canvas: bending would be arbitrary, so the control
+    // point stays on the chord.
+    const words = ['폭염', '양산'].map((w) => word(w, 30))
+    const { edges } = computeGraphLayout(words, [edge('폭염', '양산')], SIZE)
+
+    expect(bowOf(edges[0].curve!)).toBeLessThan(1)
   })
 
   it('leaves a gap at both ends rather than starting inside the label', () => {
     const words = ['폭염', '양산'].map((w) => word(w, 30))
     const { nodes, edges } = computeGraphLayout(words, [edge('폭염', '양산')], SIZE)
 
-    const [segment] = edges[0].segments
+    const curve = edges[0].curve!
     const a = find(nodes, '폭염')
     const b = find(nodes, '양산')
 
-    // The drawn piece is strictly shorter than centre-to-centre.
-    const drawn = Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1)
+    // The drawn stroke is strictly shorter than centre-to-centre.
+    const drawn = Math.hypot(curve.x2 - curve.x1, curve.y2 - curve.y1)
     expect(drawn).toBeLessThan(distance(a, b))
     expect(drawn).toBeGreaterThan(0)
   })
@@ -256,7 +358,7 @@ describe('computeGraphLayout', () => {
       width: 120,
       height: 90,
     })
-    expect(edges[0].segments).toEqual([])
+    expect(edges[0].curve).toBeNull()
   })
 
   it('drops an edge whose endpoint was never placed', () => {
