@@ -1,1 +1,76 @@
 @import "tailwindcss";
+
+/* Tailwind v4 through the Vite plugin — there is no config file. Everything in
+   @theme is emitted as a custom property on :root, which is what lets
+   KeywordGraph.tsx reference these as var() strings instead of holding a
+   second copy of every hex.
+
+   src/lib/theme.test.ts reads this block back and enforces the two rules the
+   palette was chosen to satisfy. Change a value here and that test is the
+   thing that tells you whether the change is allowed. */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+
+  --color-ground: #f8fafc;
+  --color-surface: #ffffff;
+  --color-line: #e2e8f0;
+
+  --color-ink: #0f172a;
+  --color-ink-muted: #475569;
+  --color-ink-faint: #64748b;
+
+  /* The six sections. Closest pair is 50.1 degrees apart; every one clears
+     4.5:1 on --color-ground. The palette this replaces had four of the six
+     inside one 80-degree band. */
+  --color-section-politics: #be123c; /* 345deg */
+  --color-section-economy: #15803d; /* 142deg */
+  --color-section-society: #3f6212; /* 86deg */
+  --color-section-culture: #a21caf; /* 295deg */
+  --color-section-world: #155e75; /* 194deg */
+  --color-section-it: #4338ca; /* 245deg */
+
+  /* Reserved: 46.4 degrees from the nearest section colour, because the marker
+     is drawn touching a word and would otherwise read as part of it. */
+  --color-surge: #854d0e; /* 32deg */
+
+  /* Graph structure. The edge colour is slate — it is a line, so it only has
+     to stay quieter than the labels. */
+  --color-edge: #64748b;
+  /* The cluster wash is a true achromatic grey, not slate. Slate's hue is
+     215deg and the top story's is 221deg, so a slate wash would be within six
+     degrees of the thing it has to be told apart from — the opacity problem
+     again, one layer down. src/lib/theme.test.ts asserts this one has no hue
+     at all. */
+  --color-cluster: #737373;
+  --color-top-story: #2563eb;
+
+  /* Only ever rendered in place of the graph, never beside it, so it is free
+     to sit near the politics hue. */
+  --color-danger: #b91c1c;
+}
+
+/* Set explicitly rather than relying on Tailwind's default-font-family
+   plumbing, so the page ground and ink do not depend on a preflight internal. */
+@layer base {
+  html {
+    background-color: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* The sticky toolbar's height, which the headline panel has to start below.
+     It is here rather than as a Tailwind class on both because the two would
+     otherwise agree only by coincidence: the toolbar wraps to two rows below
+     lg, and a panel pinned to a single hard-coded offset covers the tab row in
+     exactly the sm-to-lg range. The breakpoint below must stay equal to the
+     toolbar's lg:flex-row in src/App.tsx. */
+  :root {
+    --header-height: 6.5rem;
+  }
+
+  @media (width >= 64rem) {
+    :root {
+      --header-height: 3.75rem;
+    }
+  }
+}
