@@ -159,10 +159,13 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words: 24.3% for frequency alone, 71.4% / 67.1%
-for the sieve. Those figures come from `analysis.word_labels` and are **not
-comparable to any percentage quoted elsewhere** — a different label set moves them
-several points.
+Measured precision of the top 70 words on the two labelled days: 24.3% / 28.6%
+for frequency alone, 84.3% / 75.7% for the sieve with the dictionary. Those
+figures come from `analysis.word_labels` and are **not comparable to any
+percentage quoted elsewhere, or to any earlier figure in this file's history** —
+the label set has been extended four times and each extension moves them.
+Compare configurations against each other inside one run, never against a number
+someone wrote down.
 
 ### Drawing the graph
 

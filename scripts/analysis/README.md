@@ -45,9 +45,41 @@ Postgres — see CLAUDE.md. It needs `.env.supabase`.
    45 headlines. The harness prints `recall_pct`, `f1_pct` and `heatwave` — a
    configuration reading `DROPPED` is rejected regardless of its precision.
 
+## The dictionary is measured too
+
+`word_overrides` is not a threshold, so it is not gated the way `scoring_weights`
+is — but it changes what reaches the screen, so it gets measured all the same.
+Twenty-six entries added in migration `0005`, chosen from the 61 labelled-bad
+words that clear the shipped sieve rather than from whatever looked wrong on
+screen:
+
+| | before | after |
+| --- | --- | --- |
+| top-70 precision, 2026-07-31 | 71.4 | **84.3** |
+| top-70 precision, 2026-08-01 | 65.7 | **75.7** |
+| top-70 F1, 2026-07-31 | 59.9 | **70.7** |
+| top-70 F1, 2026-08-01 | 49.2 | **56.7** |
+| category mean F1 | 61.2 | **67.7** |
+
+폭염 stays first on both days, and all twelve category cells improve. Recall is
+unchanged in every one of them, which is the expected shape: removing bad words
+cannot lose good ones.
+
+Rule 4 fired again here, and from a third cause — not a widened sweep, not a new
+collection, but the dictionary itself. Taking 26 words off the screen pulled 7
+deeper ones up to fill the gap, and all 7 turned out to be bad. **The exclusions
+removed 26 bad words and the screen refilled with 7 more**, so the gain is real
+but smaller than the entry count suggests. Expect this every time: an exclusion
+does not empty a slot, it promotes whatever was next.
+
+Thirty-five of the 61 candidates were left in on purpose. 공습, 압박, 배터리,
+클라우드, 바이오, 휴머노이드, 부동산 and 아파트 can each head a real story, and
+excluding them would be using the dictionary to paper over where the good-word
+line sits — which is a labelling question, not a dictionary one.
+
 ## Labels
 
-452 words, covering everything drawn by every configuration in
+459 words, covering everything drawn by every configuration in
 `02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across
 2026-07-31 and 2026-08-01. `20_unlabeled.sql` and `21_unlabeled_category.sql`
 both return nothing, so rule 4 is satisfied.
@@ -83,6 +115,7 @@ what it finds before trusting the harness.** That happened three times here:
 | `04_labels_round2.sql` | Labels the specificity-off round exposed |
 | `05_labels_second_collection.sql` | Labels the second collection of 2026-08-01 exposed |
 | `06_labels_category.sql` | Labels the category variants exposed |
+| `07_labels_dictionary.sql` | Labels the `0005` dictionary additions promoted |
 | `10_sieve_eval.sql` | The harness: precision, recall, F1 and the 폭염 rank per configuration |
 | `11_category_eval.sql` | The same for one category tab at a time |
 | `20_unlabeled.sql` | Words on screen with no label — must be empty before the harness counts |

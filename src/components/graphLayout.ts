@@ -256,10 +256,13 @@ export function computeGraphLayout(
         // the bounds clamp, where they pile up into a column stuck to the wall.
         .distanceMax(Math.max(width, height) / 2),
     )
-    // Gentle on purpose. Strong cohesion drags a cluster's words into contact,
-    // and then the edges between them are entirely consumed by label clearance
-    // and vanish — the graph loses the lines that justify the grouping.
-    .force('cluster', clusterCohesion(communities, 0.15))
+    // Bounded on purpose, and the bound is the edges rather than the eye. Too
+    // strong and a cluster's words are dragged into contact, the label clearance
+    // consumes the whole line between them, and the graph silently loses the
+    // edges that justify the grouping — 0.35 against a padding of 6 removed half
+    // the lines on screen. Too weak and the members scatter, so the hull drawn
+    // round them swallows unrelated words.
+    .force('cluster', clusterCohesion(communities, 0.25))
     .force('collide', rectCollide(padding, 0.8))
     // Weaker across the long axis, or the graph settles into a circular blob in
     // the middle of a wide canvas and leaves the sides empty.
