@@ -390,6 +390,22 @@ Expected: FAIL — `--color-ground is not defined in src/index.css`
     color: var(--color-ink);
     font-family: var(--font-sans);
   }
+
+  /* The sticky toolbar's height, which the headline panel has to start below.
+     It is here rather than as a Tailwind class on both because the two would
+     otherwise agree only by coincidence: the toolbar wraps to two rows below
+     lg, and a panel pinned to a single hard-coded offset covers the tab row in
+     exactly the sm-to-lg range. The breakpoint below must stay equal to the
+     toolbar's lg:flex-row in src/App.tsx. */
+  :root {
+    --header-height: 6.5rem;
+  }
+
+  @media (width >= 64rem) {
+    :root {
+      --header-height: 3.75rem;
+    }
+  }
 }
 ```
 
@@ -766,11 +782,14 @@ Expected: PASS
 // it replaces covered most of the graph on a narrow screen, so clicking a
 // word hid the thing that had just been clicked.
 //
-// sm:top-16 rather than sm:top-0: the toolbar is sticky, and a panel starting
-// at the top of the viewport covered the date and the tabs, so choosing a word
-// took away the controls for choosing a different one.
+// Starting below the toolbar rather than at sm:top-0: the toolbar is sticky,
+// and a panel starting at the top of the viewport covered the date and the
+// tabs, so choosing a word took away the controls for choosing a different
+// one. The offset is --header-height from src/index.css rather than a literal,
+// because the toolbar wraps to two rows below lg and any single hard-coded
+// value is wrong on one side of that breakpoint.
 <aside
-  className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-16 sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
+  className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-(--header-height) sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
   aria-label={`"${word}" 관련 헤드라인`}
 >
 ```
@@ -899,6 +918,7 @@ Expected: build 성공, Vitest 전부 통과, oxlint 0 경고, Playwright 28개 
 
 1. '전체' 보기에서 여섯 섹션이 서로 구분되는가 — 특히 경제·세계·IT·사회가 이전처럼 뭉쳐 보이지 않는가.
 2. 클러스터가 여럿인 날에 회색 블롭 두 개가 겹친 자리가 톱 스토리(파랑)로 오인되지 않는가.
+3. **창 너비를 좁혔다 넓히며** 단어를 하나 고른 채로 패널 상단이 툴바와 맞물리는가. `--header-height`는 실측이 아니라 추정값이므로, 툴바가 한 줄↔두 줄로 바뀌는 `lg` 경계 양쪽에서 패널이 툴바를 덮거나 사이가 뜨면 `src/index.css`의 두 값을 조정한다.
 
 - [ ] **Step 6: 커밋**
 
