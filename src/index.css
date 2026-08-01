@@ -34,8 +34,12 @@
   --color-surge: #854d0e; /* 32deg */
 
   /* Graph structure. The edge colour is slate — it is a line, so it only has
-     to stay quieter than the labels. */
-  --color-edge: #64748b;
+     to stay quieter than the labels. That happens to be the same slate as
+     --color-ink-faint above, so it is defined in terms of it rather than
+     repeated: a comment saying "keep these in sync" does not fail a build,
+     and src/lib/theme.test.ts only reads hex literals, so it cannot catch two
+     tokens drifting apart the way it catches everything else in this file. */
+  --color-edge: var(--color-ink-faint);
   /* The cluster wash is a true achromatic grey, not slate. Slate's hue is
      215deg and the top story's is 221deg, so a slate wash would be within six
      degrees of the thing it has to be told apart from — the opacity problem

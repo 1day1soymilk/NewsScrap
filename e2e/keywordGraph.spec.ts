@@ -1,6 +1,28 @@
 import { expect, test } from '@playwright/test'
 import { DEFAULT_GRAPH, ECONOMY_GRAPH, EMPTY_GRAPH, todayInSeoul } from './support/fixtures'
+import type { GraphNodeRow, GraphPayload } from './support/fixtures'
 import { mockSupabase } from './support/mockSupabase'
+
+// DEFAULT_GRAPH only has four words, and "the viewport is cropped to the
+// labels, not to the canvas the simulation ran in" (src/App.tsx / CLAUDE.md):
+// four words clump into a small bounding box regardless of container width,
+// so the rendered SVG never approaches its 640px ceiling. The sticky-header
+// regression below needs a graph tall enough that the page genuinely
+// overflows a short viewport, so it uses a wide spread of words instead.
+const TALL_GRAPH: GraphPayload = {
+  nodes: Array.from({ length: 36 }, (_, i): GraphNodeRow => ({
+    word: `단어${i}`,
+    count: 1 + (i % 12),
+    spec: 0.5,
+    standalone: 0.9,
+    neighbors_per_doc: 1.5,
+    assoc: 0.6,
+    passed_by: 'length',
+    category_slug: ['politics', 'economy', 'society', 'culture', 'world', 'it'][i % 6],
+    faded: false,
+  })),
+  edges: [],
+}
 
 // Unlike d3-cloud, a force layout never silently drops a word for want of room,
 // so presence assertions here are safe. Counts still are not: assert that a
@@ -114,6 +136,50 @@ test('reaches a word by keyboard and opens its headlines', async ({ page }) => {
 
   await expect(page.getByRole('complementary')).toBeVisible()
   await expect(budget).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('keeps a keyboard-focused word clear of the sticky header', async ({ page }) => {
+  // Short enough that the page genuinely scrolls: TALL_GRAPH's 36 words push
+  // the SVG close to its 640px ceiling, and the header, captions and padding
+  // push the full page well past this viewport. The suite's default 1280x900
+  // project viewport does not scroll at all here, which would make the
+  // assertion below vacuous.
+  await page.setViewportSize({ width: 800, height: 200 })
+  await mockSupabase(page, { keyword_graph: TALL_GRAPH })
+  await page.goto('/')
+
+  const header = page.locator('header')
+  await expect(header).toBeVisible()
+  const headerBox = (await header.boundingBox())!
+
+  // Whichever word sits closest to the top of the graph is the one a sticky
+  // header without scroll-margin would swallow; find it by rendered position
+  // rather than assuming DOM order matches visual order.
+  const words = page.locator('svg text[role="button"]')
+  const rects = await words.evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })),
+  )
+  const topIndex = rects.reduce(
+    (best, rect, i) => (rect.top < rects[best].top ? i : best),
+    0,
+  )
+  const topWord = words.nth(topIndex)
+
+  // Scroll the target word fully out of view above the fold first, so
+  // focusing it forces a real scroll-into-view rather than a no-op on an
+  // already-visible node — the bug only shows up when the browser has to
+  // scroll to reach it.
+  await page.evaluate((y) => window.scrollTo(0, y + 50), rects[topIndex].bottom)
+  await expect(topWord).not.toBeInViewport()
+
+  await topWord.focus()
+  await expect(topWord).toBeFocused()
+
+  // The header is sticky and stays pinned to the top of the viewport, so its
+  // box is comparable directly against the freshly-focused word's: the word
+  // must land below it, not underneath it.
+  const wordBox = (await topWord.boundingBox())!
+  expect(wordBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height)
 })
 
 test('opens and closes the headline panel for a clicked word', async ({ page }) => {

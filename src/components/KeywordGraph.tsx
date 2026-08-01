@@ -308,7 +308,13 @@ export function KeywordGraph({
                     event.preventDefault()
                     onWordClick(node.word)
                   }}
-                  className="cursor-pointer hover:underline"
+                  // App.tsx's <header> is sticky and opaque; without this the
+                  // browser's focus scroll-into-view has no way to know the
+                  // sticky overlay exists and can land a tabbed-to word right
+                  // underneath it. --header-height is the same custom
+                  // property the header offset in src/index.css uses, so the
+                  // two cannot drift apart.
+                  className="cursor-pointer scroll-mt-[var(--header-height)] hover:underline"
                 >
                   {node.word}
                 </text>
