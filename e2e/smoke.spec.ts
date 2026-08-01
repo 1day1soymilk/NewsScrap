@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 // Supabase call resolves, so it proves nothing about the backend.
 test('renders the app shell', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: '오늘의 주요 뉴스 스크랩' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '뉴스 스크랩' })).toBeVisible()
 })
 
 // No mocks here on purpose: this is the one test that proves the Vite env vars,

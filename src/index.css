@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Display face, used on the masthead date and the panel heading only. The graph
+   measures its labels on a canvas against FONT_FAMILY in KeywordGraph.tsx, so
+   the canvas deliberately stays on the system stack: a webfont there would be
+   measured before it loaded and every label box would be the wrong width. */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap');
 
 /* Tailwind v4 through the Vite plugin — there is no config file. Everything in
    @theme is emitted as a custom property on :root, which is what lets
@@ -10,6 +15,9 @@
    thing that tells you whether the change is allowed. */
 @theme {
   --font-sans: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  /* 명조 against a canvas that is entirely 고딕. The contrast is the point: the
+     masthead is the one part of the page a person reads rather than scans. */
+  --font-display: "Noto Serif KR", ui-serif, Georgia, serif;
 
   --color-ground: #f8fafc;
   --color-surface: #ffffff;

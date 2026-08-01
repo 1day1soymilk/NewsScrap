@@ -408,7 +408,9 @@ describe('computeGraphLayout', () => {
         // The bridge. Everything is one connected component because of it.
         edge('가1', '나1', 0.35),
       ],
-      SIZE,
+      // Only the top story is shaded by default, and what is under test here is
+      // the partition rather than how many of its parts get a blob.
+      { ...SIZE, clusterLimit: 2 },
     )
 
     expect(clusters).toHaveLength(2)
@@ -428,7 +430,9 @@ describe('computeGraphLayout', () => {
     const { clusters } = computeGraphLayout(
       words,
       [edge('트럼프', '공습'), edge('최태원', '노소영')],
-      SIZE,
+      // Both events, so the order between them is observable. Only the first
+      // reaches the canvas under the default cap.
+      { ...SIZE, clusterLimit: 2 },
     )
 
     expect(clusters.map((c) => c.headlines)).toEqual([93, 19])

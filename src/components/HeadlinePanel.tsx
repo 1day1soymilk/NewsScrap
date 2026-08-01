@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import type { Category, HeadlineSummary } from '../lib/types'
+import { sectionColor } from '../lib/sectionColors'
 
 interface HeadlinePanelProps {
   word: string | null
@@ -37,7 +38,10 @@ export function HeadlinePanel({
     [categories],
   )
 
-  const sorted = useMemo(() => sortHeadlines(headlines, categories), [headlines, categories])
+  const sorted = useMemo(
+    () => sortHeadlines(dedupe(headlines), categories),
+    [headlines, categories],
+  )
 
   if (!open) return null
 
@@ -57,10 +61,12 @@ export function HeadlinePanel({
       aria-label={`"${word}" 관련 헤드라인`}
     >
       <div className="mb-4 flex items-baseline justify-between gap-2">
-        <h2 className="text-lg font-semibold">
+        <h2 className="font-display text-lg font-semibold">
           &quot;{word}&quot; 관련 헤드라인
           {!loading && !error && sorted.length > 0 && (
-            <span className="ml-2 text-sm font-normal text-ink-faint">{sorted.length}건</span>
+            <span className="ml-2 font-sans text-sm font-normal text-ink-faint">
+              {sorted.length}건
+            </span>
           )}
         </h2>
         <button onClick={onClose} className="shrink-0 text-ink-faint hover:text-ink">
@@ -81,17 +87,31 @@ export function HeadlinePanel({
       )}
 
       {!error && !loading && sorted.length > 0 && (
-        <ul className="space-y-3">
+        <ul>
           {sorted.map((headline) => (
-            <li key={headline.id} className="flex flex-col gap-1">
-              <span className="w-fit rounded-full bg-ground text-ink-muted ring-1 ring-line px-2 py-0.5 text-xs">
+            <li key={headline.id} className="border-b border-line py-3 first:pt-0 last:border-0">
+              {/* The section reads as the same dot the tab row and the canvas
+                  use, rather than as a pill of its own. On a word that ran in
+                  one section the old chips were a column of identical badges
+                  down the panel, each one louder than the headline beside it. */}
+              <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-faint">
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 shrink-0 rounded-full"
+                  style={{ background: sectionColor(headline.category_slug) }}
+                />
                 {labels.get(headline.category_slug) ?? headline.category_slug}
-              </span>
+              </p>
+              {/* Ink, not --color-top-story. A headline is not the day's biggest
+                  event, and painting every link in that blue meant the one
+                  colour on the page that names something specific also meant
+                  "this is a link". Outside the anchor stays outside it: the
+                  accessible name has to be the headline and nothing else. */}
               <a
                 href={headline.link}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm text-top-story hover:underline"
+                className="text-sm text-ink underline decoration-line underline-offset-4 hover:decoration-ink-faint"
               >
                 {headline.title}
               </a>
@@ -117,6 +137,34 @@ function HeadlineSkeleton() {
       ))}
     </div>
   )
+}
+
+// Naver serves one article under two paths — /mnews/article/421/0009091462 and
+// /article/421/0009091462 — and which one the scrape returns varies between
+// runs. 2026-08-01 was collected twice, so 190 of its 1,382 rows are the same
+// article stored under both forms, and the duplicate check at insert time
+// compares links and sees two.
+//
+// The identity is the press id and the article id at the end of the path, so
+// that is the key. Keyed on the link rather than on the title because two
+// genuinely different articles can carry the same headline.
+//
+// This only cleans up the list. The rows are still there, and they still inflate
+// the co-occurrence counts the graph is built from.
+function articleKey(headline: HeadlineSummary): string {
+  const path = (headline.link ?? '').split('?')[0]
+  const match = path.match(/(\d+)\/(\d+)\/?$/)
+  return match ? `${match[1]}/${match[2]}` : headline.link || headline.id
+}
+
+function dedupe(headlines: HeadlineSummary[]): HeadlineSummary[] {
+  const seen = new Set<string>()
+  return headlines.filter((headline) => {
+    const key = articleKey(headline)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // PostgREST hands these back in whatever order the join produced, which

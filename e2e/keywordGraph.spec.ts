@@ -56,7 +56,7 @@ test('draws an edge between words that share headlines', async ({ page }) => {
   await expect(page.locator('svg path')).toHaveCount(1)
 })
 
-test('names the day’s biggest event and shades it', async ({ page }) => {
+test('names the day’s biggest event', async ({ page }) => {
   await mockSupabase(page)
   await page.goto('/')
 
@@ -67,9 +67,10 @@ test('names the day’s biggest event and shades it', async ({ page }) => {
   await expect(page.getByText('예산안 · 여야')).toBeVisible()
   await expect(page.getByText('8건')).toBeVisible()
 
-  // One connected pair, so one blob. 국회 and 한파 are joined to nothing and
-  // are not events.
-  await expect(page.locator('svg polygon')).toHaveCount(1)
+  // Named, never shaded. A cluster blob was the convex hull of its members'
+  // label boxes, so on a real day it enclosed words belonging to other events
+  // and asserted a membership they did not have.
+  await expect(page.locator('svg polygon')).toHaveCount(0)
 })
 
 test('dims everything outside the clicked word’s neighbourhood', async ({ page }) => {
@@ -267,9 +268,10 @@ test('resolves the design tokens to real colours in the SVG', async ({ page }) =
   // failure this test exists for.
   expect(fill).toBe('rgb(190, 18, 60)')
 
-  // The one blob is the top story, so it takes the blue rather than the grey.
-  const blobFill = await page
-    .locator('svg polygon')
-    .evaluate((el) => getComputedStyle(el).fill)
-  expect(blobFill).toBe('rgb(37, 99, 235)')
+  // The same politics ink on the tab that filters for it: the tab row is the
+  // canvas's colour key, so the two resolving differently would make the key
+  // wrong rather than merely plain.
+  const tabDot = page.getByRole('button', { name: '정치' }).locator('span').first()
+  const dotColor = await tabDot.evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(dotColor).toBe('rgb(190, 18, 60)')
 })

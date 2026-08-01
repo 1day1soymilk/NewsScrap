@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { computeGraphLayout, CLUSTER_ROUNDING } from './graphLayout'
+import { computeGraphLayout } from './graphLayout'
 import type { MeasuredWord } from './graphLayout'
 import { computeFontSizes } from './wordCloudLayout'
+import { NEUTRAL_INK, sectionColor } from '../lib/sectionColors'
 import type { KeywordGraphData } from '../lib/types'
 import type { Surge } from '../lib/surge'
 
@@ -16,6 +17,16 @@ const MIN_HEIGHT = 380
 // of it is what actually puts air between the labels.
 const MAX_HEIGHT = 820
 const HEIGHT_RATIO = 0.78
+
+// Below this the canvas is a phone's, and the desktop ratio gives a box far too
+// small to lay 70 labels out in: at 358px wide it is 358x279, and the collision
+// pass cannot resolve that many boxes in it, so the words simply land on top of
+// each other. The area a label needs does not shrink with the viewport — a
+// 14px word is 14px on a phone — so the canvas has to grow with the word count
+// rather than with the width, and on a phone the page scrolls anyway.
+const NARROW_WIDTH = 640
+const NARROW_HEIGHT_PER_WORD = 13
+const NARROW_MAX_HEIGHT = 1500
 const FALLBACK_WIDTH = 700
 
 // scoring_weights.demote_factor is 0.3, but the RPC ships only the boolean
@@ -25,36 +36,34 @@ const FADED_OPACITY = 0.38
 // Everything outside the focused word's neighbourhood.
 const UNFOCUSED_OPACITY = 0.1
 
-// Every colour here is a reference into the @theme block in src/index.css,
-// which is the single source of truth. Holding hex values in this file was
-// what let the old six-section palette drift into an 80-degree band without
-// anything noticing; src/lib/theme.test.ts now enforces the spacing.
-const CATEGORY_COLORS: Record<string, string> = {
-  politics: 'var(--color-section-politics)',
-  economy: 'var(--color-section-economy)',
-  society: 'var(--color-section-society)',
-  culture: 'var(--color-section-culture)',
-  world: 'var(--color-section-world)',
-  it: 'var(--color-section-it)',
-}
-const NEUTRAL_COLOR = 'var(--color-ink)'
-// Edges read as structure rather than as text, so they get their own colour.
-// They can afford to be this solid because routing stops them short of every
-// label — nothing is drawn underneath a word for them to fight with.
+// Section inks live in src/lib/sectionColors.ts because CategoryTabs draws the
+// same six as the graph's colour key, and the two have to be the same values.
+// They are var() references into the @theme block in src/index.css, which is the
+// single source of truth: holding hex here is what let the old palette drift
+// into an 80-degree band without anything noticing.
+const NEUTRAL_COLOR = NEUTRAL_INK
+// One neutral grey for every edge, in both views.
+//
+// Edges used to be stroked with a gradient between their two endpoints' section
+// colours, so a crossing could be read without tracing it. It worked, and it
+// cost too much: it put a third layer of colour on a canvas that already spends
+// hue on 70 words, and lines are the one element here that carries no meaning of
+// its own — the words at each end already say which sections are involved.
 const EDGE_COLOR = 'var(--color-edge)'
 // Applied to an edge that had to be routed under a label because the field was
 // too crowded for any single curve to miss everything.
 const CROWDED_EDGE_FADE = 0.5
 
-// Ordinary clusters are achromatic and the top story is not. Two overlapping
-// washes double to 0.14, which is why distinguishing them by opacity failed:
-// that landed on exactly the strength that was meant to single the top story
-// out. Grey cannot stack into blue, so the ambiguity is gone by construction
-// and the top story's own opacity can come down.
-const CLUSTER_TINT = 'var(--color-cluster)'
-const CLUSTER_OPACITY = 0.07
+// The top story is named in the caption and marked with this dot, and no longer
+// shaded on the canvas.
+//
+// A cluster's blob was the convex hull of its members' label boxes, so anything
+// that happened to sit between them was inside it. On 2026-08-01 the hull for
+// 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명 —
+// four words from other events. With six blobs that read as noise; with one it
+// read as a claim, and the claim was false. A hull can only be honest when its
+// members are already adjacent, which is exactly when it adds least.
 const TOP_STORY_TINT = 'var(--color-top-story)'
-const TOP_STORY_OPACITY = 0.1
 
 // Day-over-day movement. One glyph for both "new" and "surging": a word that
 // was not there yesterday is the limiting case of one that grew, and two
@@ -113,7 +122,15 @@ export function KeywordGraph({
     return () => observer.disconnect()
   }, [])
 
-  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_RATIO)))
+  const height = useMemo(() => {
+    if (width >= NARROW_WIDTH) {
+      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_RATIO)))
+    }
+    return Math.min(
+      NARROW_MAX_HEIGHT,
+      Math.max(MIN_HEIGHT, Math.round(width * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD)),
+    )
+  }, [width, graph.nodes.length])
 
   const measured = useMemo<MeasuredWord[]>(() => {
     // computeFontSizes is the word cloud's, reused unchanged: size stays
@@ -182,28 +199,40 @@ export function KeywordGraph({
 
   return (
     <div ref={containerRef} className="mx-auto w-full max-w-5xl">
-      {/* Named in text rather than drawn on the canvas. A caption floating over
-          the graph would have to dodge the labels, and the words it names are
-          already the ones inside the strongest blob. */}
-      {topStory && (
-        <p className="mb-3 text-center text-sm text-ink-muted">
-          <span className="mr-2 rounded-full bg-top-story/10 px-2 py-0.5 text-top-story">
-            오늘의 톱 스토리
-          </span>
-          {topStory.words.join(' · ')}
-          <span className="ml-2 text-ink-faint">{topStory.headlines}건</span>
-        </p>
-      )}
-
-      {/* The mark is small and sits off the side of a word; without a key it
-          reads as a rendering artefact rather than as a claim about the day. */}
-      {marked && (
-        <p className="mb-3 text-center text-xs text-ink-muted">
-          <span className="mr-1" style={{ color: SURGE_COLOR }}>
-            {SURGE_MARK}
-          </span>
-          직전 수집일 대비 급상승
-        </p>
+      {/* One rule of caption above the canvas rather than two centred lines
+          floating in the gap between the toolbar and the first word — that gap
+          was most of what made the top of the page read as empty.
+          The top story is named in text rather than drawn on the canvas: a
+          caption over the graph would have to dodge the labels, and the words it
+          names are already the ones inside the one shaded blob. The surge key is
+          here for the opposite reason — the mark is small and sits off the side
+          of a word, so without a key it reads as a rendering artefact. */}
+      {(topStory || marked) && (
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-2">
+          {/* Plain flowing text rather than a flex row: as flex children the
+              three parts each became their own column and wrapped inside
+              themselves on a phone, so the label broke as "오늘의 톱 스토 / 리". */}
+          {topStory && (
+            <p className="text-sm text-ink-faint">
+              <span
+                aria-hidden="true"
+                className="mr-2 inline-block size-2 rounded-full align-middle"
+                style={{ background: TOP_STORY_TINT }}
+              />
+              오늘의 톱 스토리{' '}
+              <span className="text-ink">{topStory.words.join(' · ')}</span>{' '}
+              <span className="whitespace-nowrap">{topStory.headlines}건</span>
+            </p>
+          )}
+          {marked && (
+            <p className="text-xs text-ink-faint">
+              <span className="mr-1" style={{ color: SURGE_COLOR }}>
+                {SURGE_MARK}
+              </span>
+              직전 수집일 대비 급상승
+            </p>
+          )}
+        </div>
       )}
 
       {/* Cropped to the labels rather than to the canvas the simulation ran in,
@@ -216,54 +245,15 @@ export function KeywordGraph({
         viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
         role="group"
         aria-label="키워드 관계망"
-        className="mx-auto block max-w-full select-none"
+        // h-auto matters: with only max-w-full the width shrinks to the
+        // container while the height attribute stays at the box the layout ran
+        // in, so the drawing is letterboxed inside a too-tall element and the
+        // page shows a band of empty canvas above and below it — 141px of it on
+        // a phone. Letting the height follow the width keeps the crop tight.
+        className="mx-auto block h-auto max-w-full select-none"
       >
-        {/* An edge running between two sections fades from one section's ink to
-            the other's, so a stroke says which words it joins without being
-            traced end to end. That is what makes crossings readable enough to
-            allow. Only in the all-categories view: inside one section every
-            word is the same colour, so a gradient there would encode nothing. */}
-        {colorByCategory && (
-          <defs>
-            {layout.edges.map((edge, index) => {
-              const curve = edge.curve
-              if (!curve) return null
-              return (
-                <linearGradient
-                  key={`${edge.a}--${edge.b}`}
-                  id={gradientId(index)}
-                  gradientUnits="userSpaceOnUse"
-                  x1={curve.x1}
-                  y1={curve.y1}
-                  x2={curve.x2}
-                  y2={curve.y2}
-                >
-                  <stop offset="0%" stopColor={categoryColor(signalsByWord.get(edge.a))} />
-                  <stop offset="100%" stopColor={categoryColor(signalsByWord.get(edge.b))} />
-                </linearGradient>
-              )
-            })}
-          </defs>
-        )}
         <g>
-          {layout.clusters.map((cluster, index) => (
-            // Filled and stroked in the same colour: the stroke is what rounds
-            // the hull's corners into a blob instead of a polygon.
-            <polygon
-              key={cluster.words[0]}
-              points={cluster.hull.map((p) => `${p.x},${p.y}`).join(' ')}
-              style={{
-                fill: index === 0 ? TOP_STORY_TINT : CLUSTER_TINT,
-                stroke: index === 0 ? TOP_STORY_TINT : CLUSTER_TINT,
-              }}
-              strokeWidth={CLUSTER_ROUNDING}
-              strokeLinejoin="round"
-              opacity={index === 0 ? TOP_STORY_OPACITY : CLUSTER_OPACITY}
-            />
-          ))}
-        </g>
-        <g>
-          {layout.edges.map((edge, index) => {
+          {layout.edges.map((edge) => {
             // One relationship, one stroke. This used to be several <line>s per
             // edge, the leftovers of cutting each label box out of a straight
             // line, and several collinear dashes read as several relationships.
@@ -276,9 +266,9 @@ export function KeywordGraph({
                 key={`${edge.a}--${edge.b}`}
                 d={`M${curve.x1} ${curve.y1}Q${curve.cx} ${curve.cy} ${curve.x2} ${curve.y2}`}
                 fill="none"
-                style={{ stroke: colorByCategory ? `url(#${gradientId(index)})` : EDGE_COLOR }}
+                style={{ stroke: EDGE_COLOR }}
                 strokeLinecap="round"
-                strokeWidth={1.4 + 2.6 * edge.npmi}
+                strokeWidth={0.9 + 1.3 * edge.npmi}
                 // Stronger association draws a heavier, darker line; that is the
                 // only job NPMI has here, having failed as a word-quality signal.
                 //
@@ -286,7 +276,7 @@ export function KeywordGraph({
                 // fainter, so it stops competing with the words it runs under.
                 // That is the price of never dropping a relationship.
                 strokeOpacity={
-                  (touchesSelection ? 0.45 + 0.4 * edge.npmi : 0.12) *
+                  (touchesSelection ? 0.26 + 0.22 * edge.npmi : 0.1) *
                   (curve.clear ? 1 : CROWDED_EDGE_FADE)
                 }
               />
@@ -354,7 +344,13 @@ export function KeywordGraph({
                   // underneath it. --header-height is the same custom
                   // property the header offset in src/index.css uses, so the
                   // two cannot drift apart.
-                  className="cursor-pointer scroll-mt-[var(--header-height)] hover:underline"
+                  // focus-visible rather than focus: a <text> with tabIndex takes
+                  // focus on click too, and the browser's default ring drew a
+                  // hard black rectangle around whichever word had just been
+                  // clicked. Keyboard focus still gets a ring — that is the
+                  // whole distinction — and it is drawn in the ink rather than
+                  // in the UA's colour.
+                  className="cursor-pointer scroll-mt-[var(--header-height)] outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
                 >
                   {node.word}
                 </text>
@@ -367,15 +363,8 @@ export function KeywordGraph({
   )
 }
 
-// Scoped by the edge's index rather than by its words: an id has to be unique
-// in the document and a Korean word is not a safe fragment identifier.
-function gradientId(index: number): string {
-  return `edge-ink-${index}`
-}
-
 function categoryColor(signals: KeywordGraphData['nodes'][number] | undefined): string {
-  if (!signals) return NEUTRAL_COLOR
-  return CATEGORY_COLORS[signals.category_slug] ?? NEUTRAL_COLOR
+  return sectionColor(signals?.category_slug)
 }
 
 function tooltip(
