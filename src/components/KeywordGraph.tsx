@@ -20,38 +20,39 @@ const FADED_OPACITY = 0.38
 // Everything outside the focused word's neighbourhood.
 const UNFOCUSED_OPACITY = 0.1
 
-// Provisional. Phase 4 settles the real palette along with the background; the
-// point of having them now is to see whether colouring by section reads at all.
+// Every colour here is a reference into the @theme block in src/index.css,
+// which is the single source of truth. Holding hex values in this file was
+// what let the old six-section palette drift into an 80-degree band without
+// anything noticing; src/lib/theme.test.ts now enforces the spacing.
 const CATEGORY_COLORS: Record<string, string> = {
-  politics: '#b45309',
-  economy: '#047857',
-  society: '#1d4ed8',
-  culture: '#a21caf',
-  world: '#0e7490',
-  it: '#4338ca',
+  politics: 'var(--color-section-politics)',
+  economy: 'var(--color-section-economy)',
+  society: 'var(--color-section-society)',
+  culture: 'var(--color-section-culture)',
+  world: 'var(--color-section-world)',
+  it: 'var(--color-section-it)',
 }
-const NEUTRAL_COLOR = '#1f2937'
+const NEUTRAL_COLOR = 'var(--color-ink)'
 // Edges read as structure rather than as text, so they get their own colour.
 // They can afford to be this solid because routing stops them short of every
 // label — nothing is drawn underneath a word for them to fight with.
-const EDGE_COLOR = '#64748b'
-// Event clusters. Provisional along with everything else here; Phase 4 settles
-// the palette.
-//
-// The top story gets its own hue rather than more of the same one. Adjacent
-// stories overlap — 트럼프·이스라엘·하마스 sits against 공습·에너지시설·미사일 —
-// and two stacked tints at 0.07 land on exactly the 0.14 that was meant to mark
-// the top story, so strength alone cannot say which blob is which.
-const CLUSTER_TINT = '#6366f1'
+const EDGE_COLOR = 'var(--color-edge)'
+
+// Ordinary clusters are achromatic and the top story is not. Two overlapping
+// washes double to 0.14, which is why distinguishing them by opacity failed:
+// that landed on exactly the strength that was meant to single the top story
+// out. Grey cannot stack into blue, so the ambiguity is gone by construction
+// and the top story's own opacity can come down.
+const CLUSTER_TINT = 'var(--color-cluster)'
 const CLUSTER_OPACITY = 0.07
-const TOP_STORY_TINT = '#f59e0b'
-const TOP_STORY_OPACITY = 0.18
+const TOP_STORY_TINT = 'var(--color-top-story)'
+const TOP_STORY_OPACITY = 0.1
 
 // Day-over-day movement. One glyph for both "new" and "surging": a word that
 // was not there yesterday is the limiting case of one that grew, and two
 // symbols would need a legend to tell apart what the tooltip already says.
 const SURGE_MARK = '▲'
-const SURGE_COLOR = '#d97706'
+const SURGE_COLOR = 'var(--color-surge)'
 const SURGE_GAP = 3
 const SURGE_MIN_SIZE = 10
 const SURGE_MAX_SIZE = 16
@@ -145,7 +146,7 @@ export function KeywordGraph({
   )
 
   if (graph.nodes.length === 0) {
-    return <p className="text-center text-gray-500">아직 수집된 데이터가 없습니다.</p>
+    return <p className="text-center text-ink-muted">아직 수집된 데이터가 없습니다.</p>
   }
 
   function nodeOpacity(word: string, faded: boolean): number {
@@ -177,19 +178,19 @@ export function KeywordGraph({
           the graph would have to dodge the labels, and the words it names are
           already the ones inside the strongest blob. */}
       {topStory && (
-        <p className="mb-3 text-center text-sm text-gray-500">
-          <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+        <p className="mb-3 text-center text-sm text-ink-muted">
+          <span className="mr-2 rounded-full bg-top-story/10 px-2 py-0.5 text-top-story">
             오늘의 톱 스토리
           </span>
           {topStory.words.join(' · ')}
-          <span className="ml-2 text-gray-400">{topStory.headlines}건</span>
+          <span className="ml-2 text-ink-faint">{topStory.headlines}건</span>
         </p>
       )}
 
       {/* The mark is small and sits off the side of a word; without a key it
           reads as a rendering artefact rather than as a claim about the day. */}
       {marked && (
-        <p className="mb-3 text-center text-xs text-gray-500">
+        <p className="mb-3 text-center text-xs text-ink-muted">
           <span className="mr-1" style={{ color: SURGE_COLOR }}>
             {SURGE_MARK}
           </span>
@@ -216,8 +217,10 @@ export function KeywordGraph({
             <polygon
               key={cluster.words[0]}
               points={cluster.hull.map((p) => `${p.x},${p.y}`).join(' ')}
-              fill={index === 0 ? TOP_STORY_TINT : CLUSTER_TINT}
-              stroke={index === 0 ? TOP_STORY_TINT : CLUSTER_TINT}
+              style={{
+                fill: index === 0 ? TOP_STORY_TINT : CLUSTER_TINT,
+                stroke: index === 0 ? TOP_STORY_TINT : CLUSTER_TINT,
+              }}
               strokeWidth={CLUSTER_ROUNDING}
               strokeLinejoin="round"
               opacity={index === 0 ? TOP_STORY_OPACITY : CLUSTER_OPACITY}
@@ -237,7 +240,7 @@ export function KeywordGraph({
                 y1={segment.y1}
                 x2={segment.x2}
                 y2={segment.y2}
-                stroke={EDGE_COLOR}
+                style={{ stroke: EDGE_COLOR }}
                 strokeLinecap="round"
                 strokeWidth={1.4 + 2.6 * edge.npmi}
                 // Stronger association draws a heavier, darker line; that is the
@@ -277,7 +280,7 @@ export function KeywordGraph({
                     dominantBaseline="central"
                     fontSize={clampSize(node.fontSize * 0.45)}
                     fontFamily={FONT_FAMILY}
-                    fill={SURGE_COLOR}
+                    style={{ fill: SURGE_COLOR }}
                     opacity={opacity}
                     aria-hidden="true"
                     className="select-none"
@@ -292,7 +295,7 @@ export function KeywordGraph({
                   dominantBaseline="central"
                   fontSize={node.fontSize}
                   fontFamily={FONT_FAMILY}
-                  fill={color}
+                  style={{ fill: color }}
                   opacity={opacity}
                   role="button"
                   tabIndex={0}

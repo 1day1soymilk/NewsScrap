@@ -182,3 +182,24 @@ test('surfaces a query failure and recovers on retry', async ({ page }) => {
 
   await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
 })
+
+test('resolves the design tokens to real colours in the SVG', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // 예산안 is a politics word in the fixture and the all-categories view is the
+  // default, so it must render in the politics ink rather than falling back to
+  // the neutral one.
+  const word = page.locator('svg text').filter({ hasText: /^예산안$/ })
+  await expect(word).toBeVisible()
+  const fill = await word.evaluate((el) => getComputedStyle(el).fill)
+  // #be123c. An unresolved var() computes to rgb(0, 0, 0) here, which is the
+  // failure this test exists for.
+  expect(fill).toBe('rgb(190, 18, 60)')
+
+  // The one blob is the top story, so it takes the blue rather than the grey.
+  const blobFill = await page
+    .locator('svg polygon')
+    .evaluate((el) => getComputedStyle(el).fill)
+  expect(blobFill).toBe('rgb(37, 99, 235)')
+})
