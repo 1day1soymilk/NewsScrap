@@ -75,6 +75,32 @@ test('fades a word the RPC marked as demoted', async ({ page }) => {
   await expect(demoted).toHaveAttribute('opacity', '0.38')
 })
 
+test('marks a word that grew against the previous collected day', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // WORD_COUNTS has 예산안 at 1/8 of the previous day and 5/12 of this one.
+  // Every other word holds its count while the day grows, so its share falls.
+  await expect(page.getByText('직전 수집일 대비 급상승')).toBeVisible()
+  await expect(page.locator('svg text').filter({ hasText: /^▲$/ })).toHaveCount(1)
+
+  // The mark is decoration; the count it stands for has to reach a reader who
+  // cannot see it.
+  await expect(
+    page.getByRole('button', { name: '예산안, 5건, 직전 수집일 대비 3.3배' }),
+  ).toBeVisible()
+})
+
+test('marks nothing when there is no previous day to compare against', async ({ page }) => {
+  await mockSupabase(page, { collected_dates: [{ collected_date: todayInSeoul() }] })
+  await page.goto('/')
+
+  // On the first collected day every word is new, which is true and useless.
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+  await expect(page.locator('svg text').filter({ hasText: /^▲$/ })).toHaveCount(0)
+  await expect(page.getByText('직전 수집일 대비 급상승')).toHaveCount(0)
+})
+
 test('reaches a word by keyboard and opens its headlines', async ({ page }) => {
   await mockSupabase(page)
   await page.goto('/')

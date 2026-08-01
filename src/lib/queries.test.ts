@@ -16,6 +16,7 @@ function makeQueryChain(result: { data: unknown; error: unknown }) {
     eq: vi.fn(() => chain),
     is: vi.fn(() => chain),
     order: vi.fn(() => chain),
+    limit: vi.fn(() => chain),
     then: (resolve: (r: typeof result) => unknown) => resolve(result),
   }
   return chain
@@ -143,19 +144,53 @@ describe('fetchKeywordGraph', () => {
 })
 
 describe('fetchHeadlinesForWord', () => {
+  function headlineRow(id: string, title: string, link: string, slug: string) {
+    return {
+      headlines: {
+        id,
+        title,
+        link,
+        collected_date: '2026-07-31',
+        categories: { slug },
+      },
+    }
+  }
+
   it('deduplicates headlines that share the same id', async () => {
     const rows = [
-      { headlines: { id: 'h1', title: '제목1', link: 'https://a' } },
-      { headlines: { id: 'h1', title: '제목1', link: 'https://a' } },
-      { headlines: { id: 'h2', title: '제목2', link: 'https://b' } },
+      headlineRow('h1', '제목1', 'https://a', 'politics'),
+      headlineRow('h1', '제목1', 'https://a', 'politics'),
+      headlineRow('h2', '제목2', 'https://b', 'economy'),
     ]
     mockSupabase.from.mockReturnValue(makeQueryChain({ data: rows, error: null }))
 
     const result = await fetchHeadlinesForWord('2026-07-31', null, '예산안')
 
     expect(result).toEqual([
-      { id: 'h1', title: '제목1', link: 'https://a' },
-      { id: 'h2', title: '제목2', link: 'https://b' },
+      { id: 'h1', title: '제목1', link: 'https://a', category_slug: 'politics' },
+      { id: 'h2', title: '제목2', link: 'https://b', category_slug: 'economy' },
     ])
+  })
+
+  // The nested select has always joined categories in order to filter on the
+  // slug; before this it dropped the slug on the way out and the panel had no
+  // way to say which section a headline came from.
+  it('lifts the category slug out of the nested join', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({ data: [headlineRow('h1', '제목', 'https://a', 'society')], error: null }),
+    )
+
+    const result = await fetchHeadlinesForWord('2026-07-31', null, '폭염')
+
+    expect(result[0].category_slug).toBe('society')
+  })
+
+  it('caps the rows it will pull for one word', async () => {
+    const chain = makeQueryChain({ data: [], error: null })
+    mockSupabase.from.mockReturnValue(chain)
+
+    await fetchHeadlinesForWord('2026-07-31', null, '폭염')
+
+    expect(chain.limit).toHaveBeenCalledWith(200)
   })
 })

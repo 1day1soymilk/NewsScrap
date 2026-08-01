@@ -65,6 +65,49 @@ export async function fetchWordCounts(
     .sort((a, b) => b.count - a.count)
 }
 
+// Counts for a named set of words across a named set of days.
+//
+// The surge comparison must not read fetchWordCounts and sum it: a day holds
+// 3,289 distinct words and PostgREST caps a response at 1,000, so that sum is
+// silently a sum of the top 1,000. Measured on 2026-08-01 against 2026-07-31,
+// the truncated denominators inflated every ratio by 11% and turned 12 of the
+// 110 drawn words into false "new"s. Naming the words bounds the response by
+// render_cap (130) instead, which cannot be truncated.
+export async function fetchWordCountsFor(
+  dates: string[],
+  words: string[],
+): Promise<Map<string, WordCount[]>> {
+  const byDate = new Map<string, WordCount[]>(dates.map((date) => [date, []]))
+  if (dates.length === 0 || words.length === 0) return byDate
+
+  const { data, error } = await supabase
+    .from('daily_word_counts')
+    .select('collected_date, word, count')
+    .in('collected_date', dates)
+    .in('word', words)
+    .is('category_slug', null)
+  if (error) throw queryError(error)
+
+  const rows = (data ?? []) as { collected_date: string; word: string; count: number }[]
+  for (const row of rows) {
+    byDate.get(row.collected_date)?.push({ word: row.word, count: Number(row.count) })
+  }
+  return byDate
+}
+
+// Headlines collected on a day, as a server-side count: `head` means no rows
+// come back at all, so the 1,000-row cap cannot apply. This is the denominator
+// that makes two days comparable — 2026-08-01 was collected twice and holds
+// 1,382 headlines against 2026-07-31's 900.
+export async function fetchHeadlineCount(date: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('headlines')
+    .select('*', { count: 'exact', head: true })
+    .eq('collected_date', date)
+  if (error) throw queryError(error)
+  return count ?? 0
+}
+
 // An RPC rather than a view because the node and edge cuts and the NPMI
 // arithmetic have to happen server side: a day's word pairs run to thousands of
 // rows even after grouping, and PostgREST would truncate at 1000.
@@ -111,6 +154,23 @@ function numeric(value: number | null): number | null {
   return value === null || value === undefined ? null : Number(value)
 }
 
+// A word appears in a few dozen headlines on a busy day, so this is a safety
+// cap rather than a semantic cut: it exists so that a pathological word — or a
+// day collected several times over — cannot pull thousands of rows into the
+// panel. It is deliberately far above any real value, because the sort happens
+// after the fetch and a limit that ever bites would silently change the list.
+const HEADLINE_ROW_LIMIT = 200
+
+interface HeadlineRow {
+  headlines: {
+    id: string
+    title: string
+    link: string
+    collected_date: string
+    categories: { slug: string }
+  }
+}
+
 export async function fetchHeadlinesForWord(
   date: string,
   categorySlug: string | null,
@@ -126,16 +186,23 @@ export async function fetchHeadlinesForWord(
     query = query.eq('headlines.categories.slug', categorySlug)
   }
 
-  const { data, error } = await query
+  const { data, error } = await query.limit(HEADLINE_ROW_LIMIT)
   if (error) throw queryError(error)
 
+  // The same headline can carry the word twice (ETRI returns a noun per
+  // occurrence), so rows are deduplicated on the headline id.
   const seen = new Set<string>()
   const results: HeadlineSummary[] = []
-  for (const row of (data ?? []) as unknown as { headlines: HeadlineSummary }[]) {
+  for (const row of (data ?? []) as unknown as HeadlineRow[]) {
     const headline = row.headlines
     if (seen.has(headline.id)) continue
     seen.add(headline.id)
-    results.push(headline)
+    results.push({
+      id: headline.id,
+      title: headline.title,
+      link: headline.link,
+      category_slug: headline.categories.slug,
+    })
   }
   return results
 }

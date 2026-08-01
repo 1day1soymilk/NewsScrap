@@ -101,9 +101,25 @@ all encode the same column names. Changing one means changing all three.
 The frontend never aggregates in the client and never reads raw rows for counts —
 it queries the `keyword_graph` RPC and the `collected_dates` view, which exist so
 PostgREST's 1000-row cap cannot silently truncate a result set. `daily_word_counts`
-is no longer on the graph's path; `fetchWordCounts` is kept for the day-over-day
-comparison Phase 3 needs and because the view is the documented way to read counts
-without hitting that cap.
+is no longer on the graph's path.
+
+**`daily_word_counts` is not exempt from that cap**, and an earlier version of this
+file said it was. A day holds 3,289 distinct words (2026-08-01; 2,484 on 07-31), so
+an unfiltered read of it returns the top 1,000 and nothing says so. The surge
+comparison was written against that mistake and measured: summing the truncated
+response for a denominator inflated every ratio by 11% and turned 12 of the 110
+drawn words into false "new"s. Two rules follow, and `fetchWordCountsFor` /
+`fetchHeadlineCount` in `src/lib/queries.ts` exist to enforce them:
+
+- **Name the words you want** (`.in('word', …)`). The graph draws at most
+  `render_cap` (130) of them, so a response bounded by that list cannot be cut.
+- **Never sum a response to get a denominator.** Day totals come from a
+  `head: true, count: 'exact'` query, which returns no rows at all and so cannot
+  be truncated. `computeSurges` takes the total as an argument rather than
+  summing the counts it was handed, so the mistake cannot recur by accident.
+
+`fetchWordCounts` (the whole-day read) is still exported and tested but nothing
+calls it; it is the one function here that can be silently truncated.
 
 `daily_word_counts` is a `UNION ALL` of a per-category aggregate and an
 all-categories rollup keyed by a null `category_slug`. **Do not rewrite it with
@@ -238,6 +254,50 @@ The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture
 and the e2e suite can assert on it.
 
+### Day-over-day surge
+
+`src/lib/surge.ts` marks the words that gained the most of the day against the
+previous **collected** date — not against yesterday, since the archive has gaps
+and today is empty until the 13:00 KST cron runs. Two things there were settled
+by measurement and should not be re-argued from first principles:
+
+- **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,382
+  headlines against 2026-07-31's 900, so on counts every word is up 50%.
+  Dividing each day by its own headline total makes a uniform inflation cancel;
+  the median drawn word then sits at a ratio of 0.98, which is the check that
+  the normalisation works.
+- **A rank, not a threshold.** A ratio cut of 1.5 marked 58 of the 110 words
+  drawn on 2026-08-01 — half the screen, which points at nothing, the same
+  failure as shading all 26 communities. Ranking on *gained share*
+  (`today_share − previous_share`) rather than on the ratio keeps a big word
+  that grew ahead of a small word that appeared: 까마귀 (10 headlines, new)
+  beats 호르무즈 (18 headlines, 5.9x) on ratio and loses to it on gained share.
+  The top eight on that day were 유조선 · 호르무즈 · 한동훈 · 곽상언 · 공습 ·
+  까마귀 · 아르헨 · 이스라엘.
+
+`surgeLimitFor` scales the cap with what is on screen (~1/14, floor 1, ceiling
+8), because a flat eight is an annotation on 110 words and covers most of a
+category tab that drew twenty.
+
+Kleinberg's burst model is the proper instrument and is what the plan reserves
+for this, but it measures against a historical baseline and the archive is two
+days long. Revisit it when there is history to measure against.
+
+### URL state
+
+Date, category and selected word live in the query string (`src/lib/urlState.ts`),
+synced with `history.pushState` and `popstate` — no router, since there is one
+route. Two details that are easy to get wrong:
+
+- The **first** write is a `replaceState`, because it only fills in the date the
+  app defaulted to; pushing it puts a duplicate of the current view on the stack
+  and the first press of Back appears to do nothing.
+- `parseUrlState` takes the known category slugs and drops anything else, but an
+  **empty** slug list means "not yet known" rather than "nothing is valid" — the
+  categories arrive from a second query, so on first paint a shared link's
+  category would otherwise be discarded before it could be validated. `App.tsx`
+  re-checks once they load.
+
 ### Edge Function run budget
 
 The function paginates each section's "더보기" endpoint to 150 headlines, six
@@ -283,18 +343,29 @@ tested. The rendered graph and the `App.tsx` wiring around it are covered by the
 Playwright suite in `e2e/` instead — `npm run test:e2e`, which boots its own dev
 server.
 
-`e2e/keywordGraph.spec.ts` stubs Supabase at the network layer
-(`e2e/support/mockSupabase.ts`), so it does not depend on what was collected that
-day. Note that `keyword_graph` is an RPC: it arrives as a POST with its arguments
-in the body, so a handler keying off `p_category` must read
-`route.request().postDataJSON()`, not the query string. `e2e/smoke.spec.ts` is the
-only file that hits the real project, and it asserts the seeded category tabs
-rather than collected words — nothing exists for the current date between midnight
-and 13:00 KST, when the cron runs.
+`keywordGraph.spec.ts` (the graph), `appControls.spec.ts` (URL state, the date
+stepper, skeletons) and `headlinePanel.spec.ts` all stub Supabase at the network
+layer (`e2e/support/mockSupabase.ts`), so they do not depend on what was
+collected that day. Three things that handler has to get right, each of which has
+already caused a false pass or a failure:
+
+- `keyword_graph` is an **RPC**: it arrives as a POST with its arguments in the
+  body, so a handler keying off `p_category` must read
+  `route.request().postDataJSON()`, not the query string.
+- `fetchHeadlineCount` is a **HEAD** request and reads its answer from the
+  `content-range` header, not from a body.
+- A default that varies by request has to be a function, and `resolve()` has to
+  call it. Returning the function itself serialises to `undefined`, which reaches
+  the app as an empty result and reads exactly like "no data" — the surge markers
+  silently never appeared.
+
+`e2e/smoke.spec.ts` is the only file that hits the real project, and it asserts
+the seeded category tabs rather than collected words — nothing exists for the
+current date between midnight and 13:00 KST, when the cron runs.
 
 `e2e/smoke.spec.ts` needs a real `.env` (recoverable with
 `npx vercel env pull .env --environment=development`); on a fresh clone without
-one, `npm run test:e2e` fails 1 of 11 with a bare count mismatch. Also note
+one, `npm run test:e2e` fails 1 of 27 with a bare count mismatch. Also note
 `playwright.config.ts` sets `reuseExistingServer: true`, so a dev server started
 before `.env` existed will be silently reused with stale environment variables —
 stop it first.

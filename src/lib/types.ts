@@ -13,6 +13,10 @@ export interface HeadlineSummary {
   id: string
   title: string
   link: string
+  // The query has always joined categories to filter on the slug and then
+  // thrown it away. The panel shows it as a badge, which is the only way to
+  // tell which section a headline came from in the all-categories view.
+  category_slug: string
 }
 
 // Mirrors the json_build_object in keyword_graph (0003_keyword_scoring.sql).
