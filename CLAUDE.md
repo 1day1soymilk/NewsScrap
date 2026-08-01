@@ -480,11 +480,16 @@ its own copy of the sieve against `keyword_graph`'s node list and prints `!` on
 disagreement, for the same reason the harness prints `unlabeled`; a `!` means the
 script is wrong, not the sieve.
 
-Two things they found on the first run, both still open and both recorded in
-`scripts/analysis/README.md`: the compound merge does not restore 반도체, 무인기,
-상한가 or 유조선 because ETRI tags their prefixes `XPN` and their suffixes `XSN`
-and `MERGEABLE_TYPES` holds neither; and the `standalone` cut loses more whole
-words to a following 조사 (유시민, 골리앗, 앤트로픽) than it catches fragments.
-The archive also **spans the merge's own deploy** — 1,773 of 2,282 headlines were
-analysed before it shipped — so a word count that crosses 2026-08-01 13:00 KST
-blends two analysers.
+Two things they found on the first run, both recorded in
+`scripts/analysis/README.md`. The compound merge did not restore 반도체, 무인기,
+상한가 or 유조선, because it named the tags allowed to join a run and ETRI tags
+those words' prefixes `XPN` and suffixes `XSN`. **Fixed by inverting the rule:**
+the headline's own spacing already says what belongs together, so an eojeol is
+kept whole and the run breaks only on what is not part of the word. Still open is
+the `standalone` cut, which loses more whole words to a following 조사 (유시민,
+골리앗, 앤트로픽) than it catches fragments.
+
+The archive **spans the merge's own deploy** — 1,773 of 2,282 headlines were
+analysed before it first shipped — so a word count that crosses 2026-08-01 13:00
+KST blends two analysers, and the fix above adds a third boundary at its own
+deploy. The archived days are not re-analysed.

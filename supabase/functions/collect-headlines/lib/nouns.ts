@@ -24,11 +24,37 @@ export interface EtriResponse {
 
 // A run of morphemes only becomes a noun if it contains one of these.
 const NOUN_TYPES = new Set(['NNG', 'NNP'])
-// Types that may be glued into a noun run without forming one on their own:
-// foreign words (SL), hanja (SH) and numbers (SN). SL is what makes
-// SK/SL + 하이닉스/NNP come back as SK하이닉스 — ETRI never tags SK as a noun,
-// which is why the current archive holds 하이닉스 but no SK at all.
-const MERGEABLE_TYPES = new Set([...NOUN_TYPES, 'SL', 'SH', 'SN'])
+// The eojeol is the word. Korean writes a compound without spaces, so whatever
+// the writer left unspaced belongs together and the only job here is to strip
+// what got stuck on the end — particles, endings and the like. So this is a
+// denylist of what ends a run rather than an allowlist of what may join one:
+// particles (J*), endings (E*), verbs and adjectives (V*, XSV, XSA), adverbs and
+// determiners (M*), interjections (I*), bound nouns (NNB) and punctuation.
+//
+// Symbols are deliberately absent from it: SL, SH and SN are part of the word,
+// which is what makes SK/SL + 하이닉스/NNP come back as SK하이닉스 — ETRI never
+// tags SK as a noun, so an earlier archive holds 하이닉스 and no SK at all.
+//
+// An allowlist was tried first and it is the reason the archive filled with 도체
+// and 무인 and holds no 반도체 at all: it named the noun tags, and ETRI returns
+// 반도체 as 반/XPN + 도체/NNG and 무인기 as 무인/NNG + 기/XSN, so the run broke at
+// exactly the place the compound needed joining. Adding those two tags back
+// fixes the same 66 of 150 sampled headlines this rule does, but it has to
+// enumerate the tagset to say something the spacing already said.
+// scripts/analysis/31_fragments.sql is what found the fragments.
+//
+// NNB breaks because it is a bound noun rather than part of the word: without it
+// 김민석 측 arrives as 김민석측.
+const BREAK_TAG_FAMILIES = new Set(['J', 'E', 'V', 'M', 'I'])
+const BREAK_TYPES = new Set(['NNB', 'XSV', 'XSA', 'SF', 'SP', 'SS', 'SE', 'SO', 'SW'])
+// The two suffixes that survive the rule above and should not. Both are
+// inflection rather than compounding: 들 makes 개미 and 개미들 two separate
+// words, and 적 gives the adnominal 기록적 where 기록 is the keyword. Picked from
+// the XSN lemmas a 150-headline sample actually produced, not from the tagset.
+// 님 is deliberately not here — 선배님 would read better as 선배, but denying it
+// turns 손님 into 손, and a wrong word costs more than a redundant one.
+const NON_MERGEABLE_SUFFIXES = new Set(['들', '적'])
+
 const STOPWORDS = new Set(['기자', '사진', '종합', '단독', '속보', '영상'])
 // aiopen.etri.re.kr shut down on 2025-06-30. e-PreTX is ETRI's successor
 // platform and serves the same WiseNLU API with an unchanged request/response
@@ -37,13 +63,22 @@ const ETRI_ENDPOINT = 'http://epretx.etri.re.kr:8000/api/WiseNLU'
 
 // ETRI splits compound nouns into their parts, so 반도체 arrives as 반 + 도체 and
 // 알뜰폰 as 알뜰 + 폰. Taken singly those pieces are fragments that read as
-// unrelated words in a word cloud. Merging the adjacent noun morphemes of one
-// eojeol restores the compound; the pieces are then dropped, since keeping both
-// would double-count the headline.
+// unrelated words on the graph. Rejoining the morphemes of one eojeol restores
+// the compound; the pieces are then dropped, since keeping both would
+// double-count the headline.
 //
-// The merge never crosses an eojeol boundary — "정부 대책" is two words, not
+// The rejoin never crosses an eojeol boundary — "정부 대책" is two words, not
 // 정부대책 — which is why this reads sentence.word rather than scanning morp
-// straight through.
+// straight through. That boundary is the whole idea: the headline's own spacing
+// says what belongs together, so a run continues until a morpheme turns up that
+// is not part of the word (see BREAK_TYPES) rather than while the tags stay on
+// an approved list.
+function isMergeable(morph: EtriMorpheme): boolean {
+  if (BREAK_TAG_FAMILIES.has(morph.type[0])) return false
+  if (BREAK_TYPES.has(morph.type)) return false
+  return !(morph.type === 'XSN' && NON_MERGEABLE_SUFFIXES.has(morph.lemma))
+}
+
 export function extractNouns(response: EtriResponse): string[] {
   const sentences = response.return_object?.sentence ?? []
   const nouns: string[] = []
@@ -74,7 +109,7 @@ export function extractNouns(response: EtriResponse): string[] {
 
       for (let id = word.begin; id <= word.end; id++) {
         const morph = byId.get(id)
-        if (morph && MERGEABLE_TYPES.has(morph.type)) run.push(morph)
+        if (morph && isMergeable(morph)) run.push(morph)
         else flush()
       }
       flush()

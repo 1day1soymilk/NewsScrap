@@ -32,6 +32,11 @@ describe('extractNouns', () => {
     expect(extractNouns(response)).toEqual(['여야', '예산안', '처리'])
   })
 
+  // The tags here are the ones ETRI actually returns, checked against the live
+  // API. An earlier version of this fixture tagged 반 as NNG and 기 as NNG, which
+  // are the tags that would make the merge work — so the test passed while the
+  // archive filled with 도체 and 무인 and held no 반도체 at all. A fixture that
+  // invents its input measures nothing.
   it('merges adjacent noun morphemes inside one eojeol but not across eojeol', () => {
     const response = {
       return_object: {
@@ -40,10 +45,10 @@ describe('extractNouns', () => {
             morp: [
               morp('SK', 'SL', 0),
               morp('하이닉스', 'NNP', 1),
-              morp('반', 'NNG', 2),
+              morp('반', 'XPN', 2),
               morp('도체', 'NNG', 3),
               morp('무인', 'NNG', 4),
-              morp('기', 'NNG', 5),
+              morp('기', 'XSN', 5),
               morp('수출', 'NNG', 6),
             ],
             word: [
@@ -58,6 +63,45 @@ describe('extractNouns', () => {
     }
 
     expect(extractNouns(response)).toEqual(['SK하이닉스', '반도체', '무인기', '수출'])
+  })
+
+  it('leaves the inflectional suffixes out of the merge', () => {
+    const response = {
+      return_object: {
+        sentence: [
+          {
+            morp: [
+              morp('개미', 'NNG', 0),
+              morp('들', 'XSN', 1),
+              morp('기록', 'NNG', 2),
+              morp('적', 'XSN', 3),
+              morp('손', 'NNG', 4),
+              morp('님', 'XSN', 5),
+            ],
+            word: [word(0, '개미들', 0, 1), word(1, '기록적', 2, 3), word(2, '손님', 4, 5)],
+          },
+        ],
+      },
+    }
+
+    // 들 would split 개미 from 개미들 and 적 gives an adnominal, but 님 stays
+    // mergeable because dropping it turns 손님 into 손.
+    expect(extractNouns(response)).toEqual(['개미', '기록', '손님'])
+  })
+
+  it('ends the run at a bound noun', () => {
+    const response = {
+      return_object: {
+        sentence: [
+          {
+            morp: [morp('김민석', 'NNP', 0), morp('측', 'NNB', 1)],
+            word: [word(0, '김민석측', 0, 1)],
+          },
+        ],
+      },
+    }
+
+    expect(extractNouns(response)).toEqual(['김민석'])
   })
 
   it('splits a run wherever a non-mergeable morpheme interrupts it', () => {
