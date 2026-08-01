@@ -46,7 +46,7 @@ export function HeadlinePanel({
     // it replaces covered most of the graph on a narrow screen, so clicking a
     // word hid the thing that had just been clicked.
     <aside
-      className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t bg-white p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-0 sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
+      className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t bg-white p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-[var(--header-height)] sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
       aria-label={`"${word}" 관련 헤드라인`}
     >
       <div className="mb-4 flex items-baseline justify-between gap-2">

@@ -208,61 +208,76 @@ function App() {
   }, [selectedWord, selectedDate, selectedCategory])
 
   return (
-    <div className="min-h-svh p-6">
-      <h1 className="mb-6 text-center text-4xl font-semibold">오늘의 주요 뉴스 스크랩</h1>
+    <div className="min-h-svh bg-ground text-ink">
+      {/* Sticky so the date and the tabs stay reachable while the graph is
+          scrolled. The panel is offset below this in HeadlinePanel, or it
+          would cover the controls it is a response to. */}
+      <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="text-lg font-semibold tracking-tight sm:text-xl">오늘의 주요 뉴스 스크랩</h1>
 
-      <div className="mx-auto mb-6 flex max-w-3xl flex-col items-center gap-4">
-        <div className="flex items-center gap-2">
-          {/* Stepping to the neighbouring collected date rather than by a
-              calendar day: the archive has gaps, and today itself is empty
-              until the 13:00 KST cron has run. */}
-          <button
-            onClick={() => previousDate && setSelectedDate(previousDate)}
-            disabled={!previousDate}
-            aria-label="이전 수집일"
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            ‹
-          </button>
-          <input
-            type="date"
-            value={selectedDate}
-            min={availableDates[availableDates.length - 1]}
-            max={availableDates[0]}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="rounded border px-3 py-1"
+            {/* Not a <nav>: smoke.spec.ts counts the buttons inside the one
+                navigation landmark on the page, and that is CategoryTabs. */}
+            <div className="flex items-center gap-1">
+              {/* Stepping to the neighbouring collected date rather than by a
+                  calendar day: the archive has gaps, and today itself is empty
+                  until the 13:00 KST cron has run. */}
+              <button
+                onClick={() => previousDate && setSelectedDate(previousDate)}
+                disabled={!previousDate}
+                aria-label="이전 수집일"
+                className="rounded-md px-2 py-1 text-sm text-ink-muted hover:bg-ground hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                ‹
+              </button>
+              <input
+                type="date"
+                value={selectedDate}
+                min={availableDates[availableDates.length - 1]}
+                max={availableDates[0]}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
+              />
+              <button
+                onClick={() => nextDate && setSelectedDate(nextDate)}
+                disabled={!nextDate}
+                aria-label="다음 수집일"
+                className="rounded-md px-2 py-1 text-sm text-ink-muted hover:bg-ground hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+
+          <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        {error && (
+          <div className="text-center">
+            <p className="mb-2 text-danger">{error}</p>
+            <button
+              onClick={() => loadGraph()}
+              className="rounded-md border border-line bg-surface px-3 py-1 text-sm text-ink-muted hover:text-ink"
+            >
+              다시 시도
+            </button>
+          </div>
+        )}
+        {!error && loading && <GraphSkeleton />}
+        {!error && !loading && (
+          <KeywordGraph
+            graph={graph}
+            selectedWord={selectedWord}
+            // Clicking a lit word again clears the focus and closes the panel.
+            onWordClick={(word) => setSelectedWord((current) => (current === word ? null : word))}
+            colorByCategory={selectedCategory === null}
+            surges={surges}
           />
-          <button
-            onClick={() => nextDate && setSelectedDate(nextDate)}
-            disabled={!nextDate}
-            aria-label="다음 수집일"
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            ›
-          </button>
-        </div>
-        <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
-      </div>
-
-      {error && (
-        <div className="text-center">
-          <p className="mb-2 text-red-600">{error}</p>
-          <button onClick={() => loadGraph()} className="rounded border px-3 py-1 text-sm hover:bg-gray-100">
-            다시 시도
-          </button>
-        </div>
-      )}
-      {!error && loading && <GraphSkeleton />}
-      {!error && !loading && (
-        <KeywordGraph
-          graph={graph}
-          selectedWord={selectedWord}
-          // Clicking a lit word again clears the focus and closes the panel.
-          onWordClick={(word) => setSelectedWord((current) => (current === word ? null : word))}
-          colorByCategory={selectedCategory === null}
-          surges={surges}
-        />
-      )}
+        )}
+      </main>
 
       <HeadlinePanel
         word={selectedWord}
@@ -289,8 +304,8 @@ function GraphSkeleton() {
       aria-label="불러오는 중"
       className="mx-auto w-full max-w-5xl"
     >
-      <div className="mx-auto mb-3 h-4 w-56 animate-pulse rounded-full bg-gray-200" />
-      <div className="h-[380px] w-full animate-pulse rounded-xl bg-gray-100" />
+      <div className="mx-auto mb-3 h-4 w-56 animate-pulse rounded-full bg-line" />
+      <div className="h-[380px] w-full animate-pulse rounded-xl bg-ground" />
     </div>
   )
 }
