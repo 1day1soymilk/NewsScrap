@@ -120,6 +120,104 @@ what it finds before trusting the harness.** That happened three times here:
 | `11_category_eval.sql` | The same for one category tab at a time |
 | `20_unlabeled.sql` | Words on screen with no label — must be empty before the harness counts |
 | `21_unlabeled_category.sql` | The same worklist for `11_category_eval.sql` |
+| `30_word_scores.sql` | One day's words with every signal and the sieve's verdict beside each |
+| `31_fragments.sql` | Words that look like pieces of longer words, with the longer word beside them |
+
+## The two dumps are diagnostics, not evidence
+
+`10_sieve_eval.sql` answers "is this configuration better than that one" and is
+the only thing that may move a threshold. `30_word_scores.sql` and
+`31_fragments.sql` answer the different question of **why a particular word is
+on screen or missing from it**, for the shipped configuration on one day.
+
+Reading a dump of one day and adjusting a threshold because a word in it looks
+wrong is precisely the habit rule 3 and rule 5 exist to stop. Use them to find
+out what is happening; use the harness to decide whether to change anything.
+
+`30_word_scores.sql` carries a `chk` column, and it is there for the same reason
+the harness carries `unlabeled`. The file has to work out the `cut: …` reasons
+itself, because `keyword_graph` returns the survivors and says nothing about the
+rest — so that second copy of the sieve is cross-checked against the RPC's own
+node list on every row. **Any `!` means the dump has drifted from the shipped
+sieve and its verdicts are worthless.** It caught a real drift on the first run:
+`ov.mode = 'allow'` is null for the words with no override, `false or null` is
+null, and 이란 — the day's second most frequent word — was reported as merely
+outranked when sieve 4 had cut it. Migration `0003` warns about this exact null
+in its `faded` flag; it still happened.
+
+## What the fragment report found, 2026-08-01
+
+The compound-noun merge in `lib/nouns.ts` glues adjacent `NNG`/`NNP`/`SL`/`SH`/
+`SN` morphemes inside one eojeol, and its own comment cites 반도체 as the case it
+restores. It does not: 반도체 appears nowhere in the archive on either collected
+day, while 도체 appears 17 and 29 times. Asking ETRI directly says why —
+
+| written | ETRI returns | kept |
+| --- | --- | --- |
+| 반도체 | 반/**XPN** + 도체/NNG | 도체 |
+| 무인기 | 무인/NNG + 기/**XSN** | 무인 |
+| 상한가 | 상한/NNG + 가/**XSN** | 상한 |
+| 유조선 | 유조/NNG + 선/**XSN** | 유조 |
+| 특별감찰관 | 특별/NNG + 감찰/NNG + 관/**XSN** | 특별감찰 |
+| 형소법 | 형소/NNG + 법/NNG | 형소법 |
+
+Prefixes (`XPN`) and noun-forming suffixes (`XSN`) were not in the merge's list of
+joinable tags, so the run broke at them. `형소법` merged because both halves are
+`NNG`, which is why it was the one of the six that reached the screen.
+
+**Fixed by inverting the rule rather than by extending the list.** The headline's
+own spacing already says what belongs together, so `lib/nouns.ts` now keeps an
+eojeol whole and breaks only on what is not part of the word — particles,
+endings, verbs and adjectives, adverbs, bound nouns and punctuation. Naming the
+noun tags instead was tried first and fixes the same 66 of 150 sampled headlines,
+but it has to enumerate the tagset to say what the spacing said already, and it
+loses 한마디 to 마디.
+
+Measured over 150 real headlines, replayed through the real ETRI responses: 66 of
+145 distinct titles change, 87 words appear and 78 disappear. 도체 → 반도체,
+보완수사 → 보완수사권, 거부 → 거부권, 상한 → 상한가, 전투 → 전투기, 행랑 →
+줄행랑, 구름 → 먹구름, 염색 → 염색체.
+
+Two suffixes are held out by hand, and they are the only hand-maintained part:
+`들` and `적`. Both inflect rather than compound — 개미 and 개미들 would be two
+words, and 기록적 is an adnominal where 기록 is the keyword. They were picked from
+the `XSN` lemmas the sample actually produced. `님` was considered and rejected:
+선배님 would read better as 선배, but holding 님 out turns 손님 into 손, and a
+wrong word costs more than a redundant one.
+
+**The archive spans the merge's deploy, and only the last of three runs is on the
+current side of it.** `created_at` splits it into 2026-07-31 16:00 KST (900
+headlines), 2026-08-01 08:00 (873, the manual run) and 2026-08-01 13:00 (509, the
+cron), and the words fall either side of the last boundary exactly:
+
+| | 07-31 16:00 | 08-01 08:00 | 08-01 13:00 |
+| --- | --- | --- | --- |
+| 형소 / 형소법 | 6 / – | 14 / – | – / 9 |
+| 소리 / 목소리 | 4 / – | 2 / – | – / 2 |
+| 검찰 / 검찰개혁 | 6 / – | 13 / – | 3 / 2 |
+| 도체 | 17 | 16 | 13 |
+
+So 1,773 of the 2,282 archived headlines were analysed by the pre-merge function
+and 509 by the current one, and a word can be a fragment in one row and whole in
+the next — the duplicate title `“검찰개혁 끝내 완성”… 여권, 형소법 통과에
+한목소리` is stored twice, once each way. Two consequences: any per-word count
+that spans the boundary is a blend of two analysers, and 도체 surviving all three
+runs is what makes the `XPN` failure a live bug rather than an artefact of old
+data.
+
+The report's other half is the `standalone` signal's own blind spot, and it is
+larger than the fragments. Nine words below the cut on 2026-08-01 clear every
+other clause, so the cut alone is keeping them off screen — and six of them are
+whole words followed by a 조사 rather than pieces of anything: 유시민 (labelled
+good), 골리앗, 앤트로픽, 호실적, 폭등장, 세탁. Only 입주, 특별감찰 and 한화에어
+are real fragments. `post` in the report names the difference: a particle there
+means the word is complete.
+
+The merge is fixed; the `standalone` blind spot is not. Neither is a threshold
+change, so neither goes through `10_sieve_eval.sql` — but both change what
+reaches the screen, so both are measured before and after all the same. Note that
+the merge fix only affects **future** collections: the two archived days keep the
+fragments they were stored with.
 
 ## The category question, settled
 
