@@ -1,5 +1,11 @@
 export type CategoryRow = { id: string; slug: string; label: string }
 export type CollectedDateRow = { collected_date: string }
+export type HeadlineSummary = {
+  id: string
+  title: string
+  link: string
+  category_slug: string
+}
 export type HeadlineNounRow = {
   word: string
   headlines: {
@@ -153,3 +159,69 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
     },
   },
 ]
+
+// 두 사건과 그 사이의 다리 하나.
+//
+//   사건 A: 예산안 — 여야 — 국회   (삼각형)
+//   사건 B: 폭염 — 열대야 — 양산   (삼각형)
+//   다리:   국회 — 폭염            (약한 엣지 하나)
+//
+// 삼각형 안은 npmi를 높게, 다리는 낮게 주어 루뱅이 둘로 가르도록 한다. 엣지가
+// 하나뿐이므로 합치기 문턱 2에 걸리지 않고, 그래서 국회와 폭염이 다리가 된다 —
+// 다리는 예외 없이 합치기가 "안 합친다"고 판정한 쌍이다.
+export const EVENT_GRAPH: GraphPayload = {
+  nodes: [
+    node('예산안', 9, 'politics'),
+    node('여야', 7, 'politics'),
+    node('국회', 6, 'politics'),
+    node('폭염', 8, 'society'),
+    node('열대야', 5, 'society'),
+    node('양산', 4, 'society'),
+    // 어디에도 붙지 않는 단어. 실제 하루의 3분의 1이 이렇고, 사건에 속하지
+    // 않으므로 다리도 될 수 없다.
+    node('까마귀', 3, 'culture'),
+  ],
+  edges: [
+    { a: '예산안', b: '여야', cooc: 6, npmi: 0.92 },
+    { a: '예산안', b: '국회', cooc: 5, npmi: 0.9 },
+    { a: '여야', b: '국회', cooc: 5, npmi: 0.9 },
+    { a: '폭염', b: '열대야', cooc: 5, npmi: 0.92 },
+    { a: '폭염', b: '양산', cooc: 4, npmi: 0.9 },
+    { a: '열대야', b: '양산', cooc: 4, npmi: 0.9 },
+    { a: '국회', b: '폭염', cooc: 2, npmi: 0.32 },
+  ],
+}
+
+// event_headline_counts의 답. 단어별 카운트의 합(A는 22, B는 17)과 일부러 다르게
+// 두어, 화면의 숫자가 합계가 아니라 이 값에서 오는 것이 관측 가능하도록 한다.
+// 순서는 입력 순서이므로, 목이 본문의 p_events를 읽어 사건을 알아본다.
+export const EVENT_HEADLINE_COUNTS: Record<string, number> = {
+  예산안: 12,
+  폭염: 11,
+}
+
+// event_headlines의 답. 두 섹션이라 패널의 뱃지와 정렬이 관측된다.
+export const EVENT_HEADLINE_ROWS: Record<string, HeadlineSummary[]> = {
+  예산안: [
+    {
+      id: '00000000-0000-4000-8000-00000000bbb1',
+      title: '국회 예산안 심사 착수',
+      link: 'https://n.news.naver.com/article/001/0000000011',
+      category_slug: 'politics',
+    },
+    {
+      id: '00000000-0000-4000-8000-00000000bbb2',
+      title: '여야 예산안 협상 재개',
+      link: 'https://n.news.naver.com/article/001/0000000012',
+      category_slug: 'politics',
+    },
+  ],
+  폭염: [
+    {
+      id: '00000000-0000-4000-8000-00000000bbb3',
+      title: '폭염 특보 전국 확대',
+      link: 'https://n.news.naver.com/article/001/0000000013',
+      category_slug: 'society',
+    },
+  ],
+}

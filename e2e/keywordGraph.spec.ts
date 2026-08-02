@@ -56,21 +56,15 @@ test('draws an edge between words that share headlines', async ({ page }) => {
   await expect(page.locator('svg path')).toHaveCount(1)
 })
 
-test('names the day’s biggest event', async ({ page }) => {
+test('draws no cluster blob', async ({ page }) => {
   await mockSupabase(page)
   await page.goto('/')
 
-  // 예산안 and 여야 are the only connected pair in the fixture, so they are the
-  // one event, and their headline counts (5 and 3) are what rank it.
-  const caption = page.getByText('오늘의 톱 스토리')
-  await expect(caption).toBeVisible()
-  await expect(page.getByText('예산안 · 여야')).toBeVisible()
-  await expect(page.getByText('8건')).toBeVisible()
-
-  // Named, never shaded. A cluster blob was the convex hull of its members'
-  // label boxes, so on a real day it enclosed words belonging to other events
-  // and asserted a membership they did not have.
+  // Named in the event list, never shaded. A cluster blob was the convex hull
+  // of its members' label boxes, so on a real day it enclosed words belonging
+  // to other events and asserted a membership they did not have.
   await expect(page.locator('svg polygon')).toHaveCount(0)
+  await expect(page.getByText('오늘의 톱 스토리')).toHaveCount(0)
 })
 
 test('dims everything outside the clicked word’s neighbourhood', async ({ page }) => {

@@ -3,11 +3,13 @@ import {
   CATEGORIES,
   COLLECTED_DATES,
   DEFAULT_GRAPH,
+  EVENT_HEADLINE_COUNTS,
+  EVENT_HEADLINE_ROWS,
   HEADLINE_COUNTS,
   HEADLINE_ROWS,
   WORD_COUNTS,
 } from './fixtures'
-import type { GraphPayload } from './fixtures'
+import type { GraphPayload, HeadlineSummary } from './fixtures'
 
 const SUPABASE_REST_GLOB = '**/rest/v1/**'
 
@@ -16,10 +18,19 @@ export type Rows = Record<string, unknown>[]
 // keyword_graph is an RPC, so it is a POST and its arguments are in the body,
 // not the query string. Handlers get both and read whichever applies.
 export type MockRequest = { params: URLSearchParams; body: RpcBody }
-export type RpcBody = { p_date?: string; p_category?: string | null }
+// 두 사건 RPC도 POST이고 인자가 본문에 있다. p_events는 단어 배열의 배열,
+// p_words는 단어 배열이다.
+export type RpcBody = {
+  p_date?: string
+  p_category?: string | null
+  p_events?: string[][]
+  p_words?: string[]
+}
 
 export type RowsOrFn = Rows | ((request: MockRequest) => Rows)
 export type GraphOrFn = GraphPayload | ((request: MockRequest) => GraphPayload)
+export type CountsOrFn = number[] | ((request: MockRequest) => number[])
+export type HeadlinesOrFn = HeadlineSummary[] | ((request: MockRequest) => HeadlineSummary[])
 
 export type EndpointName =
   | 'categories'
@@ -28,6 +39,8 @@ export type EndpointName =
   | 'daily_word_counts'
   | 'headlines'
   | 'keyword_graph'
+  | 'event_headline_counts'
+  | 'event_headlines'
 
 export type MockOptions = {
   categories?: RowsOrFn
@@ -37,6 +50,8 @@ export type MockOptions = {
   /** Headlines per collected_date, answered as a head-count. */
   headlines?: Record<string, number>
   keyword_graph?: GraphOrFn
+  event_headline_counts?: CountsOrFn
+  event_headlines?: HeadlinesOrFn
   failOn?: EndpointName
   /** Held back this long before responding, so a loading state can be seen. */
   delayOn?: { endpoint: EndpointName; ms: number }
@@ -71,6 +86,17 @@ function wordCountsFor({ params }: MockRequest): Rows {
       (dates === null || dates.includes(row.collected_date)) &&
       (words === null || words.includes(row.word)),
   )
+}
+
+// 사건은 첫 단어로 알아본다. 앱이 보내는 순서 그대로 돌려주는 것이 계약이므로,
+// 목도 입력을 훑어 그 순서대로 만든다 — 상수 배열이면 순서 계약을 검사하지
+// 못한다.
+function eventCountsFor({ body }: MockRequest): number[] {
+  return (body.p_events ?? []).map((words) => EVENT_HEADLINE_COUNTS[words[0]] ?? 0)
+}
+
+function eventHeadlinesFor({ body }: MockRequest): HeadlineSummary[] {
+  return EVENT_HEADLINE_ROWS[(body.p_words ?? [])[0] ?? ''] ?? []
 }
 
 const TABLE_DEFAULTS: Record<string, RowsOrFn> = {
@@ -148,7 +174,11 @@ export async function mockSupabase(page: Page, options: MockOptions = {}): Promi
     const payload =
       endpoint === 'keyword_graph'
         ? resolve(options.keyword_graph, DEFAULT_GRAPH, request)
-        : resolve(options[endpoint] as RowsOrFn, TABLE_DEFAULTS[endpoint] ?? [], request)
+        : endpoint === 'event_headline_counts'
+          ? resolve(options.event_headline_counts, eventCountsFor, request)
+          : endpoint === 'event_headlines'
+            ? resolve(options.event_headlines, eventHeadlinesFor, request)
+            : resolve(options[endpoint] as RowsOrFn, TABLE_DEFAULTS[endpoint] ?? [], request)
 
     if (options.delayOn?.endpoint === endpoint) {
       await new Promise((done) => setTimeout(done, options.delayOn!.ms))
