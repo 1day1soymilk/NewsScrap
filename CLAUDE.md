@@ -65,6 +65,15 @@ Any host serving the built frontend (Vercel and the like) needs
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` configured there. They are baked
 in at build time, and `.env` is not in the repo.
 
+`index.html` is one of the places they are baked into: it carries
+`<link rel="preconnect" href="%VITE_SUPABASE_URL%">` so the DNS, TCP and TLS to
+the API host finish while the HTML is still parsing rather than after React has
+mounted — everything on the first screen comes from that origin. Vite performs
+the `%VITE_*%` substitution at build time, so a build with no `.env` ships the
+literal placeholder in the markup. That is harmless (the app is already pointing
+at a placeholder URL by then) but it is the signal that the build had no
+environment.
+
 ## Architecture
 
 ### Two runtimes, one rule
@@ -274,12 +283,16 @@ places, the words and the dot on the tab that filters for them, and
 different green from the one on screen is worse than no key, so
 `e2e/keywordGraph.spec.ts` asserts the two resolve to the same rgb.
 
-**The webfont `@import` has to come before `@import "tailwindcss"`.** That
-import is inlined into ~940 lines of rules, so a font import written below it
-lands after real statements and CSS drops it — postcss says so during the build
-("@import must precede all other statements") and the browser agrees silently.
-Written second, the file compiled fine, the masthead fell back to `ui-serif`,
-and Noto Serif KR was never once loaded.
+**The webfont is loaded from `index.html`, never from `index.css`.** It used to
+be an `@import` at the top of the stylesheet, which looks correct and is not:
+`@import "tailwindcss"` is inlined into ~940 lines of rules, so a font import
+written below it lands after real statements and CSS drops it. The build said so
+("@import must precede all other statements") and the browser agreed silently —
+the masthead had been falling back to `ui-serif` and Noto Serif KR had never
+once loaded. A `<link>` in the markup cannot hit that ordering trap at all, and
+it starts the download while the HTML is still parsing rather than after the
+stylesheet has been fetched and scanned. `preconnect` to both font hosts sits
+beside it.
 
 `--font-display` (Noto Serif KR) is used on the masthead date and the panel
 heading and **nowhere else**. The graph measures its labels on a canvas against
@@ -350,6 +363,13 @@ Three things there were arrived at by looking at real days, not by reasoning:
   window edge from 1280 to 358 at 6px a frame ran 154 layouts and now runs 76.
   The 8px is invisible because the svg is drawn at its own size and then scaled
   by `max-w-full`.
+- **`rectCollide` is not where that 48ms goes**, and it looks like it should be.
+  Hoisting the outer node's fields out of the inner loop and dropping the `?? 0`
+  guards (every node is seeded with x/y/vx/vy, so they never fired) produced a
+  bit-identical picture — coordinate sums matched to four decimals — and a time
+  inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
+  d3's own forces across 300 ticks, so anything that actually moves this number
+  changes the picture. Do not re-run this experiment.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves

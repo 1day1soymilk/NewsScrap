@@ -5,6 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>오늘의 주요 뉴스 스크랩</title>
+    <!-- 표제용 명조. 마스트헤드의 날짜와 패널 제목에만 쓰이고, 캔버스는 시스템
+         스택에 남는다 — 웹폰트를 캔버스에 쓰면 로드되기 전에 라벨 폭이 측정돼
+         모든 상자가 틀린다(KeywordGraph.tsx의 FONT_FAMILY).
+
+         여기 있는 이유: src/index.css에 @import로 두면 CSS를 받고 → @import를
+         발견하고 → googleapis를 받고 → gstatic을 받는 네 홉을 거친다. 그리고
+         @import "tailwindcss"가 ~940줄로 인라인되므로 그 아래에 쓴 @import는
+         "선행하지 않는다"는 이유로 CSS가 통째로 버린다 — 실제로 그렇게 되어
+         있었고, 마스트헤드는 ui-serif로 폴백한 채였다. 마크업에 두면 그 순서
+         함정이 존재할 수 없다. -->
+    <!-- 첫 화면의 내용은 전부 이 호스트에서 온다. 그 요청은 React가 마운트된
+         뒤에야 시작되므로, DNS·TCP·TLS를 HTML 파싱 중에 미리 끝내 두면 그만큼
+         앞당겨진다. Vite가 빌드 시 %VITE_SUPABASE_URL%을 치환한다 — .env가
+         없으면 치환되지 않고 남지만, 그때는 앱 자체가 자리표시자로 뜬다. -->
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

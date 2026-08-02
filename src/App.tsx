@@ -2,8 +2,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CategoryTabs } from './components/CategoryTabs'
 import { EventList } from './components/EventList'
+import { GraphSkeleton } from './components/GraphSkeleton'
 import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
+import { Masthead } from './components/Masthead'
 import {
   fetchAvailableDates,
   fetchCategories,
@@ -463,131 +465,5 @@ function App() {
   )
 }
 
-// The page is a dated record, so the date is what it is about — not a form
-// control tucked between a title and a row of tabs, which is where it used to
-// live. Set in 명조 against a canvas that is entirely 고딕: the masthead is the
-// one part of the page that gets read rather than scanned.
-//
-// The stepper walks the collected dates rather than the calendar, because the
-// archive has gaps and today is empty until the 07:00 KST cron has run. The
-// native picker stays for jumping further than one step.
-function Masthead({
-  date,
-  minDate,
-  maxDate,
-  previousDate,
-  nextDate,
-  onDateChange,
-  words,
-  links,
-}: {
-  date: string
-  minDate?: string
-  maxDate?: string
-  previousDate: string | null
-  nextDate: string | null
-  onDateChange: (date: string) => void
-  words: number | null
-  links: number | null
-}) {
-  const parts = formatDate(date)
-  const step =
-    'rounded-md px-1.5 text-2xl leading-none text-ink-faint hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-ink-faint'
-
-  return (
-    // Everything sits in one left-aligned column. The picker used to be floated
-    // to the right edge, where the headline panel — which starts below the
-    // toolbar and runs to the bottom — covered it the moment a word was clicked.
-    <div className="mb-6">
-      <div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => previousDate && onDateChange(previousDate)}
-            disabled={!previousDate}
-            aria-label="이전 수집일"
-            className={step}
-          >
-            ‹
-          </button>
-          <p className="font-display text-3xl leading-none font-semibold tracking-tight sm:text-4xl">
-            {parts.day}
-            <span className="ml-2 align-baseline text-lg font-medium text-ink-faint sm:text-xl">
-              {parts.weekday}
-            </span>
-          </p>
-          <button
-            onClick={() => nextDate && onDateChange(nextDate)}
-            disabled={!nextDate}
-            aria-label="다음 수집일"
-            className={step}
-          >
-            ›
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2 pl-1 text-xs text-ink-faint">
-          <span>{parts.year}</span>
-          {words !== null && links !== null && (
-            <>
-              <span>·</span>
-              <span>단어 {words}</span>
-              <span>·</span>
-              <span>관계 {links}</span>
-            </>
-          )}
-          <span>·</span>
-          {/* The stepper walks to the neighbouring collected date; this is for
-              jumping further than one step, so it is the quieter of the two. */}
-          <label className="flex items-center gap-1.5">
-            <span className="sr-only">날짜 선택</span>
-            <input
-              type="date"
-              value={date}
-              min={minDate}
-              max={maxDate}
-              onChange={(e) => onDateChange(e.target.value)}
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-ink-faint hover:text-ink"
-            />
-          </label>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Invalid dates reach this from a hand-edited query string, and Intl renders
-// those as "Invalid Date" rather than throwing — which would put that string in
-// the masthead at 36px.
-function formatDate(iso: string): { day: string; weekday: string; year: string } {
-  const parsed = new Date(`${iso}T00:00:00+09:00`)
-  if (Number.isNaN(parsed.getTime())) return { day: iso, weekday: '', year: '' }
-
-  const format = (options: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', ...options }).format(parsed)
-
-  return {
-    day: format({ month: 'long', day: 'numeric' }),
-    weekday: format({ weekday: 'short' }),
-    year: format({ year: 'numeric' }),
-  }
-}
-
-// Holds the graph's footprint while it loads, so the page does not collapse to
-// one line of text and then jump back open. Deliberately not a fake graph:
-// scattering placeholder words would suggest a layout that the real one is
-// about to contradict.
-function GraphSkeleton() {
-  return (
-    <div
-      data-testid="graph-skeleton"
-      role="status"
-      aria-busy="true"
-      aria-label="불러오는 중"
-      className="mx-auto w-full max-w-5xl"
-    >
-      <div className="mx-auto mb-3 h-4 w-56 animate-pulse rounded-full bg-line" />
-      <div className="h-[380px] w-full animate-pulse rounded-xl bg-ground" />
-    </div>
-  )
-}
 
 export default App
