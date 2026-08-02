@@ -18,6 +18,14 @@
 -- 따라서 사건이 정해진 뒤 한 번 더 물어보는 형태가 된다.
 --
 -- 데이터는 건드리지 않는다. drop function 둘로 완전히 되돌아간다.
+--
+-- 두 함수 다 `create or replace`다 (`0004`와 같은 이유). 이 파일의 내용은 개발
+-- 중에 Management API로 먼저 적용되었고 원격의 이력에는 다른 버전 이름으로
+-- 기록되어 있어서, 이 파일 자체는 아직 적용되지 않은 것으로 읽힌다. 그러면 다음
+-- `db push`가 이것을 돌리는데, 함수는 이미 있다 — `create function`이었다면
+-- 거기서 "already exists"로 죽는다. 정의가 같으므로 replace는 무해하고,
+-- 원격 이력을 고치는 `supabase migration repair`는 배포된 DB를 건드리는 일이라
+-- 사람이 판단할 몫으로 남긴다.
 
 -- 사건마다 그 멤버 단어 중 하나라도 물고 있는 헤드라인의 수. 유일화는 헤드라인
 -- id로 한다.
@@ -28,7 +36,7 @@
 --
 -- p_category가 null이면 전체 보기다. keyword_graph의 scoped CTE와 같은 필터를
 -- 쓰므로 화면에 있는 것과 같은 것을 센다.
-create function event_headline_counts(
+create or replace function event_headline_counts(
   p_date date,
   p_category text default null,
   p_events jsonb default '[]'::jsonb
@@ -80,7 +88,7 @@ comment on function event_headline_counts(date, text, jsonb) is
 -- 한 기사가 두 섹션에 실린 경우는 여기서 두 행으로 남는다 — id가 다르기
 -- 때문이고, HeadlinePanel의 dedupe()가 기사 id 경로로 다시 접는다. 그 동작은
 -- 지금과 같다.
-create function event_headlines(
+create or replace function event_headlines(
   p_date date,
   p_category text default null,
   p_words text[] default '{}'

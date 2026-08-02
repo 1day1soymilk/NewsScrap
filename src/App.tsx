@@ -16,6 +16,7 @@ import {
 } from './lib/queries'
 import { adjacentDate } from './lib/dateNav'
 import { buildEvents, eventLabel, sameCommunities, topEvents } from './lib/events'
+import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { parseUrlState, sameState, toSearch } from './lib/urlState'
@@ -23,7 +24,12 @@ import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
-const NO_COMMUNITIES: Map<string, number> = new Map()
+const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
+
+// 루뱅 분할은 그것이 나온 그래프와 짝지어 들고 다닌다. 캔버스가 그린 **뒤의**
+// effect에서 올라오기 때문이다 — 새 날의 그래프가 처음 그려지는 한 프레임 동안
+// 이 Map은 아직 어제 것이다.
+type Partition = { graph: KeywordGraphData; communities: Map<string, number> }
 
 function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
@@ -53,8 +59,8 @@ function App() {
   )
   const [selectedWord, setSelectedWord] = useState<string | null>(() => stateFromUrl().word)
   const [selectedEvent, setSelectedEvent] = useState<string | null>(() => stateFromUrl().event)
-  const [communities, setCommunities] = useState<Map<string, number>>(NO_COMMUNITIES)
-  const [eventCounts, setEventCounts] = useState<number[] | null>(null)
+  const [partition, setPartition] = useState<Partition | null>(null)
+  const [eventCounts, setEventCounts] = useState<{ of: EventGraph; counts: number[] } | null>(null)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
@@ -199,28 +205,46 @@ function App() {
   // 캔버스가 쓴 것과 같은 루뱅 분할을 그대로 받는다. 레이아웃은 폭에 반응하므로
   // 리사이즈마다 새 Map이 올라오지만, 배정은 위상만의 함수라 값이 바뀌지 않는다
   // — 내용을 비교해 재요청을 막는다.
+  //
+  // 올라온 분할은 **그것이 나온 그래프와 함께** 저장한다. 그것이 그래프와 거기서
+  // 파생되는 모든 것 사이의 유일한 장벽이고, 두 개가 아니라 하나다: 날짜나
+  // 카테고리가 바뀌면 graph의 신원이 바뀌고, 그 순간 짝이 어긋나 사건도 기사
+  // 수도 목록도 한꺼번에 비어 버린다. 한 프레임 빈 목록이, 어제의 사건과 어제의
+  // 숫자를 오늘 것처럼 내거는 것보다 낫다 — 그리고 하루의 사건 수는 세 날
+  // 15/14/15라 배열 길이만으로는 어긋남을 알아차릴 수 없다.
+  //
+  // ref로 읽는 이유: 이 콜백은 KeywordGraph의 effect가 부르므로 그 시점의 graph는
+  // 이미 방금 그려진 것이다. 콜백을 graph에 의존시키면 매 그래프마다 새 함수가
+  // 되어 effect가 다시 돌고, 여기서 읽지 않고 렌더에만 쓰므로 값도 갈리지 않는다.
+  const renderedGraph = useRef(graph)
+  renderedGraph.current = graph
+
   const onCommunities = useCallback((next: Map<string, number>) => {
-    setCommunities((current) => (sameCommunities(current, next) ? current : next))
+    const from = renderedGraph.current
+    setPartition((current) =>
+      current && current.graph === from && sameCommunities(current.communities, next)
+        ? current
+        : { graph: from, communities: next },
+    )
   }, [])
 
-  const eventGraph = useMemo(
-    () =>
-      buildEvents(
-        graph.nodes.map((node) => ({ word: node.word, count: node.count })),
-        graph.edges,
-        communities,
-      ),
-    [graph.nodes, graph.edges, communities],
-  )
+  const eventGraph = useMemo(() => {
+    if (!partition || partition.graph !== graph) return NO_EVENTS
+    return buildEvents(
+      graph.nodes.map((node) => ({ word: node.word, count: node.count })),
+      graph.edges,
+      partition.communities,
+    )
+  }, [graph, partition])
 
   // 하루의 사건 전부를 한 번에 센다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
   // 합으로 정해지는데, 그 합이 바로 이 요청이 고치려는 값이다 — 2026-08-01의
   // 실제 1위는 트럼프(합계 73 / 실제 51)가 아니라 폭염(69 / 61)이다.
   useEffect(() => {
-    if (eventGraph.events.length === 0) {
-      setEventCounts(null)
-      return
-    }
+    // 무엇이 바뀌었든 먼저 버린다. 사건 목록의 숫자는 이 요청의 답이지 이전
+    // 요청의 답이 아니고, 그 둘은 길이만으로는 구별되지 않는다.
+    setEventCounts(null)
+    if (eventGraph.events.length === 0) return
     let cancelled = false
     fetchEventHeadlineCounts(
       selectedDate,
@@ -228,7 +252,7 @@ function App() {
       eventGraph.events.map((event) => event.words.map((word) => word.word)),
     )
       .then((counts) => {
-        if (!cancelled) setEventCounts(counts)
+        if (!cancelled) setEventCounts({ of: eventGraph, counts })
       })
       .catch(() => {
         // 목록은 그린다. 숫자 자리를 비운다. 사건 이름이 숫자보다 중요하고,
@@ -240,8 +264,11 @@ function App() {
     }
   }, [eventGraph, selectedDate, selectedCategory])
 
+  // 숫자는 그것을 물어본 바로 그 사건 목록에만 붙는다. 신원이 어긋나면 null로
+  // 떨어지고 topEvents는 countSum 순서로 돌아간다 — 어제의 숫자로 오늘을 정렬하는
+  // 일은 여기서 구조적으로 불가능하다.
   const rankedEvents = useMemo(
-    () => topEvents(eventGraph.events, eventCounts),
+    () => topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null),
     [eventGraph, eventCounts],
   )
 

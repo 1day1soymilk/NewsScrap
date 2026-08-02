@@ -228,7 +228,7 @@ of all six as well, because the marker is drawn touching its word.
 
 **Nothing is shaded on the canvas any more** — see "Event clusters" below for
 why the blobs went. `--color-cluster` and `--color-top-story` survive the change:
-the top story's blue is now the dot in the caption that names it, and the
+the top story's blue is now the dot on the first row of the event list, and the
 achromatic grey is kept, unused, with its test, because the finding is about the
 palette rather than about the shape it was picked for. Two washes distinguished
 by opacity alone failed — 0.07 and 0.07 stack to exactly the 0.14 that was meant
@@ -376,7 +376,8 @@ the members ring a gap and there is nothing at the middle to read the event
 from.
 
 **Clusters are never drawn.** They decide the cohesion force, the hub each event
-rings, and which story the caption names — and nothing on the canvas.
+rings, and — through `src/lib/events.ts` — which stories the event list names.
+Nothing on the canvas.
 
 They used to be shaded, six of them (`clusterLimit`), and both halves of that
 were wrong. Six overlapping washes were the dirtiest thing on screen: a hull is
@@ -386,14 +387,55 @@ false claim — **a blob is the convex hull of its members' label boxes, so
 anything that happens to lie between them is inside it.** On 2026-08-01 the hull
 for 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명,
 four words from other events. A hull is only honest when its members are already
-adjacent, which is exactly when it adds least. The caption names the story
-instead, and `clusterLimit` still defaults to 1 because that is all the caption
-needs; `graphLayout.test.ts` passes it explicitly where the partition itself is
-under test.
+adjacent, which is exactly when it adds least. The event list names the stories
+instead, and `clusterLimit` — which cuts `layout.clusters`, a field nothing now
+reads — still defaults to 1; `graphLayout.test.ts` passes it explicitly where the
+partition itself is under test. The list is built from `GraphLayout.communities`,
+which is the **uncut** partition, so the cap cannot reach it.
 
 The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture
 and the e2e suite can assert on it.
+
+### The event list
+
+`src/lib/events.ts` turns the day into a list of events, above the canvas. It is
+pure and does not touch d3: the canvas hands its Louvain assignment up through
+`onCommunities`, and **that same partition is what the list is built from** —
+never a second copy computed here, for the reason `keyword_signals` is not
+reimplemented either.
+
+- **Louvain communities are merged before they are listed.** Two communities
+  joined by `MERGE_MIN_EDGES` (**2**) or more edges are one event, transitively,
+  through a union-find. Not 1: 2026-08-01's 민주당–한동훈 hang on a single edge
+  and the 전당대회 and the 국민의힘 지도부 are different stories. Not 3:
+  2026-08-02's 순회경선·명청대전 hang on two and are one story, so 3 splits that
+  day's biggest event.
+- **An event's headline count is never the sum of its members' counts.** One
+  article holding two member words is counted twice; the measured inflation runs
+  1.10× to 2.22× and **grows with the member count, so the ranking is wrong and
+  not just the number** — the real top of 2026-08-01 is 폭염 (sum 69, actual 61),
+  not 트럼프 (73 / 51). Two RPCs exist for this, `event_headline_counts` and
+  `event_headlines` (migration `0010`), because `count(distinct …)` is not
+  something PostgREST can express and counting the rows of a response is the
+  thing this file forbids. `countSum` survives only as the fallback order when
+  the count RPC fails, and `topEvents` will not mix the two inside one
+  comparison — the counts are used all-or-nothing (`fullyAligned`).
+- **The counts and the partition are pinned to the graph they came from.** The
+  partition arrives from a post-paint effect, so for one frame it belongs to the
+  previous day; the counts are a separate round trip. `App.tsx` stores each with
+  the object it was computed for and compares identity before use, so a
+  transition blanks the list for one frame rather than showing yesterday's
+  events, or yesterday's numbers, or ranking on them. Length is not a check: the
+  archive's three days hold 15, 14 and 15 events.
+- **A word selection and an event selection are mutually exclusive**, in the
+  click handlers and in the query string alike (`?word=` or `?event=`, never
+  both). Two lit sets at once cannot be read off the canvas.
+- **An event lights its members and not their neighbours.** A word selection
+  expands to neighbours; an event already *is* a neighbourhood, and expanding it
+  would light the event across a bridge that the merge rule had just declined to
+  join. A bridging word is the exception by construction: it lights every event
+  it touches, whole, which is what makes the bridge visible as a bridge.
 
 ### Day-over-day surge
 
