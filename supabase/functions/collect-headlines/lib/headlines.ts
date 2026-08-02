@@ -8,6 +8,21 @@ const ANCHOR_RE = /<a\b([^>]*class="[^"]*\bsa_text_title\b[^"]*"[^>]*)>([\s\S]*?
 const HREF_RE = /href="([^"]+)"/
 const STRONG_RE = /<strong[^>]*>([\s\S]*?)<\/strong>/
 
+// 섹션 첫 페이지는 /mnews/article/{press}/{id}를, "더보기" 페이지네이션은
+// /article/{press}/{id}를 같은 기사에 준다. 삽입 시 중복 검사(index.ts)는 링크
+// 문자열 전체를 맞춰 보므로, 여기서 합쳐 두지 않으면 같은 기사가 두 행이 된다.
+//
+// 꼬리에서 재구성하기 때문에 호스트·mnews·쿼리·해시·트레일링 슬래시가 한 번에
+// 정리된다. 패턴이 맞지 않으면 원본을 그대로 돌려준다 — 네이버가 URL 모양을
+// 바꿨을 때 뭉개면 서로 다른 기사가 한 링크로 합쳐져 조용히 유실된다.
+const ARTICLE_PATH_RE = /\/article\/(\d+)\/(\d+)(?:[/?#]|$)/
+
+export function canonicalLink(href: string): string {
+  const match = ARTICLE_PATH_RE.exec(href)
+  if (!match) return href
+  return `https://n.news.naver.com/article/${match[1]}/${match[2]}`
+}
+
 function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim()
 }
@@ -31,7 +46,7 @@ export function extractHeadlines(html: string): ScrapedHeadline[] {
     const [, attrs, inner] = match
     const hrefMatch = HREF_RE.exec(attrs)
     if (!hrefMatch) continue
-    const link = hrefMatch[1]
+    const link = canonicalLink(hrefMatch[1])
     if (seenLinks.has(link)) continue
 
     const strongMatch = STRONG_RE.exec(inner)
