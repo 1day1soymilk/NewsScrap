@@ -1,17 +1,21 @@
 // src/App.tsx
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CategoryTabs } from './components/CategoryTabs'
+import { EventList } from './components/EventList'
 import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
 import {
   fetchAvailableDates,
   fetchCategories,
+  fetchEventHeadlineCounts,
   fetchHeadlineCount,
+  fetchHeadlinesForEvent,
   fetchHeadlinesForWord,
   fetchKeywordGraph,
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate } from './lib/dateNav'
+import { buildEvents, eventLabel, sameCommunities, topEvents } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { parseUrlState, sameState, toSearch } from './lib/urlState'
@@ -19,6 +23,7 @@ import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
+const NO_COMMUNITIES: Map<string, number> = new Map()
 
 function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
@@ -47,6 +52,9 @@ function App() {
     () => stateFromUrl().category,
   )
   const [selectedWord, setSelectedWord] = useState<string | null>(() => stateFromUrl().word)
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(() => stateFromUrl().event)
+  const [communities, setCommunities] = useState<Map<string, number>>(NO_COMMUNITIES)
+  const [eventCounts, setEventCounts] = useState<number[] | null>(null)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
@@ -76,8 +84,12 @@ function App() {
   const urlSynced = useRef(false)
 
   useEffect(() => {
-    // TODO(task 8): wire the selected event through here.
-    const next = { date: selectedDate, category: selectedCategory, word: selectedWord, event: null }
+    const next = {
+      date: selectedDate,
+      category: selectedCategory,
+      word: selectedWord,
+      event: selectedEvent,
+    }
     if (sameState(stateFromUrl(), next)) return
 
     // The first write only fills in the date the app defaulted to. Pushing it
@@ -86,7 +98,7 @@ function App() {
     const write = urlSynced.current ? window.history.pushState : window.history.replaceState
     write.call(window.history, null, '', `${window.location.pathname}${toSearch(next)}`)
     urlSynced.current = true
-  }, [selectedDate, selectedCategory, selectedWord])
+  }, [selectedDate, selectedCategory, selectedWord, selectedEvent])
 
   useEffect(() => {
     function onPopState() {
@@ -94,6 +106,7 @@ function App() {
       setSelectedDate(state.date ?? todayInSeoul())
       setSelectedCategory(state.category)
       setSelectedWord(state.word)
+      setSelectedEvent(state.event)
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -181,16 +194,112 @@ function App() {
     }
   }, [selectedDate, previousDate, graphWords])
 
+  // --- 사건 ------------------------------------------------------------------
+
+  // 캔버스가 쓴 것과 같은 루뱅 분할을 그대로 받는다. 레이아웃은 폭에 반응하므로
+  // 리사이즈마다 새 Map이 올라오지만, 배정은 위상만의 함수라 값이 바뀌지 않는다
+  // — 내용을 비교해 재요청을 막는다.
+  const onCommunities = useCallback((next: Map<string, number>) => {
+    setCommunities((current) => (sameCommunities(current, next) ? current : next))
+  }, [])
+
+  const eventGraph = useMemo(
+    () =>
+      buildEvents(
+        graph.nodes.map((node) => ({ word: node.word, count: node.count })),
+        graph.edges,
+        communities,
+      ),
+    [graph.nodes, graph.edges, communities],
+  )
+
+  // 하루의 사건 전부를 한 번에 센다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
+  // 합으로 정해지는데, 그 합이 바로 이 요청이 고치려는 값이다 — 2026-08-01의
+  // 실제 1위는 트럼프(합계 73 / 실제 51)가 아니라 폭염(69 / 61)이다.
+  useEffect(() => {
+    if (eventGraph.events.length === 0) {
+      setEventCounts(null)
+      return
+    }
+    let cancelled = false
+    fetchEventHeadlineCounts(
+      selectedDate,
+      selectedCategory,
+      eventGraph.events.map((event) => event.words.map((word) => word.word)),
+    )
+      .then((counts) => {
+        if (!cancelled) setEventCounts(counts)
+      })
+      .catch(() => {
+        // 목록은 그린다. 숫자 자리를 비운다. 사건 이름이 숫자보다 중요하고,
+        // 목록 전체를 감추면 캡션조차 없어진다.
+        if (!cancelled) setEventCounts(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [eventGraph, selectedDate, selectedCategory])
+
+  const rankedEvents = useMemo(
+    () => topEvents(eventGraph.events, eventCounts),
+    [eventGraph, eventCounts],
+  )
+
+  const activeEvent = useMemo(() => {
+    if (!selectedEvent) return null
+    return eventGraph.events.find((event) => event.words[0].word === selectedEvent) ?? null
+  }, [eventGraph, selectedEvent])
+
+  // 사전 변경이나 재수집으로 그 단어가 그날 화면에서 사라졌으면 조용히 버린다 —
+  // category가 이미 그렇게 동작한다. 사건이 0개인 동안은 아직 판단할 수 없으므로
+  // 건드리지 않는다: 공유된 링크가 그래프가 도착하기 전에 버려지면 안 된다.
+  useEffect(() => {
+    if (selectedEvent === null || eventGraph.events.length === 0) return
+    if (!eventGraph.events.some((event) => event.words[0].word === selectedEvent)) {
+      setSelectedEvent(null)
+    }
+  }, [eventGraph, selectedEvent])
+
+  // 캔버스에서 살아남는 단어들. 사건이면 멤버 전부, 다리 단어면 그 단어가 닿는
+  // 모든 사건의 멤버 전부. 둘 다 아니면 null이고 KeywordGraph의 단어 포커스가
+  // 그대로 돈다.
+  const focusWords = useMemo(() => {
+    if (activeEvent) return new Set(activeEvent.words.map((word) => word.word))
+    if (!selectedWord) return null
+    const touched = eventGraph.bridges.get(selectedWord)
+    if (!touched) return null
+    const lit = new Set<string>()
+    for (const index of touched) {
+      for (const word of eventGraph.events[index].words) lit.add(word.word)
+    }
+    return lit
+  }, [activeEvent, selectedWord, eventGraph])
+
+  // 패널 제목. 목록의 한 줄과 같은 규칙으로 자른다.
+  const eventSubject = useMemo(() => {
+    if (!activeEvent) return null
+    const { shown, rest } = eventLabel(activeEvent.words)
+    return rest > 0 ? `${shown.join(' · ')} 외 ${rest}` : shown.join(' · ')
+  }, [activeEvent])
+
   useEffect(() => {
     setHeadlinesError(null)
-    if (!selectedWord) {
+    // 다리 단어를 눌러도 열리는 것은 **그 단어의** 헤드라인이다. 두 사건의
+    // 헤드라인을 합쳐 열면 그 단어가 왜 접점인지가 오히려 묻힌다.
+    const eventWords = activeEvent?.words.map((word) => word.word) ?? null
+    if (!selectedWord && !eventWords) {
       setHeadlinesForWord([])
       setHeadlinesLoading(false)
       return
     }
+
     let cancelled = false
     setHeadlinesLoading(true)
-    fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
+    const request = selectedWord
+      ? fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
+      : fetchHeadlinesForEvent(selectedDate, selectedCategory, eventWords!)
+
+    request
       .then((data) => {
         if (cancelled) return
         setHeadlinesForWord(data)
@@ -206,7 +315,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedWord, selectedDate, selectedCategory])
+  }, [selectedWord, activeEvent, selectedDate, selectedCategory])
 
   return (
     <div className="min-h-svh bg-ground text-ink">
@@ -258,28 +367,48 @@ function App() {
           // the picture slides intact out from under the panel.
           <div
             className={`origin-top transition-transform duration-300 motion-reduce:transition-none ${
-              selectedWord ? 'sm:-translate-x-24 sm:scale-90' : ''
+              selectedWord || selectedEvent ? 'sm:-translate-x-24 sm:scale-90' : ''
             }`}
           >
             <KeywordGraph
               graph={graph}
               selectedWord={selectedWord}
-              // Clicking a lit word again clears the focus and closes the panel.
-              onWordClick={(word) => setSelectedWord((current) => (current === word ? null : word))}
+              // 단어를 누르면 사건 선택이 풀린다. 둘 다 켜진 상태는 캔버스에서
+              // 무엇이 살아 있는지 읽을 수 없다.
+              onWordClick={(word) => {
+                setSelectedEvent(null)
+                setSelectedWord((current) => (current === word ? null : word))
+              }}
               colorByCategory={selectedCategory === null}
               surges={surges}
+              focusWords={focusWords}
+              onCommunities={onCommunities}
+              header={
+                <EventList
+                  events={rankedEvents}
+                  selected={selectedEvent}
+                  onSelect={(topWord) => {
+                    setSelectedWord(null)
+                    setSelectedEvent((current) => (current === topWord ? null : topWord))
+                  }}
+                />
+              }
             />
           </div>
         )}
       </main>
 
       <HeadlinePanel
-        word={selectedWord}
+        subject={selectedWord ?? eventSubject}
+        isEvent={!selectedWord && eventSubject !== null}
         headlines={headlinesForWord}
         categories={categories}
         loading={headlinesLoading}
         error={headlinesError}
-        onClose={() => setSelectedWord(null)}
+        onClose={() => {
+          setSelectedWord(null)
+          setSelectedEvent(null)
+        }}
       />
     </div>
   )
