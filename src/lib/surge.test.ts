@@ -39,7 +39,7 @@ describe('computeSurges', () => {
 
   // The reason shares are compared rather than counts. 2026-08-01 was collected
   // twice — a manual run plus the 13:00 KST cron, with the 150-per-category cap
-  // applying per run — so it holds 1,382 headlines against 2026-07-31's 900.
+  // applying per run — so it holds 1,144 headlines against 2026-07-31's 899.
   // Every count that day is inflated by the same factor, and inflating
   // everything is not news about any word.
   it('is unmoved by a day that was collected twice', () => {
@@ -74,8 +74,8 @@ describe('computeSurges', () => {
   // 5.9x — and the share it actually gained does not.
   it('puts a big word that grew ahead of a small word that appeared', () => {
     const surges = computeSurges(
-      day(1382, [['호르무즈', 18], ['까마귀', 10]]),
-      day(900, [['호르무즈', 2]]),
+      day(1144, [['호르무즈', 18], ['까마귀', 10]]),
+      day(899, [['호르무즈', 2]]),
       { limit: 1 },
     )
     expect([...surges.keys()]).toEqual(['호르무즈'])

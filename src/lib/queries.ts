@@ -98,7 +98,7 @@ export async function fetchWordCountsFor(
 // Headlines collected on a day, as a server-side count: `head` means no rows
 // come back at all, so the 1,000-row cap cannot apply. This is the denominator
 // that makes two days comparable — 2026-08-01 was collected twice and holds
-// 1,382 headlines against 2026-07-31's 900.
+// 1,144 headlines against 2026-07-31's 899.
 export async function fetchHeadlineCount(date: string): Promise<number> {
   const { count, error } = await supabase
     .from('headlines')

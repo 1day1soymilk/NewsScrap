@@ -7,8 +7,8 @@ import type { WordCount } from './types'
 //
 // **Shares, not counts.** 2026-08-01 was collected twice — a manual run plus
 // the 13:00 KST cron, with the 150-per-category cap applying per run — so it
-// holds 1,382 headlines against 2026-07-31's 900. Compared on raw counts every
-// word looks 50% up. Dividing each day by its own headline total makes a
+// holds 1,144 headlines against 2026-07-31's 899. Compared on raw counts every
+// word looks about 27% up. Dividing each day by its own headline total makes a
 // uniform inflation cancel; the median drawn word then sits at a ratio of 0.98,
 // which is what says the normalisation is doing its job.
 //
