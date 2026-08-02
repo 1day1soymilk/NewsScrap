@@ -123,14 +123,17 @@ function App() {
   // --- Data -----------------------------------------------------------------
 
   function loadGraph(isCancelled: () => boolean = () => false) {
-    setLoading(true)
     setError(null)
+
+    let settled = false
     fetchKeywordGraph(selectedDate, selectedCategory)
       .then((data) => {
+        settled = true
         if (isCancelled()) return
         setGraph(data)
       })
       .catch((e) => {
+        settled = true
         if (isCancelled()) return
         setError(errorMessage(e))
       })
@@ -138,6 +141,14 @@ function App() {
         if (isCancelled()) return
         setLoading(false)
       })
+
+    // 스켈레톤은 **기다릴 일이 있을 때만** 건다. 이미 본 뷰는 캐시가 같은
+    // promise를 돌려주므로 그 .then이 다음 마이크로태스크에서 곧바로 돌고,
+    // 그때는 여기 도달했을 때 settled가 이미 참이다 — 요청을 0회로 줄여 놓고
+    // 스켈레톤을 한 프레임 깜빡이면 눈에는 아무것도 빨라지지 않는다.
+    queueMicrotask(() => {
+      if (!settled && !isCancelled()) setLoading(true)
+    })
   }
 
   useEffect(() => {

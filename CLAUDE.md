@@ -245,6 +245,16 @@ Tests share the module-level cache, so `queries.test.ts` calls
 `clearQueryCache()` in a `beforeEach`. Without it one test's response leaks into
 the next.
 
+**The skeleton is only raised for a view that actually has to be waited for.**
+`loadGraph` starts the request, then schedules the `setLoading(true)` on a
+microtask and skips it if the promise has already settled — which is what a
+cache hit looks like. Flashing the skeleton for one frame would undo the whole
+saving; nothing would look faster. Note that `expect(skeleton).toBeHidden()`
+**cannot** test this: the auto-retrying assertion never sees a frame that is
+already gone, and it passed against the unfixed code. `appControls.spec.ts`
+installs a `MutationObserver` and asserts the element was never inserted, which
+does fail without the fix.
+
 `src/lib/supabaseClient.ts` builds a **`PostgrestClient` directly** rather than
 calling `createClient`. There is no login, no realtime, no storage and no
 function invocation here, but `createClient` instantiates auth-js and
