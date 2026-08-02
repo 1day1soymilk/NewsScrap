@@ -89,7 +89,10 @@ was collected twice — once by hand and once by the 13:00 KST cron, since the
 150-per-category cap applies per run — and the day went from 873 headlines to
 1,382 partway through a session. The harness immediately started reporting up to
 13 unlabelled words per row. Re-run `20_unlabeled.sql` after any collection, not
-just after editing `02_sieve_configs.sql`.
+just after editing `02_sieve_configs.sql`. Migration `0007` (2026-08-02) is
+another instance of this: it removed 386 duplicate rows and moved both labelled
+days, so the counts recorded above are stale, and both scripts must be re-run
+before trusting them again.
 
 Only about 60 of them survive from the planning stage — those were recovered by
 reading the plan document, because the 343 labels it cites lived in a chat

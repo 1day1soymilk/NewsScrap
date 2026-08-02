@@ -450,7 +450,17 @@ backfills headlines that somehow have no nouns.
   dedupes, which is what makes the existing `UNIQUE (category_id, link)` the real
   invariant. It returns anything it cannot parse **unchanged**: mangling an
   unrecognised href would merge two different articles into one link and lose one
-  of them silently.
+  of them silently. That fail-open design means a change in Naver's URL shape
+  would produce duplicates again with no other signal, so the only thing
+  standing between this bug and its silent return is this query, which must
+  return 0:
+
+  ```sql
+  select count(*) from (
+    select category_id, substring(link from '/article/(\d+/\d+)') as k
+    from headlines group by 1, 2 having count(*) > 1
+  ) d;
+  ```
 
 Section IDs are fixed: 정치 100, 경제 101, 사회 102, 생활/문화 103, 세계 104,
 IT/과학 105.
@@ -543,11 +553,19 @@ kept whole and the run breaks only on what is not part of the word. Still open i
 the `standalone` cut, which loses more whole words to a following 조사 (유시민,
 골리앗, 앤트로픽) than it catches fragments.
 
-The archive **spans the merge's own deploy** — 1,773 of 2,282 headlines were
-analysed before it first shipped (counted before migration 0007 removed 386
-duplicate rows) — so a word count that crosses 2026-08-01 13:00 KST blends two
-analysers, and the fix above adds a third boundary at its own deploy. The
-archived days are not re-analysed.
+The archive **spans the merge's own deploy** — 1,716 of the 2,043 rows on the
+two labelled days (2026-07-31 and 2026-08-01) were analysed before it first
+shipped, measured post-migration; across the whole table it is 1,716 of 2,734 —
+so a word count that crosses 2026-08-01 13:00 KST blends two analysers, and the
+fix above adds a third boundary at its own deploy. The archived days are not
+re-analysed.
+
+Migration `0007`'s cleanup was not neutral between the two analysers, either:
+keeping the earliest sighting means the 13:00 cron's re-collection lost rows
+proportionally faster than the 08:00 manual run did (509 → 327 against
+873 → 817), so 2026-08-01 is now *more* pre-merge than it was before the
+cleanup — the sieve harness's labelled corpus did not merely shift when 0007
+ran, it shifted toward the older analyser.
 
 Migration `0007` collapsed the archive onto one row per article, which **moves
 both labelled days**. Before re-running `10_sieve_eval.sql` for any reason,

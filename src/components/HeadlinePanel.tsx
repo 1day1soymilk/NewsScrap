@@ -140,17 +140,20 @@ function HeadlineSkeleton() {
 }
 
 // Naver serves one article under two paths — /mnews/article/421/0009091462 and
-// /article/421/0009091462 — and which one the scrape returns varies between
-// runs. 2026-08-01 was collected twice, so 190 of its 1,382 rows are the same
-// article stored under both forms, and the duplicate check at insert time
-// compares links and sees two.
+// /article/421/0009091462 — but that no longer produces two rows: canonicalLink
+// (lib/headlines.ts) folds both into one before insert, and migration 0007
+// cleaned up the archive rows that had already leaked through. What this
+// function still collapses is a genuinely different case — one article listed
+// under two sections, which is two legitimate rows with two different links,
+// and the panel should still show it once.
 //
 // The identity is the press id and the article id at the end of the path, so
 // that is the key. Keyed on the link rather than on the title because two
 // genuinely different articles can carry the same headline.
 //
-// This only cleans up the list. The rows are still there, and they still inflate
-// the co-occurrence counts the graph is built from.
+// dedupe() runs before sortHeadlines() below, on rows PostgREST returns in
+// arbitrary order, so for that one cross-section article which of its two
+// section badges survives is not deterministic.
 function articleKey(headline: HeadlineSummary): string {
   const path = (headline.link ?? '').split('?')[0]
   const match = path.match(/(\d+)\/(\d+)\/?$/)

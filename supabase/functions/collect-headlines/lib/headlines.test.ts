@@ -58,6 +58,23 @@ describe('canonicalLink', () => {
     expect(canonicalLink('/article/abc/def')).toBe('/article/abc/def')
     expect(canonicalLink('')).toBe('')
   })
+
+  // The oid/aid pair is a global article key on Naver's side, so rebuilding
+  // from the path tail is safe regardless of which host it was read off —
+  // two different articles cannot collide on the same pair.
+  it('rebuilds onto n.news.naver.com from a parseable path on a different Naver host', () => {
+    expect(canonicalLink('https://news.naver.com/article/001/0016225981')).toBe(
+      'https://n.news.naver.com/article/001/0016225981',
+    )
+  })
+
+  // Same reasoning with no host at all: the path tail alone identifies the
+  // article, so a bare path is enough to rebuild the canonical link.
+  it('rebuilds onto n.news.naver.com from a bare path with no host', () => {
+    expect(canonicalLink('/article/001/0016225981')).toBe(
+      'https://n.news.naver.com/article/001/0016225981',
+    )
+  })
 })
 
 describe('extractHeadlines', () => {

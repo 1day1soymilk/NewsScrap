@@ -165,8 +165,9 @@
 
 ## 배포와 검증
 
-1. `npx supabase db push` — 마이그레이션 0007
-2. `npx supabase functions deploy collect-headlines`
+1. `npx supabase functions deploy collect-headlines` — 마이그레이션보다 먼저.
+   반대로 하면 그 사이의 다음 크론이 1면 기사를 전부 mnews 형식으로 다시 넣는다.
+2. `npx supabase db push` — 마이그레이션 0007
 3. 마이그레이션 직후: `link like '%/mnews/%'`가 0건, `(category_id, article_key)` 중복이 0건
 4. 다음 수집(2026-08-03 07:00 KST) 후 같은 두 쿼리를 다시 확인. 이것이 스크레이퍼 쪽 수정이
    실제로 붙었는지 보는 유일한 방법이다 — `index.ts`는 타입 검사도 유닛 테스트도 되지 않으므로
