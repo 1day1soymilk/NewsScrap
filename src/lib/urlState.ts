@@ -7,9 +7,22 @@ export interface UrlState {
   date: string | null
   category: string | null
   word: string | null
+  /**
+   * 선택된 사건의 첫 단어(그 사건 안에서 기사 수 1위). 인덱스가 아닌 이유는
+   * 데이터가 움직이면 인덱스가 다른 사건을 가리키기 때문이고, 단어 목록
+   * 전체가 아닌 이유는 URL이 감당하기에 길기 때문이다.
+   *
+   * `word`와 상호 배타다.
+   */
+  event: string | null
 }
 
-export const EMPTY_URL_STATE: UrlState = { date: null, category: null, word: null }
+export const EMPTY_URL_STATE: UrlState = {
+  date: null,
+  category: null,
+  word: null,
+  event: null,
+}
 
 /**
  * @param knownSlugs category slugs to validate against. Pass an empty array
@@ -22,6 +35,7 @@ export function parseUrlState(search: string, knownSlugs: string[]): UrlState {
   const date = params.get('date')
   const category = params.get('category')
   const word = params.get('word')
+  const event = params.get('event')
 
   return {
     date: date && isCalendarDate(date) ? date : null,
@@ -31,6 +45,9 @@ export function parseUrlState(search: string, knownSlugs: string[]): UrlState {
     category:
       category && (knownSlugs.length === 0 || knownSlugs.includes(category)) ? category : null,
     word: word ? word : null,
+    // 손으로 고친 링크는 둘 다 담을 수 있다. 단어와 사건이 동시에 선택된
+    // 상태는 UI가 만들 수 없고 캔버스에서 읽을 수도 없으므로, 하나를 버린다.
+    event: word ? null : event ? event : null,
   }
 }
 
@@ -41,13 +58,19 @@ export function toSearch(state: UrlState): string {
   if (state.date) params.set('date', state.date)
   if (state.category) params.set('category', state.category)
   if (state.word) params.set('word', state.word)
+  else if (state.event) params.set('event', state.event)
 
   const query = params.toString()
   return query ? `?${query}` : ''
 }
 
 export function sameState(a: UrlState, b: UrlState): boolean {
-  return a.date === b.date && a.category === b.category && a.word === b.word
+  return (
+    a.date === b.date &&
+    a.category === b.category &&
+    a.word === b.word &&
+    a.event === b.event
+  )
 }
 
 // A regex alone accepts 2026-02-30 and 2026-13-01. Round-tripping through Date

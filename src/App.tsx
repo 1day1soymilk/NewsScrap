@@ -76,7 +76,8 @@ function App() {
   const urlSynced = useRef(false)
 
   useEffect(() => {
-    const next = { date: selectedDate, category: selectedCategory, word: selectedWord }
+    // TODO(task 8): wire the selected event through here.
+    const next = { date: selectedDate, category: selectedCategory, word: selectedWord, event: null }
     if (sameState(stateFromUrl(), next)) return
 
     // The first write only fills in the date the app defaulted to. Pushing it
