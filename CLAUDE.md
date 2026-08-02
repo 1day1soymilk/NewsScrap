@@ -104,7 +104,7 @@ PostgREST's 1000-row cap cannot silently truncate a result set. `daily_word_coun
 is no longer on the graph's path.
 
 **`daily_word_counts` is not exempt from that cap**, and an earlier version of this
-file said it was. A day holds 3,289 distinct words (2026-08-01; 2,484 on 07-31), so
+file said it was. A day holds 3,051 distinct words (2026-08-01; 2,484 on 07-31), so
 an unfiltered read of it returns the top 1,000 and nothing says so. The surge
 comparison was written against that mistake and measured: summing the truncated
 response for a denominator inflated every ratio by 11% and turned 12 of the 110
@@ -380,8 +380,8 @@ previous **collected** date — not against yesterday, since the archive has gap
 and today is empty until the 13:00 KST cron runs. Two things there were settled
 by measurement and should not be re-argued from first principles:
 
-- **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,382
-  headlines against 2026-07-31's 900, so on counts every word is up 50%.
+- **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,144
+  headlines against 2026-07-31's 899, so on counts every word is up about 27%.
   Dividing each day by its own headline total makes a uniform inflation cancel;
   the median drawn word then sits at a ratio of 0.98, which is the check that
   the normalisation works.
@@ -440,6 +440,17 @@ backfills headlines that somehow have no nouns.
   certificate has since expired). The successor is
   `http://epretx.etri.re.kr:8000/api/WiseNLU`, same request/response schema,
   5,000 calls/day.
+
+- **One article, one link.** The section's first page and its `SECTION_ARTICLE_LIST`
+  pagination hand back different URLs for the same article —
+  `/mnews/article/{press}/{id}` against `/article/{press}/{id}` — and the boundary
+  falls at whatever the first page held (46 of 150 in politics on 2026-08-02).
+  `canonicalLink` in `lib/headlines.ts` rebuilds both as
+  `https://n.news.naver.com/article/{press}/{id}` before `extractHeadlines`
+  dedupes, which is what makes the existing `UNIQUE (category_id, link)` the real
+  invariant. It returns anything it cannot parse **unchanged**: mangling an
+  unrecognised href would merge two different articles into one link and lose one
+  of them silently.
 
 Section IDs are fixed: 정치 100, 경제 101, 사회 102, 생활/문화 103, 세계 104,
 IT/과학 105.
@@ -533,6 +544,15 @@ the `standalone` cut, which loses more whole words to a following 조사 (유시
 골리앗, 앤트로픽) than it catches fragments.
 
 The archive **spans the merge's own deploy** — 1,773 of 2,282 headlines were
-analysed before it first shipped — so a word count that crosses 2026-08-01 13:00
-KST blends two analysers, and the fix above adds a third boundary at its own
-deploy. The archived days are not re-analysed.
+analysed before it first shipped (counted before migration 0007 removed 386
+duplicate rows) — so a word count that crosses 2026-08-01 13:00 KST blends two
+analysers, and the fix above adds a third boundary at its own deploy. The
+archived days are not re-analysed.
+
+Migration `0007` collapsed the archive onto one row per article, which **moves
+both labelled days**. Before re-running `10_sieve_eval.sql` for any reason,
+re-run `20_unlabeled.sql` first: ranks near the cut are filled by different
+words now. Measured cost on the drawn set was small — 2 of the 70 words leave on
+each day and none of the edges do, and the biggest story does not move (김민석
+46→46 on 2026-08-02) — but "small" is not "none", and the percentages recorded
+above were taken before it.

@@ -137,7 +137,7 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
     headlines: {
       id: '00000000-0000-4000-8000-00000000aaa2',
       title: '예산안 국채 발행 규모 확정',
-      link: 'https://n.news.naver.com/mnews/article/001/0000000002',
+      link: 'https://n.news.naver.com/article/001/0000000002',
       collected_date: todayInSeoul(),
       categories: { slug: 'economy' },
     },
@@ -147,7 +147,7 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
     headlines: {
       id: '00000000-0000-4000-8000-00000000aaa1',
       title: '여야 예산안 처리 합의',
-      link: 'https://n.news.naver.com/mnews/article/001/0000000001',
+      link: 'https://n.news.naver.com/article/001/0000000001',
       collected_date: todayInSeoul(),
       categories: { slug: 'politics' },
     },

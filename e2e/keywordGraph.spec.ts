@@ -200,7 +200,7 @@ test('opens and closes the headline panel for a clicked word', async ({ page }) 
   const link = panel.getByRole('link', { name: '여야 예산안 처리 합의' })
   await expect(link).toHaveAttribute(
     'href',
-    'https://n.news.naver.com/mnews/article/001/0000000001',
+    'https://n.news.naver.com/article/001/0000000001',
   )
   await expect(link).toHaveAttribute('target', '_blank')
 
