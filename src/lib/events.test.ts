@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildEvents, eventLabel, sameCommunities, topEvents } from './events'
-import type { EventWord } from './events'
+import { buildEvents, eventLabel, eventsOf, sameCommunities, topEvents } from './events'
+import type { EventWord, NewsEvent } from './events'
 import type { GraphEdge } from './types'
 
 function w(word: string, count: number): EventWord {
@@ -249,6 +249,98 @@ describe('topEvents', () => {
 
     expect(ranked[0].event.words[0].word).toBe('폭염')
     expect(ranked.every((r) => r.headlines === null)).toBe(true)
+  })
+})
+
+describe('eventsOf', () => {
+  it('멤버 단어는 자기 사건 하나를 돌려준다', () => {
+    const graph = buildEvents(
+      [w('폭염', 9), w('열대야', 7), w('트럼프', 6), w('하마스', 5)],
+      [e('폭염', '열대야'), e('트럼프', '하마스')],
+      communities([['폭염', '열대야'], ['트럼프', '하마스']]),
+    )
+    const heat = graph.events.findIndex((ev) => ev.words.some((x) => x.word === '폭염'))
+
+    expect(eventsOf(graph, '열대야')).toEqual([heat])
+  })
+
+  it('다리 단어는 닿는 사건을 전부 돌려준다 — bridges가 말하는 그대로', () => {
+    // 캔버스의 focusWords가 다리 단어에 대해 켜는 사건과 같은 집합이어야 한다.
+    // 목록이 그보다 좁게 밝히면 다리가 다리로 보이지 않는다.
+    const graph = buildEvents(
+      [w('민주당', 10), w('곽상언', 8), w('한동훈', 6), w('장동혁', 4)],
+      [e('민주당', '곽상언'), e('한동훈', '장동혁'), e('민주당', '한동훈')],
+      communities([['민주당', '곽상언'], ['한동훈', '장동혁']]),
+    )
+
+    expect(eventsOf(graph, '민주당')).toEqual(graph.bridges.get('민주당'))
+    expect(eventsOf(graph, '민주당')).toHaveLength(2)
+  })
+
+  it('사건에 속하지 않는 단어는 빈 배열이다', () => {
+    // 하루 70개 중 20개는 엣지가 하나도 없다. 오류가 아니라 그 단어가 어떤
+    // 이야기의 일부도 아니라는 뜻이고, 목록은 아무 행도 밝히지 않는다.
+    const graph = buildEvents(
+      [w('폭염', 9), w('열대야', 7), w('외톨이', 5)],
+      [e('폭염', '열대야')],
+      communities([['폭염', '열대야'], ['외톨이']]),
+    )
+
+    expect(eventsOf(graph, '외톨이')).toEqual([])
+    expect(eventsOf(graph, '없는단어')).toEqual([])
+  })
+})
+
+describe('topEvents — pinned', () => {
+  // 사건 8개, countSum이 i에 대해 단조 감소하므로 랭킹은 i 순서다.
+  function manyEvents() {
+    const many: EventWord[] = []
+    const pairs: GraphEdge[] = []
+    const groups: string[][] = []
+    for (let i = 0; i < 8; i++) {
+      many.push(w(`a${i}`, 10 - i), w(`b${i}`, 9 - i))
+      pairs.push(e(`a${i}`, `b${i}`))
+      groups.push([`a${i}`, `b${i}`])
+    }
+    return buildEvents(many, pairs, communities(groups)).events
+  }
+
+  const indexOf = (events: NewsEvent[], word: string) =>
+    events.findIndex((ev) => ev.words.some((x) => x.word === word))
+
+  it('상위 밖의 사건을 pin하면 목록 끝에 한 줄 붙는다', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, { pinned: [indexOf(events, 'a7')] })
+
+    expect(ranked).toHaveLength(6)
+    expect(ranked[5].event.words[0].word).toBe('a7')
+  })
+
+  it('이미 상위에 있는 사건을 pin해도 중복되지 않는다', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, { pinned: [indexOf(events, 'a1')] })
+
+    expect(ranked).toHaveLength(5)
+    expect(ranked.filter((r) => r.event.words[0].word === 'a1')).toHaveLength(1)
+  })
+
+  it('여러 개를 pin하면 랭킹 순서대로 붙는다', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, {
+      pinned: [indexOf(events, 'a7'), indexOf(events, 'a5')],
+    })
+
+    expect(ranked.slice(5).map((r) => r.event.words[0].word)).toEqual(['a5', 'a7'])
+  })
+
+  it('pin은 잘리는 쪽의 상한을 늘리지 않는다', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, { pinned: [indexOf(events, 'a7')] })
+
+    // 앞의 다섯은 여전히 랭킹 상위 다섯 그대로다.
+    expect(ranked.slice(0, 5).map((r) => r.event.words[0].word)).toEqual([
+      'a0', 'a1', 'a2', 'a3', 'a4',
+    ])
   })
 })
 

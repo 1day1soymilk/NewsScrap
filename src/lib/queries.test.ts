@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearQueryCache } from './queryCache'
 
 const mockSupabase = {
   from: vi.fn(),
@@ -10,16 +11,25 @@ vi.mock('./supabaseClient', () => ({ supabase: mockSupabase }))
 const {
   fetchAvailableDates,
   fetchEventHeadlineCounts,
+  fetchHeadlineCount,
   fetchHeadlinesForEvent,
   fetchHeadlinesForWord,
   fetchKeywordGraph,
   fetchWordCounts,
+  fetchWordCountsFor,
 } = await import('./queries')
+
+// 이 파일의 함수들은 모듈 수준 캐시를 공유하므로, 비우지 않으면 한 테스트의
+// 응답이 다음 테스트로 새어 간다.
+beforeEach(() => {
+  clearQueryCache()
+})
 
 function makeQueryChain(result: { data: unknown; error: unknown }) {
   const chain = {
     select: vi.fn(() => chain),
     eq: vi.fn(() => chain),
+    in: vi.fn(() => chain),
     is: vi.fn(() => chain),
     order: vi.fn(() => chain),
     limit: vi.fn(() => chain),
@@ -284,5 +294,103 @@ describe('fetchHeadlinesForEvent', () => {
     mockSupabase.rpc.mockClear()
     expect(await fetchHeadlinesForEvent('2026-07-31', null, [])).toEqual([])
     expect(mockSupabase.rpc).not.toHaveBeenCalled()
+  })
+})
+
+describe('캐시', () => {
+  it('같은 날짜·카테고리의 그래프는 한 번만 물어보고 **같은 객체**를 돌려준다', async () => {
+    // 같은 객체라는 것이 요점의 절반이다. App.tsx의 메모는 전부 신원 비교라,
+    // 값만 같고 객체가 다르면 라벨 측정 70회와 루뱅 분할과 300틱이 다시 돈다.
+    mockSupabase.rpc.mockClear()
+    mockSupabase.rpc.mockResolvedValue({ data: { nodes: [], edges: [] }, error: null })
+
+    const first = await fetchKeywordGraph('2026-08-01', 'politics')
+    const second = await fetchKeywordGraph('2026-08-01', 'politics')
+
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(1)
+    expect(second).toBe(first)
+  })
+
+  it('카테고리가 다르면 따로 물어본다', async () => {
+    mockSupabase.rpc.mockClear()
+    mockSupabase.rpc.mockResolvedValue({ data: { nodes: [], edges: [] }, error: null })
+
+    await fetchKeywordGraph('2026-08-01', 'politics')
+    await fetchKeywordGraph('2026-08-01', null)
+
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(2)
+  })
+
+  it('그래프 요청이 실패하면 캐시하지 않는다 — 다시 시도가 실제로 다시 시도한다', async () => {
+    mockSupabase.rpc.mockClear()
+    mockSupabase.rpc
+      .mockResolvedValueOnce({ data: null, error: { message: 'boom' } })
+      .mockResolvedValue({ data: { nodes: [], edges: [] }, error: null })
+
+    await expect(fetchKeywordGraph('2026-08-01', null)).rejects.toThrow('boom')
+    await expect(fetchKeywordGraph('2026-08-01', null)).resolves.toEqual({ nodes: [], edges: [] })
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(2)
+  })
+
+  it('같은 사건 구성은 한 번만 세고, 구성이 바뀌면 다시 센다', async () => {
+    mockSupabase.rpc.mockClear()
+    mockSupabase.rpc.mockResolvedValue({ data: [63], error: null })
+
+    await fetchEventHeadlineCounts('2026-08-01', null, [['폭염']])
+    await fetchEventHeadlineCounts('2026-08-01', null, [['폭염']])
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(1)
+
+    await fetchEventHeadlineCounts('2026-08-01', null, [['트럼프']])
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(2)
+  })
+
+  it('같은 단어의 헤드라인은 다시 묻지 않는다', async () => {
+    const chain = makeQueryChain({ data: [], error: null })
+    mockSupabase.from.mockClear()
+    mockSupabase.from.mockReturnValue(chain)
+
+    await fetchHeadlinesForWord('2026-08-01', null, '폭염')
+    await fetchHeadlinesForWord('2026-08-01', null, '폭염')
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1)
+
+    await fetchHeadlinesForWord('2026-08-01', null, '양산')
+    expect(mockSupabase.from).toHaveBeenCalledTimes(2)
+  })
+
+  it('일 헤드라인 수는 날짜마다 한 번만 센다', async () => {
+    const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain), then: (r: (v: unknown) => unknown) => r({ count: 1144, error: null }) }
+    mockSupabase.from.mockClear()
+    mockSupabase.from.mockReturnValue(chain)
+
+    expect(await fetchHeadlineCount('2026-08-01')).toBe(1144)
+    expect(await fetchHeadlineCount('2026-08-01')).toBe(1144)
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('캐시 — 급상승 카운트', () => {
+  // 계획서는 이것을 캐시하지 않아도 된다고 봤다. 측정이 그 가정을 뒤집었다:
+  // 날짜를 앞뒤로 왕복하면 graphWords의 신원은 그대로여도 selectedDate가
+  // 바뀌므로 effect가 다시 돌고, 이 요청만 홀로 나간다.
+  it('같은 날짜·단어 집합은 다시 묻지 않고, 단어가 달라지면 다시 묻는다', async () => {
+    const chain = makeQueryChain({ data: [], error: null })
+    mockSupabase.from.mockClear()
+    mockSupabase.from.mockReturnValue(chain)
+
+    await fetchWordCountsFor(['2026-08-01', '2026-07-31'], ['폭염', '양산'])
+    await fetchWordCountsFor(['2026-08-01', '2026-07-31'], ['폭염', '양산'])
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1)
+
+    await fetchWordCountsFor(['2026-08-01', '2026-07-31'], ['폭염', '트럼프'])
+    expect(mockSupabase.from).toHaveBeenCalledTimes(2)
+  })
+
+  it('돌려주는 Map은 매번 같은 객체다', async () => {
+    mockSupabase.from.mockReturnValue(makeQueryChain({ data: [], error: null }))
+
+    const first = await fetchWordCountsFor(['2026-08-01'], ['폭염'])
+    const second = await fetchWordCountsFor(['2026-08-01'], ['폭염'])
+
+    expect(second).toBe(first)
   })
 })

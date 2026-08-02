@@ -1,3 +1,4 @@
+import { cached } from './queryCache'
 import { supabase } from './supabaseClient'
 import type {
   Category,
@@ -73,12 +74,26 @@ export async function fetchWordCounts(
 // the truncated denominators inflated every ratio by 11% and turned 12 of the
 // 110 drawn words into false "new"s. Naming the words bounds the response by
 // render_cap (130) instead, which cannot be truncated.
-export async function fetchWordCountsFor(
+// 날짜를 앞뒤로 왕복하면 graphWords의 신원은 그대로여도 selectedDate가 바뀌므로
+// 급상승 effect가 다시 돈다 — 캐시가 없으면 이 요청만 홀로 다시 나간다. 측정으로
+// 확인한 것이고, 캐시를 씌우기 전 복귀 왕복의 유일한 잔여 요청이 이것이었다.
+export function fetchWordCountsFor(
+  dates: string[],
+  words: string[],
+): Promise<Map<string, WordCount[]>> {
+  if (dates.length === 0 || words.length === 0) {
+    return Promise.resolve(new Map(dates.map((date) => [date, []])))
+  }
+  return cached(`word-counts|${dates.join(',')}|${words.join(',')}`, () =>
+    wordCountsFor(dates, words),
+  )
+}
+
+async function wordCountsFor(
   dates: string[],
   words: string[],
 ): Promise<Map<string, WordCount[]>> {
   const byDate = new Map<string, WordCount[]>(dates.map((date) => [date, []]))
-  if (dates.length === 0 || words.length === 0) return byDate
 
   const { data, error } = await supabase
     .from('daily_word_counts')
@@ -99,13 +114,15 @@ export async function fetchWordCountsFor(
 // come back at all, so the 1,000-row cap cannot apply. This is the denominator
 // that makes two days comparable — 2026-08-01 was collected twice and holds
 // 1,144 headlines against 2026-07-31's 899.
-export async function fetchHeadlineCount(date: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('headlines')
-    .select('*', { count: 'exact', head: true })
-    .eq('collected_date', date)
-  if (error) throw queryError(error)
-  return count ?? 0
+export function fetchHeadlineCount(date: string): Promise<number> {
+  return cached(`headline-count|${date}`, async () => {
+    const { count, error } = await supabase
+      .from('headlines')
+      .select('*', { count: 'exact', head: true })
+      .eq('collected_date', date)
+    if (error) throw queryError(error)
+    return count ?? 0
+  })
 }
 
 // An RPC rather than a view because the node and edge cuts and the NPMI
@@ -115,36 +132,41 @@ export async function fetchHeadlineCount(date: string): Promise<number> {
 // Postgres renders numeric as a bare JSON number, so these arrive as JS numbers
 // already; the coercion is here for the same reason fetchWordCounts has it —
 // nothing downstream should have to wonder.
-export async function fetchKeywordGraph(
+// 캐시되는 것 중 이것이 가장 크게 남는다. 같은 객체가 돌아오면 App.tsx의 graph
+// 신원이 유지되고, 그 아래가 통째로 건너뛰어진다 — 급상승 요청 3개, 라벨 측정
+// 70회, 루뱅 분할, 300틱 시뮬레이션, 엣지 곡선 탐색, 그리고 event_headline_counts.
+export function fetchKeywordGraph(
   date: string,
   categorySlug: string | null,
 ): Promise<KeywordGraphData> {
-  const { data, error } = await supabase.rpc('keyword_graph', {
-    p_date: date,
-    p_category: categorySlug,
+  return cached(`graph|${date}|${categorySlug ?? '*'}`, async () => {
+    const { data, error } = await supabase.rpc('keyword_graph', {
+      p_date: date,
+      p_category: categorySlug,
+    })
+    if (error) throw queryError(error)
+
+    const raw = (data ?? { nodes: [], edges: [] }) as {
+      nodes?: GraphNode[]
+      edges?: GraphEdge[]
+    }
+
+    return {
+      nodes: (raw.nodes ?? []).map((node) => ({
+        ...node,
+        count: Number(node.count),
+        spec: numeric(node.spec),
+        standalone: numeric(node.standalone),
+        neighbors_per_doc: numeric(node.neighbors_per_doc),
+        assoc: numeric(node.assoc),
+      })),
+      edges: (raw.edges ?? []).map((edge) => ({
+        ...edge,
+        cooc: Number(edge.cooc),
+        npmi: Number(edge.npmi),
+      })),
+    }
   })
-  if (error) throw queryError(error)
-
-  const raw = (data ?? { nodes: [], edges: [] }) as {
-    nodes?: GraphNode[]
-    edges?: GraphEdge[]
-  }
-
-  return {
-    nodes: (raw.nodes ?? []).map((node) => ({
-      ...node,
-      count: Number(node.count),
-      spec: numeric(node.spec),
-      standalone: numeric(node.standalone),
-      neighbors_per_doc: numeric(node.neighbors_per_doc),
-      assoc: numeric(node.assoc),
-    })),
-    edges: (raw.edges ?? []).map((edge) => ({
-      ...edge,
-      cooc: Number(edge.cooc),
-      npmi: Number(edge.npmi),
-    })),
-  }
 }
 
 // assoc is null for a word that never shares a headline, and spec is null when
@@ -171,7 +193,17 @@ interface HeadlineRow {
   }
 }
 
-export async function fetchHeadlinesForWord(
+export function fetchHeadlinesForWord(
+  date: string,
+  categorySlug: string | null,
+  word: string,
+): Promise<HeadlineSummary[]> {
+  return cached(`word-headlines|${date}|${categorySlug ?? '*'}|${word}`, () =>
+    headlinesForWord(date, categorySlug, word),
+  )
+}
+
+async function headlinesForWord(
   date: string,
   categorySlug: string | null,
   word: string,
@@ -214,13 +246,25 @@ export async function fetchHeadlinesForWord(
 //
 // 하루의 사건 전부를 한 번에 묻는다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
 // 합으로 정해지는데, 그 합이 바로 이 함수가 고치려는 값이다.
-export async function fetchEventHeadlineCounts(
+export function fetchEventHeadlineCounts(
   date: string,
   categorySlug: string | null,
   events: string[][],
 ): Promise<number[]> {
-  if (events.length === 0) return []
+  if (events.length === 0) return Promise.resolve([])
+  // 사건 구성이 키의 일부다. 분할이 달라지면 답도 달라지고, 순서가 곧 신원이라
+  // 남의 구성에 붙은 답을 쓰면 화면에서 틀려 보이지 않는다.
+  return cached(
+    `event-counts|${date}|${categorySlug ?? '*'}|${events.map((e) => e.join(',')).join(';')}`,
+    () => eventHeadlineCounts(date, categorySlug, events),
+  )
+}
 
+async function eventHeadlineCounts(
+  date: string,
+  categorySlug: string | null,
+  events: string[][],
+): Promise<number[]> {
   const { data, error } = await supabase.rpc('event_headline_counts', {
     p_date: date,
     p_category: categorySlug,
@@ -242,13 +286,23 @@ export async function fetchEventHeadlineCounts(
 // 한 사건의 헤드라인. fetchHeadlinesForWord의 200행 상한을 여기 그대로 쓰면
 // 74건짜리 사건이 164행을 소비해 여유가 22%밖에 없으므로, 상한을 올리는 대신
 // 서버에서 유일화해 상한 자체를 없앤다.
-export async function fetchHeadlinesForEvent(
+export function fetchHeadlinesForEvent(
   date: string,
   categorySlug: string | null,
   words: string[],
 ): Promise<HeadlineSummary[]> {
-  if (words.length === 0) return []
+  if (words.length === 0) return Promise.resolve([])
+  return cached(
+    `event-headlines|${date}|${categorySlug ?? '*'}|${words.join(',')}`,
+    () => headlinesForEvent(date, categorySlug, words),
+  )
+}
 
+async function headlinesForEvent(
+  date: string,
+  categorySlug: string | null,
+  words: string[],
+): Promise<HeadlineSummary[]> {
   const { data, error } = await supabase.rpc('event_headlines', {
     p_date: date,
     p_category: categorySlug,

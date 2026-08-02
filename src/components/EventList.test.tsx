@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { EventList } from './EventList'
+import { UNFOCUSED_OPACITY } from '../lib/focus'
 import type { RankedEvent } from '../lib/events'
 
 function ranked(words: string[], headlines: number | null, index = 0): RankedEvent {
@@ -63,6 +64,46 @@ describe('EventList', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /폭염/ }))
     expect(onSelect).toHaveBeenCalledWith('폭염')
+  })
+
+  it('related에 든 사건만 남고 나머지는 캔버스와 같은 값으로 물러난다', () => {
+    // 캔버스에서 단어를 눌렀을 때. 목록은 그 단어가 어느 이야기의 일부인지를
+    // 말하고, 나머지는 캔버스가 하는 것과 같은 방식으로 뒤로 물러난다.
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0), ranked(['트럼프', '하마스'], 39, 1)]}
+        selected={null}
+        related={new Set(['트럼프'])}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    const lit = screen.getByRole('button', { name: /트럼프/ })
+    const dimmed = screen.getByRole('button', { name: /폭염/ })
+
+    expect(lit).toHaveAttribute('data-related', 'true')
+    expect(dimmed).not.toHaveAttribute('data-related')
+    expect(dimmed).toHaveStyle({ opacity: String(UNFOCUSED_OPACITY) })
+    expect(lit).not.toHaveStyle({ opacity: String(UNFOCUSED_OPACITY) })
+  })
+
+  it('밝힐 사건이 없으면 아무 행도 물러나지 않는다', () => {
+    // 엣지가 하나도 없는 단어를 눌렀을 때. 하루 70개 중 20개가 그렇다.
+    // 목록 전체가 흐려지면 고장으로 읽힌다.
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0), ranked(['트럼프', '하마스'], 39, 1)]}
+        selected={null}
+        related={new Set()}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    for (const name of [/폭염/, /트럼프/]) {
+      expect(screen.getByRole('button', { name })).not.toHaveStyle({
+        opacity: String(UNFOCUSED_OPACITY),
+      })
+    }
   })
 
   it('선택된 항목만 aria-pressed다', () => {

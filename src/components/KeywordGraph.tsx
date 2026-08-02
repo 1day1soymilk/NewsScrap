@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { computeGraphLayout } from './graphLayout'
+import { computeGraphLayout, nextLayoutWidth } from './graphLayout'
 import type { MeasuredWord } from './graphLayout'
 import { computeFontSizes } from './wordCloudLayout'
+import { UNFOCUSED_OPACITY } from '../lib/focus'
 import { NEUTRAL_INK, sectionColor } from '../lib/sectionColors'
 import type { KeywordGraphData } from '../lib/types'
 import type { Surge } from '../lib/surge'
@@ -34,8 +35,9 @@ const FALLBACK_WIDTH = 700
 // `faded`, so this is a second copy of that number by necessity. Kept slightly
 // higher because 0.3 on a white background is barely legible.
 const FADED_OPACITY = 0.38
-// Everything outside the focused word's neighbourhood.
-const UNFOCUSED_OPACITY = 0.1
+// Everything outside the focused word's neighbourhood. Shared with EventList,
+// which recedes the same way when a word is picked, so the two cannot drift to
+// different strengths of the same gesture.
 
 // Section inks live in src/lib/sectionColors.ts because CategoryTabs draws the
 // same six as the graph's colour key, and the two have to be the same values.
@@ -126,27 +128,44 @@ export function KeywordGraph({
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(FALLBACK_WIDTH)
 
+  // 첫 측정은 문턱과 무관하게 채택한다. FALLBACK_WIDTH에서 출발하므로 실제
+  // 컨테이너가 우연히 그 8px 안에 들면 영영 가짜 폭으로 그리게 된다.
+  const measuredOnce = useRef(false)
+
   useEffect(() => {
     const element = containerRef.current
     if (!element || typeof ResizeObserver === 'undefined') return
 
     const observer = new ResizeObserver((entries) => {
       const measured = entries[0]?.contentRect.width ?? 0
-      if (measured > 0) setWidth(measured)
+      setWidth((current) => {
+        const next = nextLayoutWidth(current, measured, measuredOnce.current ? undefined : 0)
+        if (next === null) return current
+        measuredOnce.current = true
+        return next
+      })
     })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
 
+  // 레이아웃은 렌더 경로 안에서 도는 가장 비싼 계산이다. 리사이즈 중에는 뒤로
+  // 미뤄, 다시 그리는 동안에도 페인트가 막히지 않게 한다. 폭이 바뀌지 않는
+  // 보통의 상호작용(단어 클릭 등)에서는 값이 같으므로 아무 차이도 없다.
+  const layoutWidth = useDeferredValue(width)
+
   const height = useMemo(() => {
-    if (width >= NARROW_WIDTH) {
-      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_RATIO)))
+    if (layoutWidth >= NARROW_WIDTH) {
+      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(layoutWidth * HEIGHT_RATIO)))
     }
     return Math.min(
       NARROW_MAX_HEIGHT,
-      Math.max(MIN_HEIGHT, Math.round(width * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD)),
+      Math.max(
+        MIN_HEIGHT,
+        Math.round(layoutWidth * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD),
+      ),
     )
-  }, [width, graph.nodes.length])
+  }, [layoutWidth, graph.nodes.length])
 
   const measured = useMemo<MeasuredWord[]>(() => {
     // computeFontSizes is the word cloud's, reused unchanged: size stays
@@ -165,8 +184,8 @@ export function KeywordGraph({
   }, [graph.nodes])
 
   const layout = useMemo(
-    () => computeGraphLayout(measured, graph.edges, { width, height }),
-    [measured, graph.edges, width, height],
+    () => computeGraphLayout(measured, graph.edges, { width: layoutWidth, height }),
+    [measured, graph.edges, layoutWidth, height],
   )
 
   useEffect(() => {

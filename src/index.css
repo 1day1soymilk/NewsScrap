@@ -1,9 +1,16 @@
-@import "tailwindcss";
 /* Display face, used on the masthead date and the panel heading only. The graph
    measures its labels on a canvas against FONT_FAMILY in KeywordGraph.tsx, so
    the canvas deliberately stays on the system stack: a webfont there would be
-   measured before it loaded and every label box would be the wrong width. */
+   measured before it loaded and every label box would be the wrong width.
+
+   **This has to come before @import "tailwindcss"**, not after it. That import
+   is inlined into ~940 lines of rules, so a font import written below it lands
+   after real statements, and CSS drops any @import that does — postcss says so
+   ("@import must precede all other statements") and the browser agrees
+   silently. Written second, this file compiled fine and the masthead simply
+   fell back to ui-serif; the face was never once loaded. */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap');
+@import "tailwindcss";
 
 /* Tailwind v4 through the Vite plugin — there is no config file. Everything in
    @theme is emitted as a custom property on :root, which is what lets

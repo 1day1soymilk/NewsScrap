@@ -38,6 +38,16 @@ export interface EventGraph {
   bridges: Map<string, number[]>
 }
 
+export interface TopEventsOptions {
+  /** 목록의 길이. 기본 5. */
+  limit?: number
+  /**
+   * 순위와 무관하게 목록에 반드시 나타나야 하는 사건의 index. 캔버스에서 누른
+   * 단어가 상위 밖 사건에 속할 때 그 사건이 이름을 갖게 한다.
+   */
+  pinned?: readonly number[]
+}
+
 export interface RankedEvent {
   event: NewsEvent
   /** 중복 제거된 기사 수. 카운트 RPC가 실패하면 null이고 화면은 자리를 비운다. */
@@ -196,7 +206,7 @@ function fullyAligned(events: NewsEvent[], headlines: number[] | null): headline
 export function topEvents(
   events: NewsEvent[],
   headlines: number[] | null,
-  limit: number = DEFAULT_LIMIT,
+  { limit = DEFAULT_LIMIT, pinned = [] }: TopEventsOptions = {},
 ): RankedEvent[] {
   // 카운트는 전부 있거나 전부 없다(RPC 한 번)는 것은 호출자의 관례일 뿐이고,
   // 이 함수는 그 관례를 믿지 않는다. fullyAligned가 배열 전체가 채워져
@@ -204,14 +214,38 @@ export function topEvents(
   // countSum을 쓰게 된다 — 실제 수와 합계가 한 비교 안에서 섞이는 일은 이
   // 함수 자체가 막는다.
   const counts = fullyAligned(events, headlines) ? headlines : null
-  return events
+  const ranked = events
     .map((event) => ({ event, headlines: counts?.[event.index] ?? null }))
     .sort(
       (a, b) =>
         (b.headlines ?? b.event.countSum) - (a.headlines ?? a.event.countSum) ||
         a.event.words[0].word.localeCompare(b.event.words[0].word),
     )
-    .slice(0, limit)
+
+  const shown = ranked.slice(0, limit)
+  // 상한 밖으로 밀린 사건이라도 지금 화면에서 보고 있는 것이면 이름을 갖는다.
+  // 잘리는 쪽의 상한은 그대로 두고 **뒤에 덧붙인다** — 끼워 넣으면 순위가
+  // 아닌 것이 순위인 척하게 된다.
+  const held = new Set(shown.map((r) => r.event.index))
+  for (const entry of ranked) {
+    if (held.has(entry.event.index) || !pinned.includes(entry.event.index)) continue
+    shown.push(entry)
+    held.add(entry.event.index)
+  }
+  return shown
+}
+
+// 그 단어가 속한 사건들. 다리 단어는 닿는 사건 전부이고, 그것이 캔버스의
+// focusWords가 다리에 대해 켜는 집합과 같아야 한다. 어느 사건에도 속하지 않는
+// 단어(하루 70개 중 20개는 엣지가 없다)는 빈 배열이다.
+//
+// buildEvents가 만든 분할만 읽는다 — 소속을 여기서 다시 계산하면 keyword_signals를
+// 손으로 베낀 것과 같은 함정이 된다.
+export function eventsOf(graph: EventGraph, word: string): number[] {
+  const bridged = graph.bridges.get(word)
+  if (bridged) return bridged
+  const index = graph.events.findIndex((event) => event.words.some((x) => x.word === word))
+  return index === -1 ? [] : [index]
 }
 
 // 목록 한 줄에 보일 단어와, 가려진 나머지 수.

@@ -101,6 +101,41 @@ test('다리 단어는 양쪽 사건 전체를 살리고, 보통 단어는 직�
   await expect(page.getByRole('heading', { name: /^"국회" 관련 헤드라인/ })).toBeVisible()
 })
 
+test('캔버스 단어를 누르면 그 단어가 속한 사건의 행만 목록에 남는다', async ({ page }) => {
+  await mockSupabase(page, withEvents)
+  await page.goto('/')
+
+  await label(page, '여야').click()
+
+  await expect(eventItem(page, '예산안')).toHaveAttribute('data-related', 'true')
+  await expect(eventItem(page, '폭염')).not.toHaveAttribute('data-related', 'true')
+  await expect(eventItem(page, '폭염')).toHaveCSS('opacity', UNFOCUSED)
+})
+
+test('다리 단어를 누르면 그것이 닿는 사건의 행이 전부 남는다', async ({ page }) => {
+  await mockSupabase(page, withEvents)
+  await page.goto('/')
+
+  // 캔버스가 두 사건 전체를 살리는 것과 같은 집합이어야 한다. 목록이 더 좁게
+  // 밝히면 다리가 다리로 보이지 않는다.
+  await label(page, '국회').click()
+
+  await expect(eventItem(page, '예산안')).toHaveAttribute('data-related', 'true')
+  await expect(eventItem(page, '폭염')).toHaveAttribute('data-related', 'true')
+})
+
+test('어느 사건에도 속하지 않는 단어를 누르면 아무 행도 물러나지 않는다', async ({ page }) => {
+  await mockSupabase(page, withEvents)
+  await page.goto('/')
+
+  // 까마귀는 엣지가 없다. 밝힐 사건이 없을 때 목록 전체가 흐려지면 고장으로
+  // 읽히므로, 그때는 아무것도 건드리지 않는다.
+  await label(page, '까마귀').click()
+
+  await expect(eventItem(page, '예산안')).toHaveCSS('opacity', '1')
+  await expect(eventItem(page, '폭염')).toHaveCSS('opacity', '1')
+})
+
 test('단어 선택과 사건 선택은 상호 배타다', async ({ page }) => {
   await mockSupabase(page, withEvents)
   await page.goto('/')

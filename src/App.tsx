@@ -15,7 +15,7 @@ import {
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate } from './lib/dateNav'
-import { buildEvents, eventLabel, sameCommunities, topEvents } from './lib/events'
+import { buildEvents, eventLabel, eventsOf, sameCommunities, topEvents } from './lib/events'
 import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
@@ -267,9 +267,30 @@ function App() {
   // 숫자는 그것을 물어본 바로 그 사건 목록에만 붙는다. 신원이 어긋나면 null로
   // 떨어지고 topEvents는 countSum 순서로 돌아간다 — 어제의 숫자로 오늘을 정렬하는
   // 일은 여기서 구조적으로 불가능하다.
+  // 캔버스에서 누른 단어가 속한 사건들. 다리 단어는 닿는 사건 전부 — 캔버스의
+  // focusWords가 다리에 대해 켜는 집합과 같다.
+  //
+  // 캔버스와 목록이 켜는 것이 서로 다른 것은 의도다: 캔버스는 단어와 그 이웃을
+  // 켜고(사건 경계를 넘을 수 있다), 목록은 소속을 말한다. 다른 질문이므로
+  // 일치시키지 않는다.
+  const relatedEvents = useMemo(
+    () => (selectedWord ? eventsOf(eventGraph, selectedWord) : []),
+    [eventGraph, selectedWord],
+  )
+
   const rankedEvents = useMemo(
-    () => topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null),
-    [eventGraph, eventCounts],
+    () =>
+      topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null, {
+        // 상위 5개 밖의 사건에 속한 단어를 눌러도 그 사건이 이름을 갖도록
+        // 목록 끝에 한 줄 붙인다.
+        pinned: relatedEvents,
+      }),
+    [eventGraph, eventCounts, relatedEvents],
+  )
+
+  const relatedTopWords = useMemo(
+    () => new Set(relatedEvents.map((index) => eventGraph.events[index].words[0].word)),
+    [eventGraph, relatedEvents],
   )
 
   const activeEvent = useMemo(() => {
@@ -414,6 +435,7 @@ function App() {
                 <EventList
                   events={rankedEvents}
                   selected={selectedEvent}
+                  related={relatedTopWords}
                   onSelect={(topWord) => {
                     setSelectedWord(null)
                     setSelectedEvent((current) => (current === topWord ? null : topWord))

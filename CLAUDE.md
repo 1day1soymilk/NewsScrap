@@ -213,6 +213,38 @@ data underneath it and `20_unlabeled.sql` returned eight words that had never
 been near the cut before. **Run it before the harness, every time, whatever
 changed.**
 
+### Reading the same view twice costs nothing
+
+`src/lib/queryCache.ts` sits under five of the query functions and holds the
+**promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
+rejections evicted immediately so "다시 시도" really retries). Two things follow
+that are easy to underrate:
+
+- **The point is object identity, not the network.** `App.tsx` compares
+  identities everywhere — `graph`, `graphWords`, `partition.graph === graph`,
+  `eventCounts.of === eventGraph`. Handing back the same object skips the label
+  measurement, the Louvain partition, the 300-tick simulation, the edge routing
+  **and** the follow-up round trips, and the event list appears without its
+  one blank frame. Measured on a tab round trip A→B→A: 6 requests on return
+  became 0; on a date step there→back, 9 became 0.
+- **`fetchWordCountsFor` needs it too**, which an earlier reading of this got
+  wrong: `graphWords` keeps its identity across a date step, but `selectedDate`
+  changes, so the surge effect re-runs regardless. Before it was cached it was
+  the only request still going out on a return trip.
+
+Tests share the module-level cache, so `queries.test.ts` calls
+`clearQueryCache()` in a `beforeEach`. Without it one test's response leaks into
+the next.
+
+`src/lib/supabaseClient.ts` builds a **`PostgrestClient` directly** rather than
+calling `createClient`. There is no login, no realtime, no storage and no
+function invocation here, but `createClient` instantiates auth-js and
+realtime-js eagerly, so no bundler can drop them: they were 443 kB of the built
+JS. The two headers supabase-js used to add — `apikey` and the `Bearer` token,
+both the same anon key — are set by hand, and nothing about the access model
+moves. Bundle went to 251 kB (gzip 130 → 81). The Edge Function still uses
+`npm:@supabase/supabase-js` and is unaffected.
+
 ### Design tokens
 
 Every colour on screen is defined once, in the `@theme` block in
@@ -241,6 +273,13 @@ places, the words and the dot on the tab that filters for them, and
 `src/lib/sectionColors.ts` is the one definition both read. A key that names a
 different green from the one on screen is worse than no key, so
 `e2e/keywordGraph.spec.ts` asserts the two resolve to the same rgb.
+
+**The webfont `@import` has to come before `@import "tailwindcss"`.** That
+import is inlined into ~940 lines of rules, so a font import written below it
+lands after real statements and CSS drops it — postcss says so during the build
+("@import must precede all other statements") and the browser agrees silently.
+Written second, the file compiled fine, the masthead fell back to `ui-serif`,
+and Noto Serif KR was never once loaded.
 
 `--font-display` (Noto Serif KR) is used on the masthead date and the panel
 heading and **nowhere else**. The graph measures its labels on a canvas against
@@ -302,6 +341,15 @@ Three things there were arrived at by looking at real days, not by reasoning:
   is three rings rather than one circle because a single radius is not long
   enough to hold them side by side, and they stack on it — again caught by the
   overlap test. With nothing connected at all the push is skipped entirely.
+
+- **A resize under 8px does not re-run the layout** (`nextLayoutWidth`), and the
+  width feeding it goes through `useDeferredValue` so a re-layout does not block
+  paint. One layout of 70 words and 60 edges measures **48ms**, and the cost is
+  the simulation rather than the edge routing — with the edges removed entirely
+  it is still 37.5ms, while 20 words with the same 60 edges is 5.5ms. Dragging a
+  window edge from 1280 to 358 at 6px a frame ran 154 layouts and now runs 76.
+  The 8px is invisible because the svg is drawn at its own size and then scaled
+  by `max-w-full`.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -428,6 +476,18 @@ reimplemented either.
   transition blanks the list for one frame rather than showing yesterday's
   events, or yesterday's numbers, or ranking on them. Length is not a check: the
   archive's three days hold 15, 14 and 15 events.
+- **The list answers the canvas back.** Clicking a word on the canvas lights the
+  row of the event it belongs to and recedes the others at the canvas's own
+  `UNFOCUSED_OPACITY` (`src/lib/focus.ts` holds that number once, for both).
+  A bridging word lights every row it touches, matching what `focusWords` does
+  on the canvas. **Canvas and list deliberately light different sets**: the
+  canvas lights a word and its neighbours, which can cross an event boundary,
+  while the list states membership. Two different questions, not a mismatch to
+  fix. An event ranked below the list's five is **pinned onto the end** rather
+  than inserted, so a clicked word always has a name without anything
+  pretending to a rank it does not hold. With no event to light — 20 of the 70
+  words hold no edge — **nothing is dimmed at all**; a wholly grey list reads as
+  a fault.
 - **A word selection and an event selection are mutually exclusive**, in the
   click handlers and in the query string alike (`?word=` or `?event=`, never
   both). Two lit sets at once cannot be read off the canvas.

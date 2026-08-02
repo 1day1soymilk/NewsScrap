@@ -239,6 +239,28 @@ function initialPosition(
   }
 }
 
+// 리사이즈가 폭을 이만큼 움직이기 전에는 레이아웃을 다시 돌리지 않는다.
+//
+// 한 번 도는 값이 크다 — 루뱅 분할, 300틱 시뮬레이션, 그리고 엣지마다 라벨
+// 박스를 훑는 곡선 탐색이 전부 렌더 경로 안에서 동기로 돈다. 창 가장자리를
+// 끄는 동안은 프레임마다 한 번이다.
+//
+// 8px이 보이지 않는 이유: svg는 자기 크기로 그려진 뒤 max-w-full로 축소되므로,
+// 8px 어긋난 폭으로 돈 레이아웃은 1% 다른 배율로 같은 그림을 낸다.
+const WIDTH_STEP = 8
+
+export function nextLayoutWidth(
+  current: number,
+  measured: number,
+  threshold: number = WIDTH_STEP,
+): number | null {
+  // 숨겨진 컨테이너의 ResizeObserver는 0을 보고한다. 그 폭으로 돌리면 라벨이
+  // 전부 한 점에 쌓인다.
+  if (!(measured > 0)) return null
+  const next = Math.round(measured)
+  return Math.abs(next - current) < threshold ? null : next
+}
+
 export function computeGraphLayout(
   words: MeasuredWord[],
   edges: GraphEdge[],
