@@ -187,6 +187,7 @@ describe('computeGraphLayout', () => {
       nodes: [],
       edges: [],
       clusters: [],
+      communities: new Map(),
       bounds: { x: 0, y: 0, width: 0, height: 0 },
     })
   })
@@ -487,5 +488,42 @@ describe('computeGraphLayout', () => {
 
     expect(find(nodes, '폭염')).toMatchObject({ fontSize: 48, faded: false })
     expect(find(nodes, '양산')).toMatchObject({ fontSize: 14, faded: true })
+  })
+})
+
+describe('communities', () => {
+  it('그려진 모든 단어에 배정을 준다 — 엣지가 없는 단어까지', () => {
+    const words = [word('폭염'), word('양산'), word('까마귀')]
+    const layout = computeGraphLayout(words, [edge('폭염', '양산')], SIZE)
+
+    expect(layout.communities.size).toBe(3)
+    expect(layout.communities.has('까마귀')).toBe(true)
+  })
+
+  it('한 클러스터의 단어들은 정확히 하나의 커뮤니티에 속한다', () => {
+    // 노출된 배정과 findClusters의 분할이 갈리면 목록이 캔버스와 다른 하루를
+    // 말하게 된다. clusterLimit을 올려 잘리지 않은 분할 전체를 본다.
+    const words = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'].map((w) => word(w))
+    const layout = computeGraphLayout(
+      words,
+      [edge('a1', 'a2'), edge('b1', 'b2'), edge('c1', 'c2')],
+      { ...SIZE, clusterLimit: 99 },
+    )
+
+    expect(layout.clusters.length).toBeGreaterThan(1)
+
+    const seen = new Set<number>()
+    for (const cluster of layout.clusters) {
+      const ids = new Set(cluster.words.map((w) => layout.communities.get(w)))
+      expect(ids.size).toBe(1)
+      const [id] = [...ids]
+      expect(id).toBeDefined()
+      expect(seen.has(id!)).toBe(false)
+      seen.add(id!)
+    }
+  })
+
+  it('단어가 없으면 빈 맵이다', () => {
+    expect(computeGraphLayout([], [], SIZE).communities.size).toBe(0)
   })
 })

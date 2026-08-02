@@ -83,6 +83,16 @@ export interface GraphLayout {
   edges: PlacedEdge[]
   /** Biggest first, so the day's top story is clusters[0]. Singletons omitted. */
   clusters: PlacedCluster[]
+  /**
+   * Every drawn word's Louvain community, uncut — including the singletons
+   * findClusters drops and the words past clusterLimit.
+   *
+   * The canvas does not use this; src/lib/events.ts does, to build the event
+   * list out of the same partition the cohesion force ran on. Exposing it
+   * rather than recomputing it is the point: a second copy of the partition is
+   * the hazard CLAUDE.md records against keyword_signals.
+   */
+  communities: Map<string, number>
   /** Tight box around the drawn labels, for cropping the viewport to them. */
   bounds: { x: number; y: number; width: number; height: number }
 }
@@ -239,6 +249,7 @@ export function computeGraphLayout(
       nodes: [],
       edges: [],
       clusters: [],
+      communities: new Map(),
       bounds: { x: 0, y: 0, width: 0, height: 0 },
     }
   }
@@ -380,6 +391,7 @@ export function computeGraphLayout(
     nodes: placed,
     edges: placedEdges,
     clusters,
+    communities,
     bounds: boundingBox(placed, clusters, padding),
   }
 }
