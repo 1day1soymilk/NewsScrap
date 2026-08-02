@@ -206,3 +206,55 @@ export async function fetchHeadlinesForWord(
   }
   return results
 }
+
+// 사건별 중복 제거 기사 수. RPC인 이유는 keyword_graph와 같다: count(distinct …)를
+// PostgREST가 표현할 수 없고, headline_nouns를 읽어 클라이언트에서 유일화하면
+// 응답이 1000행에 잘릴 수 있는데 잘려도 아무도 모른다 — 2026-08-02의 가장 큰
+// 사건이 이미 164행이고 이 수는 사건의 단어 수와 함께 자란다.
+//
+// 하루의 사건 전부를 한 번에 묻는다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
+// 합으로 정해지는데, 그 합이 바로 이 함수가 고치려는 값이다.
+export async function fetchEventHeadlineCounts(
+  date: string,
+  categorySlug: string | null,
+  events: string[][],
+): Promise<number[]> {
+  if (events.length === 0) return []
+
+  const { data, error } = await supabase.rpc('event_headline_counts', {
+    p_date: date,
+    p_category: categorySlug,
+    p_events: events,
+  })
+  if (error) throw queryError(error)
+
+  const counts = (data ?? []) as number[]
+  // 순서가 곧 신원이다. 어긋난 응답을 쓰면 사건에 남의 기사 수가 붙고, 그것은
+  // 화면에서 틀려 보이지 않는다.
+  if (counts.length !== events.length) {
+    throw new Error(
+      `event_headline_counts가 ${events.length}개를 물었는데 ${counts.length}개를 돌려줬습니다`,
+    )
+  }
+  return counts.map((count) => Number(count))
+}
+
+// 한 사건의 헤드라인. fetchHeadlinesForWord의 200행 상한을 여기 그대로 쓰면
+// 74건짜리 사건이 164행을 소비해 여유가 22%밖에 없으므로, 상한을 올리는 대신
+// 서버에서 유일화해 상한 자체를 없앤다.
+export async function fetchHeadlinesForEvent(
+  date: string,
+  categorySlug: string | null,
+  words: string[],
+): Promise<HeadlineSummary[]> {
+  if (words.length === 0) return []
+
+  const { data, error } = await supabase.rpc('event_headlines', {
+    p_date: date,
+    p_category: categorySlug,
+    p_words: words,
+  })
+  if (error) throw queryError(error)
+
+  return (data ?? []) as HeadlineSummary[]
+}

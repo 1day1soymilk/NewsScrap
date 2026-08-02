@@ -7,8 +7,14 @@ const mockSupabase = {
 
 vi.mock('./supabaseClient', () => ({ supabase: mockSupabase }))
 
-const { fetchAvailableDates, fetchHeadlinesForWord, fetchKeywordGraph, fetchWordCounts } =
-  await import('./queries')
+const {
+  fetchAvailableDates,
+  fetchEventHeadlineCounts,
+  fetchHeadlinesForEvent,
+  fetchHeadlinesForWord,
+  fetchKeywordGraph,
+  fetchWordCounts,
+} = await import('./queries')
 
 function makeQueryChain(result: { data: unknown; error: unknown }) {
   const chain = {
@@ -192,5 +198,91 @@ describe('fetchHeadlinesForWord', () => {
     await fetchHeadlinesForWord('2026-07-31', null, '폭염')
 
     expect(chain.limit).toHaveBeenCalledWith(200)
+  })
+})
+
+describe('fetchEventHeadlineCounts', () => {
+  it('세 인자를 그대로 넘기고 숫자 배열로 매핑한다', async () => {
+    mockSupabase.rpc.mockResolvedValue({ data: [63, 39], error: null })
+
+    const result = await fetchEventHeadlineCounts('2026-07-31', null, [
+      ['폭염', '양산'],
+      ['트럼프', '하마스'],
+    ])
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('event_headline_counts', {
+      p_date: '2026-07-31',
+      p_category: null,
+      p_events: [
+        ['폭염', '양산'],
+        ['트럼프', '하마스'],
+      ],
+    })
+    expect(result).toEqual([63, 39])
+  })
+
+  it('사건이 없으면 RPC를 부르지 않는다', async () => {
+    mockSupabase.rpc.mockClear()
+    expect(await fetchEventHeadlineCounts('2026-07-31', null, [])).toEqual([])
+    expect(mockSupabase.rpc).not.toHaveBeenCalled()
+  })
+
+  it('길이가 어긋나면 던진다', async () => {
+    // 순서가 곧 신원이므로, 짧은 응답을 그대로 쓰면 사건에 남의 기사 수가
+    // 붙고 화면상 그럴듯해 보인다. 조용히 틀리느니 시끄럽게 실패한다.
+    mockSupabase.rpc.mockResolvedValue({ data: [63], error: null })
+
+    await expect(
+      fetchEventHeadlineCounts('2026-07-31', null, [['폭염'], ['트럼프']]),
+    ).rejects.toThrow(/event_headline_counts/)
+  })
+
+  it('PostgREST 오류를 진짜 Error로 던진다', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: { message: 'boom', code: 'PGRST202' },
+    })
+
+    await expect(fetchEventHeadlineCounts('2026-07-31', null, [['폭염']])).rejects.toThrow(
+      'boom (PGRST202)',
+    )
+  })
+})
+
+describe('fetchHeadlinesForEvent', () => {
+  it('단어 배열을 넘기고 헤드라인으로 매핑한다', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: [
+        {
+          id: 'h1',
+          title: '폭염 특보 확대',
+          link: 'https://n.news.naver.com/article/001/0000000001',
+          category_slug: 'society',
+        },
+      ],
+      error: null,
+    })
+
+    const result = await fetchHeadlinesForEvent('2026-07-31', 'society', ['폭염', '양산'])
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('event_headlines', {
+      p_date: '2026-07-31',
+      p_category: 'society',
+      p_words: ['폭염', '양산'],
+    })
+    expect(result).toEqual([
+      {
+        id: 'h1',
+        title: '폭염 특보 확대',
+        link: 'https://n.news.naver.com/article/001/0000000001',
+        category_slug: 'society',
+      },
+    ])
+  })
+
+  it('단어가 없으면 RPC를 부르지 않는다', async () => {
+    mockSupabase.rpc.mockClear()
+    expect(await fetchHeadlinesForEvent('2026-07-31', null, [])).toEqual([])
+    expect(mockSupabase.rpc).not.toHaveBeenCalled()
   })
 })
