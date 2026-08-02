@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { computeGraphLayout } from './graphLayout'
 import type { MeasuredWord } from './graphLayout'
 import { computeFontSizes } from './wordCloudLayout'
@@ -54,17 +55,6 @@ const EDGE_COLOR = 'var(--color-edge)'
 // too crowded for any single curve to miss everything.
 const CROWDED_EDGE_FADE = 0.5
 
-// The top story is named in the caption and marked with this dot, and no longer
-// shaded on the canvas.
-//
-// A cluster's blob was the convex hull of its members' label boxes, so anything
-// that happened to sit between them was inside it. On 2026-08-01 the hull for
-// 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명 —
-// four words from other events. With six blobs that read as noise; with one it
-// read as a claim, and the claim was false. A hull can only be honest when its
-// members are already adjacent, which is exactly when it adds least.
-const TOP_STORY_TINT = 'var(--color-top-story)'
-
 // Day-over-day movement. One glyph for both "new" and "surging": a word that
 // was not there yesterday is the limiting case of one that grew, and two
 // symbols would need a legend to tell apart what the tooltip already says.
@@ -98,6 +88,29 @@ interface KeywordGraphProps {
   colorByCategory: boolean
   /** Words that grew against the previous collected day. Empty is normal. */
   surges: Map<string, Surge>
+  /**
+   * Whatever goes above the canvas — the event list, in practice. A slot
+   * rather than a component of its own so the list and the surge key share one
+   * bordered row; two stacked bordered rows read as two unrelated blocks.
+   */
+  header?: ReactNode
+  /**
+   * The words an event or a bridge selection holds lit. Null means no such
+   * selection, and the word focus below runs as it always has.
+   *
+   * An event lights its members and **not their neighbours**: a word selection
+   * expands to neighbours, but an event already is a neighbourhood, and
+   * expanding it would light the very event across a bridge that the merge
+   * rule declined to join — letting the display overturn that judgement.
+   */
+  focusWords?: Set<string> | null
+  /**
+   * The uncut Louvain partition, handed up so the event list is built from the
+   * same one the cohesion force ran on. Called on every resize; the assignment
+   * is a function of topology alone, so the value does not change and the
+   * caller compares content before acting on it.
+   */
+  onCommunities?: (communities: Map<string, number>) => void
 }
 
 export function KeywordGraph({
@@ -106,6 +119,9 @@ export function KeywordGraph({
   onWordClick,
   colorByCategory,
   surges,
+  header,
+  focusWords = null,
+  onCommunities,
 }: KeywordGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(FALLBACK_WIDTH)
@@ -153,6 +169,10 @@ export function KeywordGraph({
     [measured, graph.edges, width, height],
   )
 
+  useEffect(() => {
+    onCommunities?.(layout.communities)
+  }, [layout.communities, onCommunities])
+
   // Focus mode: the clicked word and whatever shares a headline with it stay
   // lit, everything else recedes. Empty when nothing is selected.
   const neighbors = useMemo(() => {
@@ -176,12 +196,21 @@ export function KeywordGraph({
 
   function nodeOpacity(word: string, faded: boolean): number {
     const base = faded ? FADED_OPACITY : 1
+    // 사건이나 다리가 선택되면 살아남는 집합이 밖에서 정해져 온다. 그럴 때는
+    // 이웃으로 넓히지 않는다 — 사건은 그 자체가 이미 이웃 집합이다.
+    if (focusWords) return focusWords.has(word) ? base : UNFOCUSED_OPACITY
     if (!selectedWord) return base
     if (word === selectedWord || neighbors.has(word)) return base
     return UNFOCUSED_OPACITY
   }
 
-  const topStory = layout.clusters[0]
+  // 엣지는 양끝이 다 살아 있을 때만 살아 있다. 단어 포커스일 때의 규칙은 그대로
+  // 둔다 — 이웃끼리 잇는 선까지 살리면 지금 화면이 달라진다.
+  function edgeLit(a: string, b: string): boolean {
+    if (focusWords) return focusWords.has(a) && focusWords.has(b)
+    if (!selectedWord) return true
+    return a === selectedWord || b === selectedWord
+  }
 
   // Only markers on words that were actually drawn can be clipped, so the
   // allowance is skipped entirely on a day with no movement rather than padding
@@ -202,30 +231,14 @@ export function KeywordGraph({
       {/* One rule of caption above the canvas rather than two centred lines
           floating in the gap between the toolbar and the first word — that gap
           was most of what made the top of the page read as empty.
-          The top story is named in text rather than drawn on the canvas: a
-          caption over the graph would have to dodge the labels, and the words it
-          names are already the ones inside the one shaded blob. The surge key is
-          here for the opposite reason — the mark is small and sits off the side
-          of a word, so without a key it reads as a rendering artefact. */}
-      {(topStory || marked) && (
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-2">
-          {/* Plain flowing text rather than a flex row: as flex children the
-              three parts each became their own column and wrapped inside
-              themselves on a phone, so the label broke as "오늘의 톱 스토 / 리". */}
-          {topStory && (
-            <p className="text-sm text-ink-faint">
-              <span
-                aria-hidden="true"
-                className="mr-2 inline-block size-2 rounded-full align-middle"
-                style={{ background: TOP_STORY_TINT }}
-              />
-              오늘의 톱 스토리{' '}
-              <span className="text-ink">{topStory.words.join(' · ')}</span>{' '}
-              <span className="whitespace-nowrap">{topStory.headlines}건</span>
-            </p>
-          )}
+          The header slot holds the event list. The surge key is here for its
+          own reason: the mark is small and sits off the side of a word, so
+          without a key it reads as a rendering artefact. */}
+      {(header || marked) && (
+        <div className="mb-4 border-b border-line pb-2">
+          {header}
           {marked && (
-            <p className="text-xs text-ink-faint">
+            <p className="mt-1 text-right text-xs text-ink-faint">
               <span className="mr-1" style={{ color: SURGE_COLOR }}>
                 {SURGE_MARK}
               </span>
@@ -259,8 +272,7 @@ export function KeywordGraph({
             // line, and several collinear dashes read as several relationships.
             const curve = edge.curve
             if (!curve) return null
-            const touchesSelection =
-              !selectedWord || edge.a === selectedWord || edge.b === selectedWord
+            const touchesSelection = edgeLit(edge.a, edge.b)
             return (
               <path
                 key={`${edge.a}--${edge.b}`}
