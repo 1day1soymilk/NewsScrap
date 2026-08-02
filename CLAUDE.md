@@ -169,6 +169,21 @@ time and should not be rediscovered:
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
   and 순회 all score a perfect 1.00, for the same reason the fragment 알뜰 does.
   Turning it off gained 6.8 and 14.2 F1 points on the two measured days.
+- **The neighbours clause is disabled too** (`max_neighbors_per_doc` −1, below
+  the signal's minimum of 0), by migration `0009`. Two of sieve 4's three
+  rescues are now retired and **the length clause is the sieve**: it admits 68
+  of the 70 drawn words, and its precision, 84.3%, is the whole sieve's. Do not
+  read that as a leak to be plugged. The four signals were measured against the
+  labels inside the length group and **not one of them separates its 112 good
+  words from its 22 bad** — character length runs the wrong way (bad 3.59, good
+  3.33), headline count is flat (7.0 against 7.2), and recurrence across the
+  archive's days is flat too, because at three days it measures "story that is
+  still running" rather than "word that recurs whatever the news". That is why
+  the dictionary is doing this work: there is no signal left, not because the
+  dictionary is a shortcut.
+- **`allow` entries are load-bearing, not decoration.** 폭염 and 양산 were given
+  theirs in `0003` as insurance against exactly the retune `0009` performed, and
+  they are now the only two words on the canvas not admitted by length.
 - **Category specificity must be computed across all six sections**, never within
   the filtered view. Inside one category every word sits in one bucket, entropy
   collapses to zero, and every word scores a perfect 1.
@@ -183,13 +198,20 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words on the two labelled days: 24.3% / 28.6%
-for frequency alone, 84.3% / 75.7% for the sieve with the dictionary. Those
-figures come from `analysis.word_labels` and are **not comparable to any
-percentage quoted elsewhere, or to any earlier figure in this file's history** —
-the label set has been extended four times and each extension moves them.
-Compare configurations against each other inside one run, never against a number
-someone wrote down.
+Measured precision of the top 70 words on the two labelled days: 24.3% / 30.0%
+for frequency alone, 84.3% / 84.3% for the sieve with the dictionary, from the
+run that decided `0009`. Those figures come from `analysis.word_labels` and are
+**not comparable to any percentage quoted elsewhere, or to any earlier figure in
+this file's history** — the label set has been extended five times and each
+extension moves them, most recently by `08_labels_after_dedup.sql`. Compare
+configurations against each other inside one run, never against a number someone
+wrote down.
+
+`08_labels_after_dedup.sql` is itself the second half of rule 4 firing:
+`02_sieve_configs.sql` was untouched, but migrations `0007` and `0008` moved the
+data underneath it and `20_unlabeled.sql` returned eight words that had never
+been near the cut before. **Run it before the harness, every time, whatever
+changed.**
 
 ### Design tokens
 
