@@ -552,7 +552,15 @@ archived days are not re-analysed.
 Migration `0007` collapsed the archive onto one row per article, which **moves
 both labelled days**. Before re-running `10_sieve_eval.sql` for any reason,
 re-run `20_unlabeled.sql` first: ranks near the cut are filled by different
-words now. Measured cost on the drawn set was small — 2 of the 70 words leave on
-each day and none of the edges do, and the biggest story does not move (김민석
-46→46 on 2026-08-02) — but "small" is not "none", and the percentages recorded
-above were taken before it.
+words now. Measured cost on the drawn set: nodes held at 70 on both days and
+the biggest story does not move (김민석 46→46 on 2026-08-02), but a pre-flight
+check that asked "do these 70 words' existing edges still clear
+`edge_min_cooc`" said edges were untouched, and that check was wrong — measured
+edges moved 47→36 on 2026-08-01 and 57→58 on 2026-08-02. **A check that holds
+the drawn node set fixed is not a check on the drawn graph**: edges are only
+drawn between drawn nodes, the ranking shift changes which 70 words those are,
+and the new set draws over a different pair set than the old one did. Some of
+the lost pairs were never real co-occurrence to begin with — a pair that
+appeared together in one story collected twice had been counted twice. The
+percentages recorded above were taken before any of this, on the pre-migration
+graph.
