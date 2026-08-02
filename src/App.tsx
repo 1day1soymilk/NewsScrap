@@ -16,7 +16,7 @@ import {
   fetchKeywordGraph,
   fetchWordCountsFor,
 } from './lib/queries'
-import { adjacentDate } from './lib/dateNav'
+import { adjacentDate, todayInSeoul } from './lib/dateNav'
 import { buildEvents, eventLabel, eventsOf, sameCommunities, topEvents } from './lib/events'
 import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
@@ -32,10 +32,6 @@ const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
 // effect에서 올라오기 때문이다 — 새 날의 그래프가 처음 그려지는 한 프레임 동안
 // 이 Map은 아직 어제 것이다.
 type Partition = { graph: KeywordGraphData; communities: Map<string, number> }
-
-function todayInSeoul(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
-}
 
 // Read before the categories query has resolved, so slugs cannot be validated
 // yet; parseUrlState takes an empty list to mean "not yet known" rather than

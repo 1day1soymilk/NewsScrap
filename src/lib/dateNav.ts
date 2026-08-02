@@ -1,6 +1,20 @@
 export type Direction = 'prev' | 'next'
 
 /**
+ * Today, in the timezone the archive is keyed by.
+ *
+ * 'sv-SE' is not a locale choice — it is the shortest way to get ISO
+ * `YYYY-MM-DD` out of `toLocaleDateString`, which is the form every date in
+ * this app is compared and stored as.
+ *
+ * Lives here rather than in App.tsx because main.tsx needs it too: the first
+ * graph request is started before React mounts.
+ */
+export function todayInSeoul(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+}
+
+/**
  * The nearest collected date on one side of `from`, or null if there is none.
  *
  * "Strictly before/after" rather than "one index along" because the app opens

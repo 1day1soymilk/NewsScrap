@@ -245,6 +245,14 @@ Tests share the module-level cache, so `queries.test.ts` calls
 `clearQueryCache()` in a `beforeEach`. Without it one test's response leaks into
 the next.
 
+**`main.tsx` fires the first `keyword_graph` request before React mounts**, off
+the URL, and the cache is what makes that safe rather than wasteful: App's own
+call gets the same promise and the same object back, so it is one request and
+one layout, not two. It pairs with the `preconnect` in `index.html` — the
+handshake is finished by the time this fires. Without the cache this line would
+simply add a request. The category comes from `parseUrlState` with no slug list
+yet, which is the same "not yet known" path App uses on first paint.
+
 **The skeleton is only raised for a view that actually has to be waited for.**
 `loadGraph` starts the request, then schedules the `setLoading(true)` on a
 microtask and skips it if the promise has already settled — which is what a
