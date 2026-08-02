@@ -1,6 +1,7 @@
-// 포커스 모드에서 물러난 것의 불투명도.
+// The opacity of everything that has receded in focus mode.
 //
-// 캔버스(KeywordGraph)와 사건 목록(EventList)이 같은 값을 쓴다. 두 곳이 같은
-// 동작을 하기 때문이고, 두 번째 사본을 두면 한쪽만 조정됐을 때 화면이 두 가지
-// 세기로 물러나게 된다 — 색 상수가 갈라졌던 것과 같은 위험이라 하나로 둔다.
+// The canvas (KeywordGraph) and the event list (EventList) use the same value
+// because they perform the same gesture. A second copy would let one of them be
+// tuned alone, and the screen would then recede at two different strengths —
+// the same hazard the colour constants already record.
 export const UNFOCUSED_OPACITY = 0.1

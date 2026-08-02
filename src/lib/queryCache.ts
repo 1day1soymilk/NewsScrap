@@ -1,48 +1,66 @@
 // src/lib/queryCache.ts
 //
-// 같은 날짜·카테고리를 다시 보는 것은 이 화면의 기본 동작이다 — 탭을 A→B→A로
-// 돌리거나 날짜를 하루 앞뒤로 왕복하는 것. 캐시가 없으면 그때마다 같은
-// keyword_graph RPC와 급상승 요청 3개와 event_headline_counts가 그대로 다시
-// 나간다.
+// Looking at the same day and section again is the normal way this screen is
+// used — flipping a tab A→B→A, or stepping a date there and back. Without a
+// cache each of those re-issues the same keyword_graph RPC, the same three
+// surge requests and the same event_headline_counts.
 //
-// **아끼는 것이 네트워크만이 아니다.** App.tsx의 메모는 전부 신원 비교이므로,
-// 같은 객체를 돌려주는 것만으로 그 아래가 통째로 건너뛰어진다: 캔버스의
-// measureText 70회, 루뱅 분할, 300틱 시뮬레이션, 엣지마다 도는 곡선 탐색까지.
-// 그래서 여기 담기는 것은 **결과가 아니라 promise**이고, 두 번째 호출은 첫
-// 번째가 만든 바로 그 객체를 받는다(진행 중인 요청의 중복 제거도 같은 코드로
-// 공짜다).
+// **What is saved is not only the network.** Every memo in App.tsx compares
+// identities, so handing back the same object skips everything downstream: 70
+// canvas text measurements, the Louvain partition, the 300-tick simulation and
+// the edge routing. That is why what is stored here is a **promise rather than
+// a result** — the second caller gets the very object the first one made, and
+// in-flight deduplication falls out of the same code for free.
 
-// 지난 날짜의 데이터는 불변이지만 오늘 것은 07:00 KST cron으로 바뀌고, 탭을
-// 열어 둔 채 그 경계를 넘을 수 있다.
+// A past day's data never changes, but today's does when the 07:00 KST cron
+// runs, and a tab can be left open across that boundary.
 export const CACHE_TTL_MS = 5 * 60 * 1000
 
-// 하루의 화면은 카테고리 7가지(전체 포함)이므로 며칠을 오가도 이 안에 든다.
-// 상한은 오래 연 세션이 무한정 자라지 않게 하는 것이지 적중률을 위한 값이 아니다.
+// A day's screen is seven views (six sections plus all), so several days of
+// browsing fit. The cap is here to bound growth in a long-lived tab, not to
+// maximise the hit rate.
 export const CACHE_MAX_ENTRIES = 24
 
 interface Entry {
-  /** 응답을 요청한 시각. 다시 읽혀도 갱신하지 않는다 — 아니면 계속 읽히는 키가 영원히 신선한 척한다. */
+  /**
+   * When the request went out. Deliberately not refreshed on a read: otherwise
+   * a key that keeps being read would look fresh forever and today's graph
+   * would never cross the cron boundary.
+   */
   at: number
   value: Promise<unknown>
+  /** Whether the response has arrived. This is what isReady reports. */
+  settled: boolean
 }
 
 const entries = new Map<string, Entry>()
 
-export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
+function live(key: string): Entry | undefined {
   const held = entries.get(key)
-  if (held && Date.now() - held.at < CACHE_TTL_MS) return held.value as Promise<T>
+  return held && Date.now() - held.at < CACHE_TTL_MS ? held : undefined
+}
+
+export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const held = live(key)
+  if (held) return held.value as Promise<T>
 
   const value = run()
-  // Map은 삽입 순서를 지키므로 그 순서가 곧 나이순이다. 이미 있던 키는 지웠다가
-  // 다시 넣어야 갱신된 자리로 간다.
+  // Map keeps insertion order, so that order is age order. An existing key has
+  // to be deleted before it is set again or it keeps its old position.
   entries.delete(key)
-  entries.set(key, { at: Date.now(), value })
+  const entry: Entry = { at: Date.now(), value, settled: false }
+  entries.set(key, entry)
 
-  // 실패는 남기지 않는다. 화면의 "다시 시도" 버튼이 5분 동안 같은 오류를
-  // 되돌려주면 그것은 다시 시도가 아니다.
-  value.catch(() => {
-    if (entries.get(key)?.value === value) entries.delete(key)
-  })
+  value.then(
+    () => {
+      entry.settled = true
+    },
+    () => {
+      // Failures are not kept. A retry button that hands back the same error
+      // for five minutes is not a retry.
+      if (entries.get(key) === entry) entries.delete(key)
+    },
+  )
 
   while (entries.size > CACHE_MAX_ENTRIES) {
     const oldest = entries.keys().next()
@@ -50,6 +68,41 @@ export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
     entries.delete(oldest.value)
   }
   return value
+}
+
+/**
+ * Is there **nothing to wait for** on this key right now?
+ *
+ * Holding a slot is not enough — a request still in flight holds one too, and
+ * that one has to be waited for. Whether the screen raises a skeleton hangs on
+ * this answer, and this function exists so that nobody has to infer it from the
+ * order in which promises happen to resolve.
+ */
+export function isReady(key: string): boolean {
+  return live(key)?.settled ?? false
+}
+
+export interface CachedQuery<A extends unknown[], T> {
+  (...args: A): Promise<T>
+  /** Whether calling with these arguments would have to wait. */
+  isReady(...args: A): boolean
+}
+
+/**
+ * Wrap a query so it is cached under a key derived from its arguments.
+ *
+ * Applied by hand, each function grows a thin exported shell plus a renamed
+ * private body — and that pair was repeated six times, which duplicates the way
+ * caching is applied rather than the caching itself. Give the key rule and the
+ * query; everything else happens once, here.
+ */
+export function cachedQuery<A extends unknown[], T>(
+  keyOf: (...args: A) => string,
+  run: (...args: A) => Promise<T>,
+): CachedQuery<A, T> {
+  const query = (...args: A) => cached(keyOf(...args), () => run(...args))
+  query.isReady = (...args: A) => isReady(keyOf(...args))
+  return query
 }
 
 export function clearQueryCache(): void {

@@ -1,4 +1,4 @@
-import { cached } from './queryCache'
+import { cachedQuery } from './queryCache'
 import { supabase } from './supabaseClient'
 import type {
   Category,
@@ -74,56 +74,48 @@ export async function fetchWordCounts(
 // the truncated denominators inflated every ratio by 11% and turned 12 of the
 // 110 drawn words into false "new"s. Naming the words bounds the response by
 // render_cap (130) instead, which cannot be truncated.
-// 날짜를 앞뒤로 왕복하면 graphWords의 신원은 그대로여도 selectedDate가 바뀌므로
-// 급상승 effect가 다시 돈다 — 캐시가 없으면 이 요청만 홀로 다시 나간다. 측정으로
-// 확인한 것이고, 캐시를 씌우기 전 복귀 왕복의 유일한 잔여 요청이 이것이었다.
-export function fetchWordCountsFor(
-  dates: string[],
-  words: string[],
-): Promise<Map<string, WordCount[]>> {
-  if (dates.length === 0 || words.length === 0) {
-    return Promise.resolve(new Map(dates.map((date) => [date, []])))
-  }
-  return cached(`word-counts|${dates.join(',')}|${words.join(',')}`, () =>
-    wordCountsFor(dates, words),
-  )
-}
+//
+// Cached, and it has to be: stepping to a date and back keeps the identity of
+// `graphWords` but changes `selectedDate`, so the surge effect re-runs anyway.
+// Measured — before this was cached it was the only request still going out on
+// a return trip.
+export const fetchWordCountsFor = cachedQuery(
+  (dates: string[], words: string[]) => `word-counts|${dates.join(',')}|${words.join(',')}`,
+  async (dates: string[], words: string[]): Promise<Map<string, WordCount[]>> => {
+    const byDate = new Map<string, WordCount[]>(dates.map((date) => [date, []]))
+    if (dates.length === 0 || words.length === 0) return byDate
 
-async function wordCountsFor(
-  dates: string[],
-  words: string[],
-): Promise<Map<string, WordCount[]>> {
-  const byDate = new Map<string, WordCount[]>(dates.map((date) => [date, []]))
+    const { data, error } = await supabase
+      .from('daily_word_counts')
+      .select('collected_date, word, count')
+      .in('collected_date', dates)
+      .in('word', words)
+      .is('category_slug', null)
+    if (error) throw queryError(error)
 
-  const { data, error } = await supabase
-    .from('daily_word_counts')
-    .select('collected_date, word, count')
-    .in('collected_date', dates)
-    .in('word', words)
-    .is('category_slug', null)
-  if (error) throw queryError(error)
-
-  const rows = (data ?? []) as { collected_date: string; word: string; count: number }[]
-  for (const row of rows) {
-    byDate.get(row.collected_date)?.push({ word: row.word, count: Number(row.count) })
-  }
-  return byDate
-}
+    const rows = (data ?? []) as { collected_date: string; word: string; count: number }[]
+    for (const row of rows) {
+      byDate.get(row.collected_date)?.push({ word: row.word, count: Number(row.count) })
+    }
+    return byDate
+  },
+)
 
 // Headlines collected on a day, as a server-side count: `head` means no rows
 // come back at all, so the 1,000-row cap cannot apply. This is the denominator
 // that makes two days comparable — 2026-08-01 was collected twice and holds
 // 1,144 headlines against 2026-07-31's 899.
-export function fetchHeadlineCount(date: string): Promise<number> {
-  return cached(`headline-count|${date}`, async () => {
+export const fetchHeadlineCount = cachedQuery(
+  (date: string) => `headline-count|${date}`,
+  async (date: string): Promise<number> => {
     const { count, error } = await supabase
       .from('headlines')
       .select('*', { count: 'exact', head: true })
       .eq('collected_date', date)
     if (error) throw queryError(error)
     return count ?? 0
-  })
-}
+  },
+)
 
 // An RPC rather than a view because the node and edge cuts and the NPMI
 // arithmetic have to happen server side: a day's word pairs run to thousands of
@@ -132,14 +124,13 @@ export function fetchHeadlineCount(date: string): Promise<number> {
 // Postgres renders numeric as a bare JSON number, so these arrive as JS numbers
 // already; the coercion is here for the same reason fetchWordCounts has it —
 // nothing downstream should have to wonder.
-// 캐시되는 것 중 이것이 가장 크게 남는다. 같은 객체가 돌아오면 App.tsx의 graph
-// 신원이 유지되고, 그 아래가 통째로 건너뛰어진다 — 급상승 요청 3개, 라벨 측정
-// 70회, 루뱅 분할, 300틱 시뮬레이션, 엣지 곡선 탐색, 그리고 event_headline_counts.
-export function fetchKeywordGraph(
-  date: string,
-  categorySlug: string | null,
-): Promise<KeywordGraphData> {
-  return cached(`graph|${date}|${categorySlug ?? '*'}`, async () => {
+// This is the one whose caching pays for the rest. Handing back the same object
+// keeps the identity of `graph` in App.tsx, and everything downstream is then
+// skipped: the three surge requests, 70 canvas text measurements, the Louvain
+// partition, the 300-tick simulation, the edge routing, and event_headline_counts.
+export const fetchKeywordGraph = cachedQuery(
+  (date: string, categorySlug: string | null) => `graph|${date}|${categorySlug ?? '*'}`,
+  async (date: string, categorySlug: string | null): Promise<KeywordGraphData> => {
     const { data, error } = await supabase.rpc('keyword_graph', {
       p_date: date,
       p_category: categorySlug,
@@ -166,8 +157,8 @@ export function fetchKeywordGraph(
         npmi: Number(edge.npmi),
       })),
     }
-  })
-}
+  },
+)
 
 // assoc is null for a word that never shares a headline, and spec is null when
 // the categories table holds a single row. Number(null) is 0, which would read
@@ -193,122 +184,108 @@ interface HeadlineRow {
   }
 }
 
-export function fetchHeadlinesForWord(
-  date: string,
-  categorySlug: string | null,
-  word: string,
-): Promise<HeadlineSummary[]> {
-  return cached(`word-headlines|${date}|${categorySlug ?? '*'}|${word}`, () =>
-    headlinesForWord(date, categorySlug, word),
-  )
-}
+export const fetchHeadlinesForWord = cachedQuery(
+  (date: string, categorySlug: string | null, word: string) =>
+    `word-headlines|${date}|${categorySlug ?? '*'}|${word}`,
+  async (
+    date: string,
+    categorySlug: string | null,
+    word: string,
+  ): Promise<HeadlineSummary[]> => {
+    let query = supabase
+      .from('headline_nouns')
+      .select('word, headlines!inner(id, title, link, collected_date, categories!inner(slug))')
+      .eq('word', word)
+      .eq('headlines.collected_date', date)
 
-async function headlinesForWord(
-  date: string,
-  categorySlug: string | null,
-  word: string,
-): Promise<HeadlineSummary[]> {
-  let query = supabase
-    .from('headline_nouns')
-    .select('word, headlines!inner(id, title, link, collected_date, categories!inner(slug))')
-    .eq('word', word)
-    .eq('headlines.collected_date', date)
+    if (categorySlug) {
+      query = query.eq('headlines.categories.slug', categorySlug)
+    }
 
-  if (categorySlug) {
-    query = query.eq('headlines.categories.slug', categorySlug)
-  }
+    const { data, error } = await query.limit(HEADLINE_ROW_LIMIT)
+    if (error) throw queryError(error)
 
-  const { data, error } = await query.limit(HEADLINE_ROW_LIMIT)
-  if (error) throw queryError(error)
+    // The same headline can carry the word twice (ETRI returns a noun per
+    // occurrence), so rows are deduplicated on the headline id.
+    const seen = new Set<string>()
+    const results: HeadlineSummary[] = []
+    for (const row of (data ?? []) as unknown as HeadlineRow[]) {
+      const headline = row.headlines
+      if (seen.has(headline.id)) continue
+      seen.add(headline.id)
+      results.push({
+        id: headline.id,
+        title: headline.title,
+        link: headline.link,
+        category_slug: headline.categories.slug,
+      })
+    }
+    return results
+  },
+)
 
-  // The same headline can carry the word twice (ETRI returns a noun per
-  // occurrence), so rows are deduplicated on the headline id.
-  const seen = new Set<string>()
-  const results: HeadlineSummary[] = []
-  for (const row of (data ?? []) as unknown as HeadlineRow[]) {
-    const headline = row.headlines
-    if (seen.has(headline.id)) continue
-    seen.add(headline.id)
-    results.push({
-      id: headline.id,
-      title: headline.title,
-      link: headline.link,
-      category_slug: headline.categories.slug,
-    })
-  }
-  return results
-}
-
-// 사건별 중복 제거 기사 수. RPC인 이유는 keyword_graph와 같다: count(distinct …)를
-// PostgREST가 표현할 수 없고, headline_nouns를 읽어 클라이언트에서 유일화하면
-// 응답이 1000행에 잘릴 수 있는데 잘려도 아무도 모른다 — 2026-08-02의 가장 큰
-// 사건이 이미 164행이고 이 수는 사건의 단어 수와 함께 자란다.
+// Deduplicated headline counts, one per event. An RPC for the same reason
+// keyword_graph is one: PostgREST cannot express count(distinct …), and reading
+// headline_nouns to uniquify on the client risks a response truncated at 1,000
+// rows with nothing saying so — the biggest event on 2026-08-02 is already 164
+// rows, and that number grows with an event's member count.
 //
-// 하루의 사건 전부를 한 번에 묻는다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
-// 합으로 정해지는데, 그 합이 바로 이 함수가 고치려는 값이다.
-export function fetchEventHeadlineCounts(
-  date: string,
-  categorySlug: string | null,
-  events: string[][],
-): Promise<number[]> {
-  if (events.length === 0) return Promise.resolve([])
-  // 사건 구성이 키의 일부다. 분할이 달라지면 답도 달라지고, 순서가 곧 신원이라
-  // 남의 구성에 붙은 답을 쓰면 화면에서 틀려 보이지 않는다.
-  return cached(
+// Every event of the day is counted in one call. Cutting to the top five first
+// would rank them on summed member counts, which is the very value this exists
+// to correct.
+//
+// The event composition is part of the key. A different partition is a different
+// answer, and since position is identity, an answer computed for someone else's
+// composition does not look wrong on screen.
+export const fetchEventHeadlineCounts = cachedQuery(
+  (date: string, categorySlug: string | null, events: string[][]) =>
     `event-counts|${date}|${categorySlug ?? '*'}|${events.map((e) => e.join(',')).join(';')}`,
-    () => eventHeadlineCounts(date, categorySlug, events),
-  )
-}
+  async (
+    date: string,
+    categorySlug: string | null,
+    events: string[][],
+  ): Promise<number[]> => {
+    if (events.length === 0) return []
 
-async function eventHeadlineCounts(
-  date: string,
-  categorySlug: string | null,
-  events: string[][],
-): Promise<number[]> {
-  const { data, error } = await supabase.rpc('event_headline_counts', {
-    p_date: date,
-    p_category: categorySlug,
-    p_events: events,
-  })
-  if (error) throw queryError(error)
+    const { data, error } = await supabase.rpc('event_headline_counts', {
+      p_date: date,
+      p_category: categorySlug,
+      p_events: events,
+    })
+    if (error) throw queryError(error)
 
-  const counts = (data ?? []) as number[]
-  // 순서가 곧 신원이다. 어긋난 응답을 쓰면 사건에 남의 기사 수가 붙고, 그것은
-  // 화면에서 틀려 보이지 않는다.
-  if (counts.length !== events.length) {
-    throw new Error(
-      `event_headline_counts가 ${events.length}개를 물었는데 ${counts.length}개를 돌려줬습니다`,
-    )
-  }
-  return counts.map((count) => Number(count))
-}
+    const counts = (data ?? []) as number[]
+    // Position is identity. Using a misaligned response pins one event's count
+    // onto another, and that does not look wrong on screen. Fail loudly instead.
+    if (counts.length !== events.length) {
+      throw new Error(
+        `event_headline_counts가 ${events.length}개를 물었는데 ${counts.length}개를 돌려줬습니다`,
+      )
+    }
+    return counts.map((count) => Number(count))
+  },
+)
 
-// 한 사건의 헤드라인. fetchHeadlinesForWord의 200행 상한을 여기 그대로 쓰면
-// 74건짜리 사건이 164행을 소비해 여유가 22%밖에 없으므로, 상한을 올리는 대신
-// 서버에서 유일화해 상한 자체를 없앤다.
-export function fetchHeadlinesForEvent(
-  date: string,
-  categorySlug: string | null,
-  words: string[],
-): Promise<HeadlineSummary[]> {
-  if (words.length === 0) return Promise.resolve([])
-  return cached(
+// One event's headlines. Reusing fetchHeadlinesForWord's 200-row cap here would
+// leave 22% of headroom — a 74-headline event already consumes 164 rows — so
+// rather than raising the cap, the server uniquifies and the cap goes away.
+export const fetchHeadlinesForEvent = cachedQuery(
+  (date: string, categorySlug: string | null, words: string[]) =>
     `event-headlines|${date}|${categorySlug ?? '*'}|${words.join(',')}`,
-    () => headlinesForEvent(date, categorySlug, words),
-  )
-}
+  async (
+    date: string,
+    categorySlug: string | null,
+    words: string[],
+  ): Promise<HeadlineSummary[]> => {
+    if (words.length === 0) return []
 
-async function headlinesForEvent(
-  date: string,
-  categorySlug: string | null,
-  words: string[],
-): Promise<HeadlineSummary[]> {
-  const { data, error } = await supabase.rpc('event_headlines', {
-    p_date: date,
-    p_category: categorySlug,
-    p_words: words,
-  })
-  if (error) throw queryError(error)
+    const { data, error } = await supabase.rpc('event_headlines', {
+      p_date: date,
+      p_category: categorySlug,
+      p_words: words,
+    })
+    if (error) throw queryError(error)
 
-  return (data ?? []) as HeadlineSummary[]
-}
+    return (data ?? []) as HeadlineSummary[]
+  },
+)

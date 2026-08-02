@@ -73,7 +73,7 @@ describe('EventList', () => {
       <EventList
         events={[ranked(['폭염', '양산'], 63, 0), ranked(['트럼프', '하마스'], 39, 1)]}
         selected={null}
-        related={new Set(['트럼프'])}
+        related={[1]}
         onSelect={vi.fn()}
       />,
     )
@@ -94,7 +94,7 @@ describe('EventList', () => {
       <EventList
         events={[ranked(['폭염', '양산'], 63, 0), ranked(['트럼프', '하마스'], 39, 1)]}
         selected={null}
-        related={new Set()}
+        related={[]}
         onSelect={vi.fn()}
       />,
     )

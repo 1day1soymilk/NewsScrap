@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CACHE_MAX_ENTRIES, CACHE_TTL_MS, cached, clearQueryCache } from './queryCache'
+import {
+  CACHE_MAX_ENTRIES,
+  CACHE_TTL_MS,
+  cached,
+  cachedQuery,
+  clearQueryCache,
+  isReady,
+} from './queryCache'
 
 beforeEach(() => {
   clearQueryCache()
@@ -104,5 +111,60 @@ describe('cached', () => {
     await cached('a', run)
 
     expect(run).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('isReady', () => {
+  it('기다릴 필요가 없을 때만 참이다 — 진행 중인 요청은 거짓', async () => {
+    // 스켈레톤을 걸지 말지가 이 답에 달려 있다. 아직 날아가고 있는 요청은
+    // 캐시에 자리가 있어도 기다려야 하므로 참이면 안 된다.
+    let release: (value: number) => void = () => {}
+    const run = () => new Promise<number>((resolve) => (release = resolve))
+
+    const pending = cached('a', run)
+    expect(isReady('a')).toBe(false)
+
+    release(1)
+    await pending
+    expect(isReady('a')).toBe(true)
+  })
+
+  it('담긴 적 없거나 TTL이 지났으면 거짓이다', async () => {
+    vi.useFakeTimers()
+    expect(isReady('없음')).toBe(false)
+
+    await cached('a', async () => 1)
+    expect(isReady('a')).toBe(true)
+
+    vi.advanceTimersByTime(CACHE_TTL_MS + 1)
+    expect(isReady('a')).toBe(false)
+  })
+
+  it('실패한 요청은 자리를 남기지 않으므로 거짓이다', async () => {
+    await expect(cached('a', () => Promise.reject(new Error('boom')))).rejects.toThrow()
+    expect(isReady('a')).toBe(false)
+  })
+})
+
+describe('cachedQuery', () => {
+  it('인자에서 키를 만들어 캐시하고, 같은 인자면 한 번만 돈다', async () => {
+    const run = vi.fn(async (date: string, category: string | null) => `${date}/${category}`)
+    const query = cachedQuery((date: string, category: string | null) => `k|${date}|${category}`, run)
+
+    const first = await query('2026-08-01', null)
+    const second = await query('2026-08-01', null)
+    await query('2026-08-02', null)
+
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(second).toBe(first)
+  })
+
+  it('그 인자로 물어보면 기다릴 일이 있는지 답한다', async () => {
+    const query = cachedQuery((date: string) => `k|${date}`, async (date: string) => date)
+
+    expect(query.isReady('2026-08-01')).toBe(false)
+    await query('2026-08-01')
+    expect(query.isReady('2026-08-01')).toBe(true)
+    expect(query.isReady('2026-08-02')).toBe(false)
   })
 })

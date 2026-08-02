@@ -8,11 +8,12 @@ export interface UrlState {
   category: string | null
   word: string | null
   /**
-   * 선택된 사건의 첫 단어(그 사건 안에서 기사 수 1위). 인덱스가 아닌 이유는
-   * 데이터가 움직이면 인덱스가 다른 사건을 가리키기 때문이고, 단어 목록
-   * 전체가 아닌 이유는 URL이 감당하기에 길기 때문이다.
+   * The first word of the selected event — the member holding the most
+   * headlines. Not an index, because an index points at a different event once
+   * the data moves; not the whole member list, because that is too long for a
+   * URL to carry.
    *
-   * `word`와 상호 배타다.
+   * Mutually exclusive with `word`.
    */
   event: string | null
 }
@@ -45,10 +46,28 @@ export function parseUrlState(search: string, knownSlugs: string[]): UrlState {
     category:
       category && (knownSlugs.length === 0 || knownSlugs.includes(category)) ? category : null,
     word: word ? word : null,
-    // 손으로 고친 링크는 둘 다 담을 수 있다. 단어와 사건이 동시에 선택된
-    // 상태는 UI가 만들 수 없고 캔버스에서 읽을 수도 없으므로, 하나를 버린다.
+    // A hand-edited link can carry both. A word and an event selected at once
+    // is a state the UI cannot produce and the canvas cannot be read in, so one
+    // of them is dropped.
     event: word ? null : event ? event : null,
   }
+}
+
+/**
+ * The current URL's state, read before the categories query has resolved — so
+ * slugs cannot be validated yet, and parseUrlState takes an empty list to mean
+ * "not yet known" rather than "nothing is valid". App.tsx re-checks once they
+ * arrive, and main.tsx needs the same reading before React mounts.
+ *
+ * `date` stays null when the URL carries none. **Do not default it here**: the
+ * URL-sync effect compares this against the app's state to decide whether to
+ * write, and a defaulted date makes an empty URL compare equal to the opening
+ * view. The first write is then skipped, so the write after it is a replaceState
+ * rather than a pushState and Back stops working. Callers that need a concrete
+ * day apply `?? todayInSeoul()` themselves.
+ */
+export function stateFromUrl(): UrlState {
+  return parseUrlState(window.location.search, [])
 }
 
 export function toSearch(state: UrlState): string {

@@ -21,24 +21,18 @@ import { buildEvents, eventLabel, eventsOf, sameCommunities, topEvents } from '.
 import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
-import { parseUrlState, sameState, toSearch } from './lib/urlState'
+import { sameState, stateFromUrl, toSearch } from './lib/urlState'
 import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
 const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
 
-// 루뱅 분할은 그것이 나온 그래프와 짝지어 들고 다닌다. 캔버스가 그린 **뒤의**
-// effect에서 올라오기 때문이다 — 새 날의 그래프가 처음 그려지는 한 프레임 동안
-// 이 Map은 아직 어제 것이다.
+// A Louvain partition is carried around paired with the graph it came from,
+// because it arrives from an effect that runs **after** the canvas has painted:
+// for one frame, while a new day is first drawn, this Map still belongs to the
+// previous one.
 type Partition = { graph: KeywordGraphData; communities: Map<string, number> }
-
-// Read before the categories query has resolved, so slugs cannot be validated
-// yet; parseUrlState takes an empty list to mean "not yet known" rather than
-// "nothing is valid". The check happens once they arrive.
-function stateFromUrl() {
-  return parseUrlState(window.location.search, [])
-}
 
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -120,16 +114,19 @@ function App() {
 
   function loadGraph(isCancelled: () => boolean = () => false) {
     setError(null)
+    // The skeleton is raised only when there is something to wait for. A view
+    // already held by the cache resolves without a round trip, and flashing a
+    // skeleton for that frame would undo the whole saving — nothing would look
+    // any faster. The cache answers this directly rather than the answer being
+    // inferred from the order promises happen to resolve in.
+    setLoading(!fetchKeywordGraph.isReady(selectedDate, selectedCategory))
 
-    let settled = false
     fetchKeywordGraph(selectedDate, selectedCategory)
       .then((data) => {
-        settled = true
         if (isCancelled()) return
         setGraph(data)
       })
       .catch((e) => {
-        settled = true
         if (isCancelled()) return
         setError(errorMessage(e))
       })
@@ -137,14 +134,6 @@ function App() {
         if (isCancelled()) return
         setLoading(false)
       })
-
-    // 스켈레톤은 **기다릴 일이 있을 때만** 건다. 이미 본 뷰는 캐시가 같은
-    // promise를 돌려주므로 그 .then이 다음 마이크로태스크에서 곧바로 돌고,
-    // 그때는 여기 도달했을 때 settled가 이미 참이다 — 요청을 0회로 줄여 놓고
-    // 스켈레톤을 한 프레임 깜빡이면 눈에는 아무것도 빨라지지 않는다.
-    queueMicrotask(() => {
-      if (!settled && !isCancelled()) setLoading(true)
-    })
   }
 
   useEffect(() => {
@@ -276,12 +265,12 @@ function App() {
   // 숫자는 그것을 물어본 바로 그 사건 목록에만 붙는다. 신원이 어긋나면 null로
   // 떨어지고 topEvents는 countSum 순서로 돌아간다 — 어제의 숫자로 오늘을 정렬하는
   // 일은 여기서 구조적으로 불가능하다.
-  // 캔버스에서 누른 단어가 속한 사건들. 다리 단어는 닿는 사건 전부 — 캔버스의
-  // focusWords가 다리에 대해 켜는 집합과 같다.
+  // The events the word clicked on the canvas belongs to. A bridging word gives
+  // every event it touches — the same set focusWords lights on the canvas.
   //
-  // 캔버스와 목록이 켜는 것이 서로 다른 것은 의도다: 캔버스는 단어와 그 이웃을
-  // 켜고(사건 경계를 넘을 수 있다), 목록은 소속을 말한다. 다른 질문이므로
-  // 일치시키지 않는다.
+  // Canvas and list deliberately light different things: the canvas lights a
+  // word and its neighbours, which can cross an event boundary, while the list
+  // states membership. Two different questions, so they are not reconciled.
   const relatedEvents = useMemo(
     () => (selectedWord ? eventsOf(eventGraph, selectedWord) : []),
     [eventGraph, selectedWord],
@@ -290,17 +279,13 @@ function App() {
   const rankedEvents = useMemo(
     () =>
       topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null, {
-        // 상위 5개 밖의 사건에 속한 단어를 눌러도 그 사건이 이름을 갖도록
-        // 목록 끝에 한 줄 붙인다.
+        // So that a word belonging to an event ranked below the list's five
+        // still has a name, that event is appended as one more row.
         pinned: relatedEvents,
       }),
     [eventGraph, eventCounts, relatedEvents],
   )
 
-  const relatedTopWords = useMemo(
-    () => new Set(relatedEvents.map((index) => eventGraph.events[index].words[0].word)),
-    [eventGraph, relatedEvents],
-  )
 
   const activeEvent = useMemo(() => {
     if (!selectedEvent) return null
@@ -444,7 +429,7 @@ function App() {
                 <EventList
                   events={rankedEvents}
                   selected={selectedEvent}
-                  related={relatedTopWords}
+                  related={relatedEvents}
                   onSelect={(topWord) => {
                     setSelectedWord(null)
                     setSelectedEvent((current) => (current === topWord ? null : topWord))

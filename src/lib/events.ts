@@ -39,11 +39,12 @@ export interface EventGraph {
 }
 
 export interface TopEventsOptions {
-  /** 목록의 길이. 기본 5. */
+  /** How many rows the list holds. Defaults to 5. */
   limit?: number
   /**
-   * 순위와 무관하게 목록에 반드시 나타나야 하는 사건의 index. 캔버스에서 누른
-   * 단어가 상위 밖 사건에 속할 때 그 사건이 이름을 갖게 한다.
+   * Indices of events that must appear in the list whatever their rank, so that
+   * a word clicked on the canvas still names its event when that event ranks
+   * below the cut.
    */
   pinned?: readonly number[]
 }
@@ -223,9 +224,9 @@ export function topEvents(
     )
 
   const shown = ranked.slice(0, limit)
-  // 상한 밖으로 밀린 사건이라도 지금 화면에서 보고 있는 것이면 이름을 갖는다.
-  // 잘리는 쪽의 상한은 그대로 두고 **뒤에 덧붙인다** — 끼워 넣으면 순위가
-  // 아닌 것이 순위인 척하게 된다.
+  // An event pushed past the cut still gets a name when it is the one being
+  // looked at. The ranked side keeps its limit and the event is **appended** —
+  // inserting it would let something that is not a rank pose as one.
   const held = new Set(shown.map((r) => r.event.index))
   for (const entry of ranked) {
     if (held.has(entry.event.index) || !pinned.includes(entry.event.index)) continue
@@ -235,12 +236,12 @@ export function topEvents(
   return shown
 }
 
-// 그 단어가 속한 사건들. 다리 단어는 닿는 사건 전부이고, 그것이 캔버스의
-// focusWords가 다리에 대해 켜는 집합과 같아야 한다. 어느 사건에도 속하지 않는
-// 단어(하루 70개 중 20개는 엣지가 없다)는 빈 배열이다.
+// The events a word belongs to. For a bridging word that is every event it
+// touches, which has to be the same set focusWords lights on the canvas. A word
+// belonging to no event — 20 of the 70 drawn hold no edge — gives an empty array.
 //
-// buildEvents가 만든 분할만 읽는다 — 소속을 여기서 다시 계산하면 keyword_signals를
-// 손으로 베낀 것과 같은 함정이 된다.
+// Reads only the partition buildEvents produced. Recomputing membership here
+// would be the same trap as hand-copying keyword_signals.
 export function eventsOf(graph: EventGraph, word: string): number[] {
   const bridged = graph.bridges.get(word)
   if (bridged) return bridged

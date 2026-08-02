@@ -128,8 +128,9 @@ export function KeywordGraph({
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(FALLBACK_WIDTH)
 
-  // 첫 측정은 문턱과 무관하게 채택한다. FALLBACK_WIDTH에서 출발하므로 실제
-  // 컨테이너가 우연히 그 8px 안에 들면 영영 가짜 폭으로 그리게 된다.
+  // The first measurement is taken whatever the threshold says. Width starts at
+  // FALLBACK_WIDTH, so a real container landing within 8px of it would otherwise
+  // be drawn at a made-up width forever.
   const measuredOnce = useRef(false)
 
   useEffect(() => {
