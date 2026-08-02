@@ -176,6 +176,17 @@ function pairKey(a: number, b: number): string {
   return a < b ? `${a}:${b}` : `${b}:${a}`
 }
 
+// headlines가 events와 완전히 맞물려 있을 때만 참이다: null이 아니고, 길이가
+// events와 같고, 모든 event.index 자리가 채워져 있어야 한다. 하나라도 어긋나면
+// (짧은 배열이든, 길이는 맞지만 구멍이 있든) topEvents는 실제 수를 전혀 쓰지
+// 않는다 — 절반만 채워진 배열이 실제 수와 countSum을 같은 비교 안에서 섞이게
+// 두는 것이 이 함수가 카운트를 인자로 받는 이유 자체를 무너뜨리기 때문이다.
+function fullyAligned(events: NewsEvent[], headlines: number[] | null): headlines is number[] {
+  if (headlines === null) return false
+  if (headlines.length !== events.length) return false
+  return events.every((event) => headlines[event.index] !== undefined)
+}
+
 // 중복 제거된 기사 수로 순위를 매기고 자른다.
 //
 // 이 함수가 카운트를 인자로 받고 스스로 세지 않는 것은 CLAUDE.md의 규칙과 같은
@@ -187,10 +198,14 @@ export function topEvents(
   headlines: number[] | null,
   limit: number = DEFAULT_LIMIT,
 ): RankedEvent[] {
+  // 카운트는 전부 있거나 전부 없다(RPC 한 번)는 것은 호출자의 관례일 뿐이고,
+  // 이 함수는 그 관례를 믿지 않는다. fullyAligned가 배열 전체가 채워져
+  // 있는지 확인하며, 어긋나면 counts는 null로 떨어져 아래 map이 모든 사건에
+  // countSum을 쓰게 된다 — 실제 수와 합계가 한 비교 안에서 섞이는 일은 이
+  // 함수 자체가 막는다.
+  const counts = fullyAligned(events, headlines) ? headlines : null
   return events
-    .map((event) => ({ event, headlines: headlines?.[event.index] ?? null }))
-    // 카운트는 전부 있거나 전부 없다(RPC 한 번), 그래서 이 비교가 실제 수와
-    // 합계를 섞는 일은 없다. 없을 때만 합계로 떨어진다.
+    .map((event) => ({ event, headlines: counts?.[event.index] ?? null }))
     .sort(
       (a, b) =>
         (b.headlines ?? b.event.countSum) - (a.headlines ?? a.event.countSum) ||

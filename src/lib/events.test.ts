@@ -223,6 +223,33 @@ describe('topEvents', () => {
     expect(topEvents(events, null)).toHaveLength(2)
     expect(topEvents([], null)).toEqual([])
   })
+
+  it('카운트 배열이 사건 수보다 짧으면 전부 없는 것으로 본다', () => {
+    // 상위 N개 사건에만 카운트를 요청하는 실수 — 계획서가 명시적으로 되짚는
+    // 바로 그 안티패턴 — 를 흉내낸 배열. 절반만 채워진 배열이 실제 수와
+    // countSum을 같은 비교에 섞이게 두면 안 되므로, 이 경우 전부 countSum
+    // 순서로 떨어지고 headlines는 모두 null이어야 한다.
+    const { events } = buildEvents(words, edges, partition)
+    const short: number[] = [51] // 사건은 2개인데 배열 길이는 1
+
+    const ranked = topEvents(events, short)
+
+    expect(ranked[0].event.words[0].word).toBe('폭염')
+    expect(ranked.every((r) => r.headlines === null)).toBe(true)
+  })
+
+  it('길이는 맞아도 구멍이 있으면 전부 없는 것으로 본다', () => {
+    const { events } = buildEvents(words, edges, partition)
+    const trump = events.findIndex((ev) => ev.words.some((x) => x.word === '트럼프'))
+    const holed: number[] = []
+    holed[trump] = 51 // 다른 사건의 자리는 비워 둔다
+    holed.length = events.length // 길이는 사건 수와 정확히 같다
+
+    const ranked = topEvents(events, holed)
+
+    expect(ranked[0].event.words[0].word).toBe('폭염')
+    expect(ranked.every((r) => r.headlines === null)).toBe(true)
+  })
 })
 
 describe('eventLabel', () => {
