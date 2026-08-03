@@ -119,3 +119,70 @@ describe('EventList', () => {
     expect(screen.getByRole('button', { name: /트럼프/ })).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+describe('EventList — 펼치기', () => {
+  it('offers the rest of the day when there are more events than rows', () => {
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0)]}
+        selected={null}
+        total={15}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    const toggle = screen.getByRole('button', { name: /더 보기/ })
+    expect(toggle).toHaveTextContent('14')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('offers to collapse once expanded', () => {
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0), ranked(['트럼프', '하마스'], 39, 1)]}
+        selected={null}
+        total={2}
+        expanded
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '접기' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('offers nothing when the day holds no more than is shown', () => {
+    // A category tab lands here, and so does the archive's smallest day.
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0)]}
+        selected={null}
+        total={1}
+        expanded={false}
+        onToggle={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /더 보기|접기/ })).not.toBeInTheDocument()
+  })
+
+  it('calls onToggle when the row is pressed', () => {
+    const onToggle = vi.fn()
+    render(
+      <EventList
+        events={[ranked(['폭염', '양산'], 63, 0)]}
+        selected={null}
+        total={15}
+        expanded={false}
+        onToggle={onToggle}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
+    expect(onToggle).toHaveBeenCalledTimes(1)
+  })
+})

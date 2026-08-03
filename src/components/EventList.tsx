@@ -24,10 +24,26 @@ interface EventListProps {
    * the bridge map is keyed by, so nothing has to be translated to match here.
    */
   related?: readonly number[]
+  /**
+   * How many events the day holds in total. The toggle appears only when this
+   * exceeds the rows given, so a category tab — or a day with five events —
+   * offers nothing to open.
+   */
+  total?: number
+  expanded?: boolean
+  onToggle?: () => void
   onSelect: (topWord: string) => void
 }
 
-export function EventList({ events, selected, related = [], onSelect }: EventListProps) {
+export function EventList({
+  events,
+  selected,
+  related = [],
+  total = events.length,
+  expanded = false,
+  onToggle,
+  onSelect,
+}: EventListProps) {
   // A day with no edges has no events. That is not an error, it means nothing
   // was connected that day, and nothing is drawn.
   if (events.length === 0) return null
@@ -78,6 +94,23 @@ export function EventList({ events, selected, related = [], onSelect }: EventLis
           </li>
         )
       })}
+
+      {onToggle && (expanded || total > events.length) && (
+        // Inside the list, because it is about the list's own length rather than
+        // a control that happens to sit under it. The dot column is kept so the
+        // label lines up with the event names above it.
+        <li>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-xs text-ink-faint hover:bg-surface hover:text-ink"
+          >
+            <span aria-hidden="true" className="inline-block size-2 shrink-0" />
+            <span>{expanded ? '접기' : `더 보기 ${total - events.length}개`}</span>
+          </button>
+        </li>
+      )}
     </ol>
   )
 }
