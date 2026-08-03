@@ -196,6 +196,55 @@ the *data* moves and not only when the sweep widens: collecting a date twice put
 13 unlabelled words on screen and silently invalidated a run. Two findings that cost real
 time and should not be rediscovered:
 
+- **A word is rescued for being a proper noun** (`min_proper` 0.50, migration
+  `0018`), and this is the largest single measured gain the sieve has had:
+  **+2.9 mean F1 and +3.9 precision day-wide, +11.4 mean F1 across the 24
+  category cells**, winning on all four days and never dropping the day's
+  biggest story. `proper` is the share of a word's rows the analyser tagged NNP.
+
+  **What it buys is the price of `min_word_len`, which had only ever been priced
+  in one direction.** The length clause was measured as the sieve — it admits
+  most of what is drawn and its precision is the whole sieve's — but nobody had
+  costed what it *rejects*: a two-character word could not reach the canvas at
+  all, and in the archive's whole history exactly two ever had, 폭염 and 양산,
+  both by hand. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
+  애플, 구글 and 기아 were all cut with the noise. 13 to 21 words a day come in
+  through this clause now.
+
+  **Length was always a proxy, and the analyser answers the real question.**
+  garu tags 이란 NNP and 감찰 NNG — and 감찰, 윤리, 청문, 초등 and 순회 are
+  precisely the five words named just below as the reason the specificity clause
+  had to be turned off, every one scoring a perfect 1.00 on spec. The
+  discrimination `spec` could not make is in the tagger's output.
+
+  **`min_word_len 2` is the control and it is why this is the tagger's win, not
+  length's**: admitting every two-character word scores mean F1 **31.98** against
+  the shipped sieve's 49.48 — far worse, not better. Of the 44 words a blanket
+  `min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the
+  tabs, **31** are.
+
+  **It has the opposite signature to `head_pos`, and that is the general
+  lesson.** head_pos won day-wide and lost 8 of 24 category cells while winning
+  none, because it is a *cut* and a tab's render cap never binds, so there was
+  nothing to promote into the hole. This is a *rescue*: it only ever adds words,
+  a tab has the room, and so the tabs gain more than the day does. **A day-wide
+  win with a category loss means the mechanism needs the cap to be binding; a
+  win on both, larger on the tabs, means it does not.**
+
+  0.50 is **mid-plateau and deliberately not the best cell** — .25/.50/.75/1.00
+  give 52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs.
+  1.00 scores 0.15 higher and is the boundary: it demands every row be tagged
+  NNP, so one mistagged row in fifty disqualifies a name.
+
+  It does **not** replace the dictionary. With `word_overrides` off the rescue
+  alone scores about what the shipped sieve scores with it on — so it is not
+  merely re-catching the same words — but that configuration still drops the
+  day's biggest story on three of four days, because 폭염 is two characters and
+  **NNG**, and lives on its `allow` entry.
+
+  The cost is visible and was accepted on the numbers: 닉스 (from 삼전닉스) and
+  어스 (from 구글 어스) are tagged NNP and come in as fragments, and 유럽, 남미,
+  중동, 호남 come in as regions.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등

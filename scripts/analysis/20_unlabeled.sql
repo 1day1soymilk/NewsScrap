@@ -53,6 +53,9 @@ passed as (
     and (
       char_length(s.word) >= c.min_word_len
       or s.spec >= c.min_spec
+      -- 사체 4d: 두 글자여도 고유명사면 살린다. 길이 절은 "조각이 아니라 온전한
+      -- 단어인가"의 대리 지표일 뿐이고, 분석기가 그 질문에 직접 답한다.
+      or s.proper >= c.min_proper
       or s.neighbors_per_doc <= c.max_npd
       or (c.use_dict and ov.mode = 'allow')
     )

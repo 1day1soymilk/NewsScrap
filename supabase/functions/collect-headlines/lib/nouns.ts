@@ -12,6 +12,23 @@ export interface AnalyzedToken {
   start: number
 }
 
+/**
+ * A word the extraction kept, with the part of speech it was built from.
+ *
+ * The pos is carried because **length is only a proxy for what the sieve wants
+ * to know.** `min_word_len` is 3 and it admits 68 of the 70 drawn words, which
+ * makes it effectively the whole sieve; what it is standing in for is "this is a
+ * word in its own right rather than a piece of one". A two-character word fails
+ * that test often enough to be worth cutting wholesale, and 이란 and 중국 and
+ * 삼성 are the price. The analyser answers the real question directly: it tags
+ * 이란 NNP and 감찰 NNG, and 감찰·윤리·청문·초등·순회 are exactly the words
+ * CLAUDE.md names as the reason the specificity clause had to be turned off.
+ */
+export interface ExtractedNoun {
+  word: string
+  pos: string
+}
+
 // A run of morphemes only becomes a noun if it contains one of these.
 const NOUN_TYPES = new Set(['NNG', 'NNP'])
 // The eojeol is the word. Korean writes a compound without spaces, so whatever
@@ -94,15 +111,27 @@ function eojeolOf(title: string): Int32Array {
   return index
 }
 
-export function extractNouns(title: string, tokens: readonly AnalyzedToken[]): string[] {
+export function extractNouns(
+  title: string,
+  tokens: readonly AnalyzedToken[],
+): ExtractedNoun[] {
   const eojeol = eojeolOf(title)
-  const nouns: string[] = []
+  const nouns: ExtractedNoun[] = []
   let run: AnalyzedToken[] = []
   let at = -2
 
+  // The merged word takes the pos of its **head** — the last NOUN_TYPES token in
+  // the run — because Korean compounds are head-final. That is what makes
+  // SK/SL + 하이닉스/NNP arrive as NNP rather than SL, and 반/XPN + 도체/NNG as
+  // NNG. A run always holds at least one noun token or it is not flushed, so
+  // there is always a head to take.
   const flush = () => {
-    if (run.some((token) => NOUN_TYPES.has(token.pos))) {
-      nouns.push(run.map((token) => token.text).join(''))
+    const nounTokens = run.filter((token) => NOUN_TYPES.has(token.pos))
+    if (nounTokens.length > 0) {
+      nouns.push({
+        word: run.map((token) => token.text).join(''),
+        pos: nounTokens[nounTokens.length - 1].pos,
+      })
     }
     run = []
   }
@@ -136,8 +165,8 @@ export function extractNouns(title: string, tokens: readonly AnalyzedToken[]): s
 // analyser is already handed NFC text. This is not that guarantee restated: it
 // is the one that does not depend on the analyser echoing its input's code
 // points back.
-export function filterNouns(words: string[]): string[] {
-  return words
-    .map((word) => word.normalize('NFC'))
-    .filter((word) => word.length >= 2 && !STOPWORDS.has(word))
+export function filterNouns(nouns: ExtractedNoun[]): ExtractedNoun[] {
+  return nouns
+    .map((noun) => ({ word: noun.word.normalize('NFC'), pos: noun.pos }))
+    .filter((noun) => noun.word.length >= 2 && !STOPWORDS.has(noun.word))
 }

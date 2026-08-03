@@ -25,6 +25,9 @@ w as (
     coalesce(max(value) filter (where key = 'min_word_len'), 3)            as min_word_len,
     coalesce(max(value) filter (where key = 'min_spec'), 0.80)             as min_spec,
     coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_npd,
+    -- 사체 4d. 출하 전까지 키가 없으므로 기본값이 절을 끄고, 그러면 이 파일은
+    -- 이전과 정확히 같은 것을 잰다 — max_head_pos가 쓰던 방식 그대로.
+    coalesce(max(value) filter (where key = 'min_proper'), 9.90)           as min_proper,
     coalesce(max(value) filter (where key = 'max_head_pos'), 9.90)         as max_head_pos,
     coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit
   from scoring_weights
@@ -60,6 +63,7 @@ day_pass as (
     and (
       char_length(s.word) >= w.min_word_len
       or s.spec >= w.min_spec
+      or s.proper >= w.min_proper
       or s.neighbors_per_doc <= w.max_npd
       or ov.mode = 'allow'
     )

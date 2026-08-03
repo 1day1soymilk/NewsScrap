@@ -37,19 +37,24 @@ function eojeolSpans(title: string, spec: [string, string][]): AnalyzedToken[] {
 // garu-ko 0.9.12 actually returns for these titles, checked against it — a
 // fixture that invents its input measures nothing, which is the mistake the
 // ETRI version of this file recorded having made.
+// `expected` is `word/pos`. The merged word's pos is its **head**: the last
+// NOUN_TYPES token in the run, because Korean compounds are head-final. That is
+// what makes SK/SL + 하이닉스/NNP come back NNP rather than SL, and it is the
+// whole point of carrying pos at all — a two-character NNP is a name and a
+// two-character NNG is not.
 const CASES: { name: string; title: string; spec: [string, string][]; expected: string[] }[] = [
   {
     name: 'collects NNG and NNP',
     title: '여야 예산안 처리',
     spec: [['여야', 'NNG'], ['예산안', 'NNG'], ['처리', 'NNG']],
-    expected: ['여야', '예산안', '처리'],
+    expected: ['여야/NNG', '예산안/NNG', '처리/NNG'],
   },
   {
     // 보완수사권 is one eojeol and must come back whole; 완전 박탈 is two.
     name: 'merges inside one eojeol but never across a space',
     title: '보완수사권 완전 박탈',
     spec: [['보완', 'NNG'], ['수사', 'NNG'], ['권', 'XSN'], ['완전', 'MAG'], ['박탈', 'NNG']],
-    expected: ['보완수사권', '박탈'],
+    expected: ['보완수사권/NNG', '박탈/NNG'],
   },
   {
     // 적 makes 기록적 an adnominal where 기록 is the keyword; 들 makes 개미들
@@ -57,14 +62,14 @@ const CASES: { name: string; title: string; spec: [string, string][]; expected: 
     name: 'leaves the inflectional suffixes out of the merge',
     title: '기록적 개미들',
     spec: [['기록', 'NNG'], ['적', 'XSN'], ['개미', 'NNG'], ['들', 'XSN']],
-    expected: ['기록', '개미'],
+    expected: ['기록/NNG', '개미/NNG'],
   },
   {
     // Without this 김민석 측 arrives as 김민석측.
     name: 'ends the run at a bound noun',
     title: '김민석측 발언',
     spec: [['김민석', 'NNP'], ['측', 'NNB'], ['발언', 'NNG']],
-    expected: ['김민석', '발언'],
+    expected: ['김민석/NNP', '발언/NNG'],
   },
   {
     // SL, SH and SN are part of the word: this is what makes SK하이닉스 and
@@ -76,29 +81,46 @@ const CASES: { name: string; title: string; spec: [string, string][]; expected: 
       ['1', 'SN'], ['군단장', 'NNG'],
       ['李', 'SH'], ['대통령', 'NNG'],
     ],
-    expected: ['SK하이닉스', '1군단장', '李대통령'],
+    expected: ['SK하이닉스/NNP', '1군단장/NNG', '李대통령/NNG'],
   },
   {
     name: 'splits a run wherever a particle or ending interrupts it',
     title: '상한가에 반도체가',
     spec: [['상한', 'NNG'], ['가', 'JKB'], ['에', 'JKB'], ['반도체', 'NNG'], ['가', 'JKS']],
-    expected: ['상한', '반도체'],
+    expected: ['상한/NNG', '반도체/NNG'],
   },
   {
     name: 'drops runs carrying no NNG or NNP of their own',
     title: '하였다 예산안',
     spec: [['하', 'VV'], ['였', 'EP'], ['다', 'EF'], ['예산안', 'NNG']],
-    expected: ['예산안'],
+    expected: ['예산안/NNG'],
   },
 ]
 
 describe('extractNouns', () => {
   for (const { name, title, spec, expected } of CASES) {
     it(name, () => {
-      expect(extractNouns(title, tokens(title, spec))).toEqual(expected)
-      expect(extractNouns(title, eojeolSpans(title, spec))).toEqual(expected)
+      const show = (ns: { word: string; pos: string }[]) => ns.map((n) => `${n.word}/${n.pos}`)
+      expect(show(extractNouns(title, tokens(title, spec)))).toEqual(expected)
+      expect(show(extractNouns(title, eojeolSpans(title, spec)))).toEqual(expected)
     })
   }
+
+  // The case this signal was added for. garu tags 이란 NNP and 감찰 NNG, and
+  // 감찰/윤리/청문/초등/순회 are precisely the words CLAUDE.md names as the reason
+  // the specificity clause had to be disabled — so pos separates what spec could
+  // not. Verified against garu-ko 0.9.12.
+  it('tells a two-character name from a two-character common noun', () => {
+    const title = '이란 감찰 논란'
+    const result = extractNouns(title, tokens(title, [
+      ['이란', 'NNP'], ['감찰', 'NNG'], ['논란', 'NNG'],
+    ]))
+    expect(result).toEqual([
+      { word: '이란', pos: 'NNP' },
+      { word: '감찰', pos: 'NNG' },
+      { word: '논란', pos: 'NNG' },
+    ])
+  })
 
   it('returns an empty array for no tokens', () => {
     expect(extractNouns('', [])).toEqual([])
@@ -115,8 +137,17 @@ describe('filterNouns', () => {
   const PLAIN_LI = '李' // CJK UNIFIED IDEOGRAPH-674E
   const PLAIN_NO = '盧' // CJK UNIFIED IDEOGRAPH-76E7
 
+  // filterNouns now carries the pos through untouched — it filters and
+  // normalises, it does not re-judge. `n` keeps these fixtures readable.
+  const n = (word: string, pos = 'NNG') => ({ word, pos })
+
   it('drops words shorter than 2 characters and known stopwords', () => {
-    expect(filterNouns(['여야', '예산안', '것', '기자', '사진'])).toEqual(['여야', '예산안'])
+    expect(filterNouns([n('여야'), n('예산안'), n('것'), n('기자'), n('사진')]))
+      .toEqual([n('여야'), n('예산안')])
+  })
+
+  it('carries the pos through unchanged', () => {
+    expect(filterNouns([n('이란', 'NNP'), n('감찰')])).toEqual([n('이란', 'NNP'), n('감찰')])
   })
 
   // 단어는 headline_nouns의 키이므로, 같은 글자의 두 표현이 두 단어가 되면 모든
@@ -124,9 +155,9 @@ describe('filterNouns', () => {
   // 중복이 아니다 — ETRI가 입력의 문자를 그대로 돌려준다는 가정을 하지 않기
   // 위해서다. 아카이브에 실제로 있던 형태가 李대통령이다.
   it('normalises compatibility ideographs to NFC', () => {
-    expect(filterNouns([`${COMPAT_LI}대통령`, `${COMPAT_NO}배신`])).toEqual([
-      `${PLAIN_LI}대통령`,
-      `${PLAIN_NO}배신`,
+    expect(filterNouns([n(`${COMPAT_LI}대통령`), n(`${COMPAT_NO}배신`)])).toEqual([
+      n(`${PLAIN_LI}대통령`),
+      n(`${PLAIN_NO}배신`),
     ])
   })
 
@@ -134,11 +165,11 @@ describe('filterNouns', () => {
   // 이 테스트는 같은 것을 코드포인트로 물어서, 실패했을 때 26446과 63969라는
   // 구별 가능한 숫자가 나오게 한다.
   it('leaves behind the ordinary code point, not the compatibility one', () => {
-    const [word] = filterNouns([`${COMPAT_LI}대통령`])
-    expect(word.codePointAt(0)).toBe(0x674e)
+    const [first] = filterNouns([n(`${COMPAT_LI}대통령`)])
+    expect(first.word.codePointAt(0)).toBe(0x674e)
   })
 
   it('applies the stopword list after normalising', () => {
-    expect(filterNouns([`${COMPAT_LI}대통령`, '기자'])).toEqual([`${PLAIN_LI}대통령`])
+    expect(filterNouns([n(`${COMPAT_LI}대통령`), n('기자')])).toEqual([n(`${PLAIN_LI}대통령`)])
   })
 })

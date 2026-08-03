@@ -146,6 +146,66 @@ Two tells worth carrying forward:
   보릿돌교 would not. That question decided the ~50 cases the prose definition
   left genuinely open.
 
+## Round nine — the price of `min_word_len`, at last
+
+**The largest single measured gain the sieve has had.** `min_proper` 0.50 shipped
+in migration `0018`: a word is admitted if the analyser tagged it a proper noun
+on more than half its rows, whatever its length.
+
+| | day-wide, 4 days | category, 24 cells |
+| --- | --- | --- |
+| shipped before | mean F1 49.48, precision 71.07 | mean F1 55.07 |
+| `len3 or proper >= .50` | **52.40**, precision **75.00** | **66.44** |
+| `min_word_len 2` (control) | 31.98, precision 45.73 | — |
+
+`unlabeled` 0 on every row and `story_rank` 1 on all four days.
+
+**The question nobody had asked.** This directory and CLAUDE.md both record the
+length clause as *the* sieve — it admits 68 of 70 and its precision is the
+sieve's — and both price it only by what it lets through. What it rejects had
+never been costed: **a two-character word could not reach the canvas at all.**
+Across the archive's entire history exactly two ever did, 폭염 and 양산, both by
+hand in migration `0003`. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구,
+인천, 삼성, 애플, 구글, 기아 — all cut with the noise.
+
+**Length was a proxy; the analyser answers the real question.** Now that it runs
+in-process it can be asked directly, and the reason to expect it to work was
+specific rather than hopeful: garu tags 이란 NNP and **감찰, 윤리, 청문, 초등 and
+순회 NNG** — the five words this repository names as the reason the *specificity*
+clause had to be disabled, each scoring a perfect 1.00 on spec. The
+discrimination spec could not make is sitting in the tagger's output.
+
+**`min_word_len 2` is in the sweep as the control, and it is the finding.**
+Admitting every two-character word scores 31.98 — far *worse* than the shipped
+sieve, not better. So the gain is not "two-character words were being lost"; it
+is that the analyser can say which of them are names. Of the 44 words a blanket
+`min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the tabs,
+**31** are — 포항, 울산, 통영, 경주, 원주, 독일, 칠레, 가자, 유엔, 인텔, 쿠팡,
+퀄컴, 놀런, 룰라.
+
+**It has the opposite signature to head_pos, which is the reusable part.** That
+signal won day-wide and lost 8 of 24 cells while winning none, because it is a
+cut and a tab's cap never binds. This is a rescue: it only adds, a tab has the
+room, and the tabs therefore gain more than the day. *A day-wide win with a
+category loss means the mechanism needs the cap binding; a win on both, larger on
+the tabs, means it does not.*
+
+0.50 is mid-plateau and deliberately not the best cell — .25/.50/.75/1.00 give
+52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs. 1.00
+wins by 0.15 and is the boundary, demanding every row be tagged NNP, so one
+mistagged row in fifty would disqualify a name.
+
+The dictionary is **not** replaced. Rescue-only scores 49.58, about what the
+shipped sieve scored with the dictionary on — so it is not re-catching the same
+words — but it drops the day's biggest story on three of four days, because 폭염
+is two characters and NNG and lives on its `allow` entry.
+
+Cost, accepted on the numbers: 닉스 (from 삼전닉스) and 어스 (from 구글 어스) are
+tagged NNP and arrive as fragments; 유럽, 남미, 중동 and 호남 arrive as regions.
+
+Labels: `17_labels_two_character.sql` (44) and
+`18_labels_two_character_category.sql` (36). Both worklists empty afterwards.
+
 ## Labels
 
 891 words, covering everything drawn by every **active** configuration in

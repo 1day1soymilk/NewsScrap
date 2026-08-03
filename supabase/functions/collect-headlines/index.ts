@@ -221,8 +221,9 @@ async function processHeadlines(
   // never inserted without its nouns in hand — the rule the ETRI version stated
   // as "nouns first". A row with no nouns at all is a word cloud that cannot
   // see the headline, which is why the repair below exists as well.
-  const fresh: { headline: ScrapedHeadline; nouns: string[] }[] = []
-  const repairs: { id: string; nouns: string[] }[] = []
+  type Noun = { word: string; pos: string }
+  const fresh: { headline: ScrapedHeadline; nouns: Noun[] }[] = []
+  const repairs: { id: string; nouns: Noun[] }[] = []
   for (const headline of headlines) {
     tally.processed += 1
     const seen = existing.get(headline.link)
@@ -233,8 +234,8 @@ async function processHeadlines(
     else fresh.push({ headline, nouns })
   }
 
-  const nounRows: { headline_id: string; word: string }[] = repairs.flatMap(({ id, nouns }) =>
-    nouns.map((word) => ({ headline_id: id, word }))
+  const nounRows: { headline_id: string; word: string; pos: string }[] = repairs.flatMap(
+    ({ id, nouns }) => nouns.map((noun) => ({ headline_id: id, word: noun.word, pos: noun.pos })),
   )
   tally.repaired = repairs.length
 
@@ -262,8 +263,8 @@ async function processHeadlines(
 
     const nounsByLink = new Map(chunk.map(({ headline, nouns }) => [headline.link, nouns]))
     for (const row of data ?? []) {
-      for (const word of nounsByLink.get(row.link) ?? []) {
-        nounRows.push({ headline_id: row.id, word })
+      for (const noun of nounsByLink.get(row.link) ?? []) {
+        nounRows.push({ headline_id: row.id, word: noun.word, pos: noun.pos })
       }
       tally.stored += 1
     }
@@ -293,7 +294,7 @@ async function loadAnalyser(): Promise<Garu> {
   return analyser
 }
 
-function analyseNouns(garu: Garu, title: string): string[] {
+function analyseNouns(garu: Garu, title: string) {
   const normalised = title.normalize('NFC')
   const tokens = garu.analyze(normalised).tokens
   return filterNouns(extractNouns(normalised, tokens))

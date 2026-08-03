@@ -39,8 +39,8 @@ const garu = await Garu.load()
 const rows = []
 for (const { id, title } of headlines) {
   const normalised = title.normalize('NFC')
-  for (const word of filterNouns(extractNouns(normalised, garu.analyze(normalised).tokens))) {
-    rows.push([id, word])
+  for (const noun of filterNouns(extractNouns(normalised, garu.analyze(normalised).tokens))) {
+    rows.push([id, noun.word, noun.pos])
   }
 }
 
@@ -53,20 +53,21 @@ for (const { id, title } of headlines) {
 const quote = (s) => `'${String(s).replace(/'/g, "''")}'`
 const out = [
   `create table if not exists public.headline_nouns_reanalysis (
-     headline_id uuid not null, word text not null);`,
+     headline_id uuid not null, word text not null, pos text);`,
+  'alter table public.headline_nouns_reanalysis add column if not exists pos text;',
   'truncate public.headline_nouns_reanalysis;',
 ]
 for (let i = 0; i < rows.length; i += 2000) {
   const chunk = rows.slice(i, i + 2000)
   out.push(
-    'insert into public.headline_nouns_reanalysis (headline_id, word) values\n' +
-      chunk.map(([h, w]) => `(${quote(h)}, ${quote(w)})`).join(',\n') + ';',
+    'insert into public.headline_nouns_reanalysis (headline_id, word, pos) values\n' +
+      chunk.map(([h, w, p]) => `(${quote(h)}, ${quote(w)}, ${quote(p)})`).join(',\n') + ';',
   )
 }
 out.push(
   `with cleared as (delete from public.headline_nouns returning 1)
-   insert into public.headline_nouns (headline_id, word)
-   select headline_id, word from public.headline_nouns_reanalysis;`,
+   insert into public.headline_nouns (headline_id, word, pos)
+   select headline_id, word, pos from public.headline_nouns_reanalysis;`,
 )
 out.push('drop table public.headline_nouns_reanalysis;')
 
