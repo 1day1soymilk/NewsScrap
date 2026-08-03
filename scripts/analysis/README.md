@@ -13,6 +13,9 @@ times by exactly that, and each of the rules below is one of those failures.
 
 ```bash
 scripts/analysis/run.sh scripts/analysis/00_labels.sql       # once, to seed labels
+scripts/analysis/run.sh scripts/analysis/12_eval_days.sql    # the days under test
+scripts/analysis/run.sh scripts/analysis/02_sieve_configs.sql
+scripts/analysis/run.sh scripts/analysis/20_unlabeled.sql    # must be empty
 scripts/analysis/run.sh scripts/analysis/10_sieve_eval.sql   # every time
 ```
 
@@ -84,10 +87,26 @@ line sits — which is a labelling question, not a dictionary one.
 
 ## Labels
 
-459 words, covering everything drawn by every configuration in
-`02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across
-2026-07-31 and 2026-08-01. `20_unlabeled.sql` and `21_unlabeled_category.sql`
-both return nothing, so rule 4 is satisfied.
+606 words, covering everything drawn by every **active** configuration in
+`02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across the
+four days in `analysis.eval_days` — 2026-07-31, 08-01, 08-02 and 08-03.
+`20_unlabeled.sql` and `21_unlabeled_category.sql` both return nothing, so rule 4
+is satisfied.
+
+**The harness measured two days until 2026-08-03**, and widening it to four cost
+139 labels (`09_labels_four_days.sql`). Two things made it worth paying for.
+08-02 and 08-03 are the only days collected after both the noun-merge fix and the
+canonical-link dedup, so they are the cleanest evidence there is; and a word that
+matters can live on a day the harness cannot see, which is what happened to
+자국민 — it sits 29th on 08-02 and was invisible to a two-day run.
+
+`active` is what keeps that bill payable. Rounds one to three of
+`02_sieve_configs.sql` sweep `min_spec` and `max_neighbors_per_doc`, and
+migrations `0003` and `0009` turned both clauses off after measuring them.
+Scoring those rows as well would have cost 116 further labels — 187 rather than
+71 from `20_unlabeled.sql` — to make rows meaningful for configurations nobody
+will adopt. They stay in the file, inactive. Flip one back to `true` and re-run
+`20_unlabeled.sql`, as ever.
 
 **Rule 4 breaks when the data moves, not only when the sweep widens.** 2026-08-01
 was collected twice — once by hand and once by the 13:00 KST cron, since the
@@ -124,8 +143,11 @@ what it finds before trusting the harness.** That happened three times here:
 | `05_labels_second_collection.sql` | Labels the second collection of 2026-08-01 exposed |
 | `06_labels_category.sql` | Labels the category variants exposed |
 | `07_labels_dictionary.sql` | Labels the `0005` dictionary additions promoted |
-| `10_sieve_eval.sql` | The harness: precision, recall, F1 and the 폭염 rank per configuration |
+| `08_labels_after_dedup.sql` | Labels migration `0007` promoted by moving the data |
+| `09_labels_four_days.sql` | Labels the widening to four days and round four exposed |
+| `10_sieve_eval.sql` | The harness: precision, recall, F1 and the day's top-story rank per configuration |
 | `11_category_eval.sql` | The same for one category tab at a time |
+| `12_eval_days.sql` | The days under test and each one's biggest story — **apply before 10, 11, 20 and 21**, all four read it |
 | `20_unlabeled.sql` | Words on screen with no label — must be empty before the harness counts |
 | `21_unlabeled_category.sql` | The same worklist for `11_category_eval.sql` |
 | `30_word_scores.sql` | One day's words with every signal and the sieve's verdict beside each |
@@ -222,19 +244,100 @@ measured split now is **1,716 of the 2,043 rows on the two labelled days**
 (1,716 of 2,734 across the whole table). The boundary itself is unchanged —
 only how much sits on each side of it.
 
-The report's other half is the `standalone` signal's own blind spot, and it is
-larger than the fragments. Nine words below the cut on 2026-08-01 clear every
-other clause, so the cut alone is keeping them off screen — and six of them are
-whole words followed by a 조사 rather than pieces of anything: 유시민 (labelled
-good), 골리앗, 앤트로픽, 호실적, 폭등장, 세탁. Only 입주, 특별감찰 and 한화에어
-are real fragments. `post` in the report names the difference: a particle there
-means the word is complete.
-
-The merge is fixed; the `standalone` blind spot is not. Neither is a threshold
-change, so neither goes through `10_sieve_eval.sql` — but both change what
-reaches the screen, so both are measured before and after all the same. Note that
-the merge fix only affects **future** collections: the two archived days keep the
+The merge fix only affects **future** collections: the archived days keep the
 fragments they were stored with.
+
+## The `standalone` blind spot, measured and closed
+
+The signal asks whether a word appears in the title as a run of Hangul with
+non-Hangul on both sides. Korean attaches 조사 with no space, so 유시민이,
+골리앗의 and 자국민에 all score 0.00 — indistinguishable from 도체 inside 반도체.
+The blind spot is real and this file used to record it as the larger half of the
+fragment report: nine words below the cut on 2026-08-01 cleared every other
+clause, six of them whole words followed by a particle.
+
+**That reading is superseded and was already stale when it was written.**
+Migrations `0007` (duplicate rows) and `0009` (neighbours clause off) moved the
+data under it. Measured across all four collected days on 2026-08-03, six words
+are kept off screen by this clause and nothing else, and five reach the top 70:
+
+| day | word | df | rank without the cut | enclosing | label |
+| --- | --- | --- | --- | --- | --- |
+| 07-31 | 춘천시 | 5 | 36 | 춘천시**의원** | bad |
+| 07-31 | 한화에어 | 5 | 39 | 한화에어**로**스페이스 | bad |
+| 08-01 | 폭등장 | 6 | 38 | 폭등장**에도** (particle) | bad |
+| 08-01 | 골리앗 | 3 | 57 | 골리앗**의** (particle) | bad |
+| 08-01 | 특별감찰 | 3 | 81 — off screen day-wide, 3rd in 정치 | 특별감찰**관** | bad |
+| 08-02 | 자국민 | 6 | 29 | 자국민**에** (particle) | bad |
+
+**Every one of the three the signal is wrong about is a word that should not be
+drawn anyway.** 골리앗 looked like the clearest case for fixing the signal and is
+the clearest case against: four of its five headlines across three days are the
+same book, 『골리앗의 저주』, in [북리뷰], [북스&] and [Book] — and 북리뷰 and 저주
+were already labelled bad. 자국민 goes with 국민, 폭등장 with 폭등.
+
+The other four clauses this file has swept were each turned off or left alone by
+measurement, and round four asked the same question of this one:
+
+| configuration | 07-31 | 08-01 | 08-02 | 08-03 | mean F1 |
+| --- | --- | --- | --- | --- | --- |
+| **standalone >= .10 — ships** | 70.7 | 67.8 | 63.1 | 56.1 | **64.4** |
+| standalone off | 68.3 | 65.5 | 63.1 | 56.1 | 63.3 |
+| >= .05, >= .20, >= .30 | 70.7 | 67.8 | 63.1 | 56.1 | 64.4 |
+| >= .50 | 71.9 | 69.0 | 61.7 | 56.1 | 64.7 |
+| off, no dictionary | 57.5 | 57.5 | 57.7 | 49.7 | 55.6, story `DROPPED` ×3 |
+
+Turning it off never wins a day. `.05` through `.30` are identical, so 0.10 sits
+in the middle of a plateau rather than at the edge of one — rule 2 satisfied
+without moving anything. `.50` is +0.3 on the mean and −1.4 on 08-02, which is
+inside the noise this file has always refused to fit. The no-dictionary row is
+rejected outright by rule 5.
+
+The category harness agrees and more cleanly, over 24 cells:
+
+| variant | mean F1 | mean precision | mean recall |
+| --- | --- | --- | --- |
+| **ships (standalone >= .10)** | **63.4** | 66.5 | 65.1 |
+| standalone off | 63.0 | 65.1 | 65.1 |
+| standalone >= .50 | 63.1 | 67.6 | 63.5 |
+
+Recall is *identical* with the cut off and precision is the only thing that
+moves. Removing the clause admits bad words and rescues no good ones, which is
+exactly what the six labels above predict.
+
+**So no particle-aware variant of the signal was built.** It would rescue
+골리앗, 자국민 and 폭등장, all three of them bad. The blind spot is real, the
+words behind it are not worth having, and a second signal would be code carrying
+no measurement. Revisit only if a labelled-good word ever turns up cut by this
+clause alone — `31_fragments.sql` is the report that would show it.
+
+The label set moved during this round: 윤리위, 반도체 and 李대통령 were proposed
+bad and overruled to good, 여의도 and 형사사법체계 the other way. Every figure
+above is from after that. **Nothing in the ranking moved** — the same
+configuration wins by the same margin — which is the claim this file has always
+made about where the good-word line sits, reproduced on purpose rather than by
+assertion.
+
+### A collection defect found on the way
+
+`李대통령` exists in `headline_nouns` as **two different strings**: `李` U+674E and
+the CJK compatibility ideograph U+F7A1, which Naver's headlines use
+interchangeably. They render identically and are two separate words to every
+count in this project — 15 rows between them, and `李정부` splits the same way
+over 3. Six words in the archive carry a compatibility ideograph (`李공격`,
+`李대통령`, `李정부`, `李지지율`, `李필패론`, `盧배신`); two of them currently
+collide with an NFC twin.
+
+This is the canonical-link bug in a different alphabet: one thing, two keys,
+silently splitting counts. It is **not fixed** — `lib/nouns.ts` would have to
+normalise to NFC before storing, and the archive would need a backfill. Nothing
+in this round depends on it, and the label file simply labels both forms.
+
+```sql
+select normalize(word, nfc) as nfc_form, count(distinct word) as forms
+from (select distinct word from headline_nouns) t
+group by 1 having count(distinct word) > 1;
+```
 
 ## The category question, settled
 
@@ -256,6 +359,11 @@ and two days:
 Day-wide wins in all twelve cells rather than on average. Precision drops in some
 of them — 세계 on 2026-07-31 goes 90.0 to 75.8 — while recall rises much further,
 48.6 to 67.6, which is rule 5 doing its job.
+
+**Re-measured on four days on 2026-08-03**, over 24 cells and the extended label
+set: 46.1 for the pre-`0004` cut, **63.4** for the day-wide one, 52.8 for the
+day-wide-plus-scoped variant. The gap held, and grew. The 61.2 above is the
+two-day figure and is kept as the number the migration was decided on.
 
 A fourth option, lowering the per-category cut to 2, is **unmeasured**. Pricing
 it under rule 4 costs 180 more labels, and a sample of what it draws is mostly
