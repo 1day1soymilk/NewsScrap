@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { EVENT_GRAPH } from './support/fixtures'
+import {
+  EVENT_GRAPH,
+  MANY_EVENTS_GRAPH,
+  MANY_EVENT_HEADLINE_COUNTS,
+} from './support/fixtures'
 import { mockSupabase } from './support/mockSupabase'
 
 // EVENT_GRAPH는 삼각형 두 개가 약한 엣지 하나로 닿아 있다. 루뱅이 그것을 두
@@ -154,4 +158,27 @@ test('카운트 RPC가 실패해도 목록은 그린다 — 숫자만 빈다', a
 
   await expect(eventItem(page, '예산안')).toBeVisible()
   await expect(page.getByRole('list', { name: '오늘의 사건' })).not.toContainText('건')
+})
+
+test('사건이 다섯 개를 넘으면 나머지를 펼쳐 볼 수 있다', async ({ page }) => {
+  await mockSupabase(page, {
+    keyword_graph: MANY_EVENTS_GRAPH,
+    event_headline_counts: ({ body }) =>
+      (body.p_events ?? []).map((words) => MANY_EVENT_HEADLINE_COUNTS[words[0]] ?? 0),
+  })
+  await page.goto('/')
+
+  const list = page.getByRole('list', { name: '오늘의 사건' })
+  await expect(list.getByRole('button', { name: /가0/ })).toBeVisible()
+  await expect(list.getByRole('button', { name: /가5/ })).toHaveCount(0)
+
+  await list.getByRole('button', { name: '더 보기 3개' }).click()
+  await expect(list.getByRole('button', { name: /가5/ })).toBeVisible()
+  await expect(list.getByRole('button', { name: /가7/ })).toBeVisible()
+  await expect(list.getByRole('button', { name: '접기' })).toBeVisible()
+
+  // 섹션이 바뀌면 하루의 사건 수도 바뀐다 — 펼친 채로 넘어가면 이전 날의 높이에
+  // 다른 날의 내용이 남는다.
+  await page.locator('header').getByRole('button', { name: '정치' }).click()
+  await expect(list.getByRole('button', { name: '접기' })).toHaveCount(0)
 })

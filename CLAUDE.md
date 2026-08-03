@@ -537,6 +537,19 @@ reimplemented either.
   pretending to a rank it does not hold. With no event to light — 20 of the 70
   words hold no edge — **nothing is dimmed at all**; a wholly grey list reads as
   a fault.
+- **The list holds `EVENT_LIST_LIMIT` (5) rows and can be opened to the day's
+  full set.** Expanding passes `limit: Infinity` to `topEvents` rather than
+  branching anywhere else, which makes `pinned` a no-op by construction — every
+  event is already present. The toggle is the list's own last row, because it is
+  about the list's length rather than a control that happens to sit beneath it,
+  and it is not rendered at all when the day holds no more than is shown (a
+  category tab, mostly). **It collapses on a date or a category change**: a day
+  holds 14 to 17 events and a tab far fewer, so an expansion carried across a
+  change leaves the page at the previous view's height showing a different
+  view's content. `eventGraph` is the identity that moves on both.
+- **The expansion is not in the query string.** It is not a shareable claim
+  about the data, and the URL already carries a mutual-exclusion rule between
+  `?word=` and `?event=` that a third axis would only complicate.
 - **A word selection and an event selection are mutually exclusive**, in the
   click handlers and in the query string alike (`?word=` or `?event=`, never
   both). Two lit sets at once cannot be read off the canvas.

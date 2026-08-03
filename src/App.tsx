@@ -17,7 +17,14 @@ import {
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
-import { buildEvents, eventLabel, eventsOf, sameCommunities, topEvents } from './lib/events'
+import {
+  EVENT_LIST_LIMIT,
+  buildEvents,
+  eventLabel,
+  eventsOf,
+  sameCommunities,
+  topEvents,
+} from './lib/events'
 import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
@@ -54,6 +61,10 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState<string | null>(() => stateFromUrl().event)
   const [partition, setPartition] = useState<Partition | null>(null)
   const [eventCounts, setEventCounts] = useState<{ of: EventGraph; counts: number[] } | null>(null)
+  // Deliberately not in the query string: it is not a shareable claim about the
+  // data, and the URL already carries a mutual-exclusion rule between ?word= and
+  // ?event= that a third axis would only complicate.
+  const [eventsExpanded, setEventsExpanded] = useState(false)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
@@ -298,12 +309,22 @@ function App() {
   const rankedEvents = useMemo(
     () =>
       topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null, {
+        limit: eventsExpanded ? Infinity : EVENT_LIST_LIMIT,
         // So that a word belonging to an event ranked below the list's five
-        // still has a name, that event is appended as one more row.
+        // still has a name, that event is appended as one more row. Lifting the
+        // limit makes this a no-op by construction rather than by a branch.
         pinned: relatedEvents,
       }),
-    [eventGraph, eventCounts, relatedEvents],
+    [eventGraph, eventCounts, relatedEvents, eventsExpanded],
   )
+
+  // A day holds 14 to 17 events and a category tab far fewer, so an expansion
+  // carried across a change leaves the page at the previous view's height
+  // showing a different view's content. eventGraph is the identity that moves on
+  // both a date and a category change.
+  useEffect(() => {
+    setEventsExpanded(false)
+  }, [eventGraph])
 
 
   const activeEvent = useMemo(() => {
@@ -449,6 +470,9 @@ function App() {
                   events={rankedEvents}
                   selected={selectedEvent}
                   related={relatedEvents}
+                  total={eventGraph.events.length}
+                  expanded={eventsExpanded}
+                  onToggle={() => setEventsExpanded((current) => !current)}
                   onSelect={(topWord) => {
                     setSelectedWord(null)
                     setSelectedEvent((current) => (current === topWord ? null : topWord))

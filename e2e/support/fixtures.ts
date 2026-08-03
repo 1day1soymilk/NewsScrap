@@ -199,6 +199,32 @@ export const EVENT_GRAPH: GraphPayload = {
   ],
 }
 
+// Eight disjoint pairs, so Louvain gives eight communities and the merge rule —
+// which wants two edges between two communities — cannot join any of them. That
+// is three more events than the collapsed list holds, which is what makes the
+// expand toggle observable. EVENT_GRAPH's two events never reach the limit.
+//
+// 가N always outranks 나N inside its pair, so 가N is the event's first word and
+// the one MANY_EVENT_HEADLINE_COUNTS is keyed by.
+export const MANY_EVENTS_GRAPH: GraphPayload = {
+  nodes: Array.from({ length: 8 }, (_, i) => [
+    node(`가${i}`, 20 - i, 'politics'),
+    node(`나${i}`, 12 - i, 'politics'),
+  ]).flat(),
+  edges: Array.from({ length: 8 }, (_, i) => ({
+    a: `가${i}`,
+    b: `나${i}`,
+    cooc: 5,
+    npmi: 0.9,
+  })),
+}
+
+// Distinct per event, so the ranking has no ties to resolve and the list's order
+// is the one this file states rather than whatever the sort happened to keep.
+export const MANY_EVENT_HEADLINE_COUNTS: Record<string, number> = Object.fromEntries(
+  Array.from({ length: 8 }, (_, i) => [`가${i}`, 30 - i * 2]),
+)
+
 // event_headline_counts의 답. 단어별 카운트의 합(A는 22, B는 17)과 일부러 다르게
 // 두어, 화면의 숫자가 합계가 아니라 이 값에서 오는 것이 관측 가능하도록 한다.
 // 순서는 입력 순서이므로, 목이 본문의 p_events를 읽어 사건을 알아본다.
