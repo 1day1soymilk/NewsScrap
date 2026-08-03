@@ -203,6 +203,47 @@ is two characters and NNG and lives on its `allow` entry.
 Cost, accepted on the numbers: 닉스 (from 삼전닉스) and 어스 (from 구글 어스) are
 tagged NNP and arrive as fragments; 유럽, 남미, 중동 and 호남 arrive as regions.
 
+## Round ten — the rescue invalidated the fragment cut's tuning
+
+`min_standalone` 0.10 → **0.50** (migration `0019`), and the interesting part is
+why it was allowed to move at all.
+
+Round four swept .05 to .30, found them identical, recorded 0.10 as mid-plateau
+and concluded the clause cost nothing either way — six words kept off screen by
+it, all six labelled bad. **That measurement was taken when nothing under three
+characters could reach the canvas**, so the cut only ever saw long words, and
+long words are rarely fragments.
+
+Round nine's rescue admits a word on the tagger's say-so at any length, and the
+tagger has no opinion about whether a string is a piece of something bigger.
+닉스 (`삼전닉스`, NNP, standalone 0.14) reached the screen on two of four days.
+So the threshold had to be re-swept:
+
+| min_standalone | day-wide F1 | day-wide precision | category F1 |
+| --- | --- | --- | --- |
+| 0.10 (was) | 52.40 | 75.00 | 66.44 |
+| 0.30 | 52.87 | 75.70 | — |
+| **0.50** | **53.12** | **76.05** | **67.02** |
+| 0.70 | 52.55 | 75.35 | — |
+
+Wins on both surfaces; the peak is interior, which is rule 2. `unlabeled` 0 and
+`story_rank` 1 throughout, and nothing new needed labelling — a tightening
+promotes rank 71, and those were already labelled.
+
+Cost, named: ten words go, seven bad (닉스 ×2, 수도권, 최고위원, 경찰관, 한국 ×2)
+and three good — 우크라, 충청, 해남. Those three are the **조사 blind spot**:
+Korean attaches a particle without a space, so 해남에 scores as a fragment
+exactly as 도체 inside 반도체 does. 오만 is the sharpest loss, a country scoring
+0.00 because every headline writes 오만과. Round four's instruction **not** to
+build a particle-aware variant still stands — this moves a number the harness can
+price rather than adding a rule it cannot.
+
+**The transferable lesson is not the threshold.** A measurement is only valid
+under the circumstance it was taken in, and a clause that admits a *new kind* of
+word invalidates every threshold tuned when that kind could not appear. Round
+nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
+canvas.
+
 Labels: `17_labels_two_character.sql` (44) and
 `18_labels_two_character_category.sql` (36). Both worklists empty afterwards.
 

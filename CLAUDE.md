@@ -245,6 +245,27 @@ time and should not be rediscovered:
   The cost is visible and was accepted on the numbers: 닉스 (from 삼전닉스) and
   어스 (from 구글 어스) are tagged NNP and come in as fragments, and 유럽, 남미,
   중동, 호남 come in as regions.
+- **The rescue gave the fragment cut new work, and `min_standalone` moved from
+  0.10 to 0.50 because of it** (migration `0019`). Round four had swept .05 to
+  .30, found them identical and recorded 0.10 as mid-plateau — a measurement
+  taken when **nothing under three characters could reach the canvas**, so the
+  cut only ever saw long words, which are rarely fragments. The rescue admits on
+  the tagger's say-so at any length, and the tagger has no opinion about whether
+  a string is part of something bigger. Re-swept: 52.40 / 52.87 / **53.12** /
+  52.55 day-wide at .10 / .30 / .50 / .70 and 66.44 → **67.02** on the tabs.
+  Wins on both, and the peak is interior.
+
+  Ten words leave the screen: seven bad (닉스 twice, 수도권, 최고위원, 경찰관,
+  한국 twice) and three good — 우크라, 충청, 해남, which are the **조사 blind
+  spot**, Korean attaching a particle with no space so 해남에 scores as a
+  fragment. Round four's instruction not to build a particle-aware variant still
+  stands; this moves a number, which the harness can price, rather than adding a
+  rule it cannot.
+
+  **The general point is worth more than the threshold**: a measurement is only
+  valid under the circumstance it was taken in, and adding a clause that admits
+  a *new kind* of word invalidates every threshold that was tuned when that kind
+  could not appear.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
