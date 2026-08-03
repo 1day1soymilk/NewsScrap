@@ -154,6 +154,15 @@ describe('extractNouns', () => {
 })
 
 describe('filterNouns', () => {
+  // 네이버는 같은 한자를 보통 한자와 CJK 호환 한자 두 가지로 쓴다. 화면에서
+  // 구별되지 않으므로 아래 테스트는 **반드시 이스케이프로** 입력을 만든다. 양쪽을
+  // 그냥 타이핑하면 입력과 기대값이 한 문자열이 되어, 통과하면서 아무것도
+  // 검증하지 않는다 — 처음 작성했을 때 실제로 그렇게 됐다. 글자를 "고치지" 말 것.
+  const COMPAT_LI = '李' // CJK COMPATIBILITY IDEOGRAPH-F9E1
+  const COMPAT_NO = '盧' // CJK COMPATIBILITY IDEOGRAPH-F933
+  const PLAIN_LI = '李' // CJK UNIFIED IDEOGRAPH-674E
+  const PLAIN_NO = '盧' // CJK UNIFIED IDEOGRAPH-76E7
+
   it('drops words shorter than 2 characters and known stopwords', () => {
     expect(filterNouns(['여야', '예산안', '것', '기자', '사진'])).toEqual(['여야', '예산안'])
   })
@@ -161,15 +170,24 @@ describe('filterNouns', () => {
   // 단어는 headline_nouns의 키이므로, 같은 글자의 두 표현이 두 단어가 되면 모든
   // 집계가 조용히 갈린다. 제목 쪽에서도 정규화하지만 여기서 다시 하는 것은
   // 중복이 아니다 — ETRI가 입력의 문자를 그대로 돌려준다는 가정을 하지 않기
-  // 위해서다. 아카이브에 실제로 있던 형태가 李대통령이다.
+  // 위해서다. 아카이브에 실제로 있던 형태가 李대통령이다.
   it('normalises compatibility ideographs to NFC', () => {
-    expect(filterNouns(['李대통령', '盧배신'])).toEqual(['李대통령', '盧배신'])
+    expect(filterNouns([`${COMPAT_LI}대통령`, `${COMPAT_NO}배신`])).toEqual([
+      `${PLAIN_LI}대통령`,
+      `${PLAIN_NO}배신`,
+    ])
   })
 
-  // 정규화가 길이 컷보다 먼저여도 뒤여도 결과가 같아야 한다는 확인은 아니고,
-  // 정규화된 결과에 대해 스톱워드가 걸리는지를 본다.
+  // 위 테스트가 깨지면 출력이 "李대통령"과 "李대통령"으로 찍혀 읽을 수가 없다.
+  // 이 테스트는 같은 것을 코드포인트로 물어서, 실패했을 때 26446과 63969라는
+  // 구별 가능한 숫자가 나오게 한다.
+  it('leaves behind the ordinary code point, not the compatibility one', () => {
+    const [word] = filterNouns([`${COMPAT_LI}대통령`])
+    expect(word.codePointAt(0)).toBe(0x674e)
+  })
+
   it('applies the stopword list after normalising', () => {
-    expect(filterNouns(['李대통령', '기자'])).toEqual(['李대통령'])
+    expect(filterNouns([`${COMPAT_LI}대통령`, '기자'])).toEqual([`${PLAIN_LI}대통령`])
   })
 })
 
