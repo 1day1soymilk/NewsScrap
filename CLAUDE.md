@@ -54,8 +54,15 @@ with the repo, so a fresh clone needs them recreated.
 | File | Holds | Used by |
 | --- | --- | --- |
 | `.env` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | the frontend, at build time, and `e2e/smoke.spec.ts` |
-| `.env.functions` | `ETRI_API_KEY` | uploaded wholesale as the Edge Function environment |
+| `.env.functions` | **nothing** — see below | uploaded wholesale as the Edge Function environment |
 | `.env.supabase` | CLI access token, project ref, DB password | the Supabase CLI |
+
+`.env.functions` sets **no variables at all** now. It held `ETRI_API_KEY` until
+the analyser moved inside the function, and the key is kept there commented out
+because that file is the only copy of it there has ever been — it was once lost
+with a deleted worktree and recovered by luck. The deployed secret was removed
+with `supabase secrets unset`, which is not what `secrets set --env-file` on an
+emptied file does: setting nothing removes nothing.
 
 Never put `SUPABASE_*` variables in `.env.functions`: that file becomes the
 function's environment and Supabase reserves the prefix. The DB password is not

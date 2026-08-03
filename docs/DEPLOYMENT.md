@@ -9,13 +9,10 @@
    - Project Settings → API 에서 **Project URL**, **anon key**, **service_role key** 를 복사해 둔다.
    - Project Settings → General 의 **Reference ID** 도 복사해 둔다 (`<project-ref>`).
 
-2. **ETRI API 키 발급** — [epretx.etri.re.kr](https://epretx.etri.re.kr) 회원가입 후 발급
-   - 구 포털 `aiopen.etri.re.kr` 은 **2025-06-30 운영 종료**됐다 (현재 인증서도 만료 상태).
-     e-PreTX 가 공식 후속 플랫폼이고 WiseNLU 를 동일한 요청/응답 스키마로 제공한다.
-     엔드포인트만 `http://epretx.etri.re.kr:8000/api/WiseNLU` 로 바뀌었다.
-   - 한도는 5,000 호출/일. 이 함수는 1회 실행당 최대 900회
-     (6 카테고리 × 150 헤드라인) 호출한다. 첫 실행만 900건 전부가 신규이고
-     이후에는 중복이 ETRI 호출 없이 걸러지므로 일 1회 스케줄이면 여유가 있다.
+2. **형태소 분석기 — 발급받을 것이 없다.** 함수 안에서 `npm:garu-ko` 를 직접
+   돌린다 (MIT, WASM, 1.4MB 모델). 외부 계정도, API 키도, 호출 한도도 없다.
+   예전에는 ETRI 의 WiseNLU 를 헤드라인마다 호출했고 `.env.functions` 에
+   `ETRI_API_KEY` 를 넣어야 했다 — 지금은 그 파일 자체가 비어 있다.
 
 3. **`.env` 작성** — 저장소 루트에 `.env.example` 을 복사해서 채운다.
 
@@ -36,10 +33,8 @@ npx supabase link --project-ref <project-ref>
 # 스키마 적용
 npx supabase db push
 
-# Edge Function 시크릿. SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 는
-# Supabase 런타임이 자동 주입하므로 ETRI 키만 등록하면 된다.
-npx supabase secrets set ETRI_API_KEY=<발급받은 키>
-
+# Edge Function 시크릿은 등록할 것이 없다. SUPABASE_URL 과
+# SUPABASE_SERVICE_ROLE_KEY 는 런타임이 자동 주입하고, 분석기는 키를 쓰지 않는다.
 npx supabase functions deploy collect-headlines
 ```
 
@@ -55,17 +50,31 @@ curl -X POST https://<project-ref>.supabase.co/functions/v1/collect-headlines \
 응답 JSON 의 `summary` 에 6개 카테고리가 모두 `ok: ... seen, ... processed, ... new` 형태로
 나와야 한다. 어느 하나라도 `failed:` 면 그 메시지가 원인이다.
 
-**실행 시간:** 카테고리당 150건, 총 900건을 동시성 8로 처리해 90초 안팎을 예상한다.
-Edge Function wall-clock 한도는 무료 150초 / 유료 400초다.
+**실행 시간:** 카테고리당 150건, 총 900건을 4~5초에 처리한다. 전부 신규인
+하루 첫 실행도 같은 자릿수다 (측정: 755건 분석에 5.0초).
 
-함수는 예산을 초과하면 죽는 대신 스스로 멈춘다. `RUN_BUDGET_MS`(110초)를 카테고리 6개로
+**막는 한도는 wall-clock 이 아니라 워커의 누적 CPU 시간이고, 대략 3초다.** 이것이
+ETRI 를 걷어낼 때 실제로 부딪힌 벽이다 — 45초 실행이 죽고 64.6초 실행이 살아남았다.
+분석 자체는 헤드라인당 0.88ms, 900건에 0.8초로 싸다. 예산을 태운 것은 그 주변의
+헤드라인당 세 번씩, 총 ~2,700번의 DB 왕복이었다. ETRI 시절에는 그 왕복 하나하나가
+500ms 대기 뒤에 있어서 워커가 실행 시간의 98%를 놀았고, 그래서 누적 CPU 가 작았다.
+대기를 없앤 것이 CPU 를 늘린 게 아니라 **놀던 시간을 없앴다.**
+
+그래서 저장은 카테고리 단위로 묶는다 (`processHeadlines`): 조회 3회 + upsert 1회 +
+명사 insert 몇 회로 카테고리당 5~6 요청이다. 이 형태에서는 3초 예산에 여유가 크다.
+
+함수는 예산을 초과하면 죽는 대신 스스로 멈춘다. `RUN_BUDGET_MS`(50초)를 카테고리 6개로
 나눠 각자 몫을 주므로, 느린 실행에서도 특정 카테고리만 계속 굶는 일은 없다. 처리하지 못한
-헤드라인은 다음 실행이 이어받는다 (중복은 ETRI 호출 없이 걸러지므로 2회차부터 빠르다).
+헤드라인은 다음 실행이 이어받는다. 다만 이 예산은 wall-clock 이라 CPU 한도를 막아주지
+못한다 — 막아주는 것은 위의 배치다.
 
 `summary` 에 `skipped: run budget exhausted` 가 보이거나 `processed` 가 `collected` 보다
 한참 적으면 `supabase/functions/collect-headlines/index.ts` 에서 조절한다:
 - 유료 플랜이면 `RUN_BUDGET_MS` 를 `360_000` 으로 올린다
 - 무료 플랜이면 `MAX_HEADLINES_PER_CATEGORY` 를 100 정도로 낮춘다
+
+`WORKER_RESOURCE_LIMIT` 로 죽으면 응답이 없으므로 `summary` 를 읽을 수 없다. 그때는
+로그의 `CHK` 줄이 어느 카테고리에서 멈췄는지 말해준다.
 
 ### 2. 데이터 확인 (SQL Editor)
 
@@ -162,8 +171,8 @@ select cron.schedule(
 );
 ```
 
-ETRI 한도는 하루 5,000콜이고 중복은 조회 한 번에 콜 0이므로, 여섯 번 돌아도
-여유가 크다.
+분석기가 함수 안에 있으니 외부 한도라는 것이 없고, 여섯 번을 돌든 그보다 자주 돌든
+비용은 스크래핑과 DB 왕복뿐이다. 실행당 4~5초다.
 
 pg_cron 은 UTC 로 돈다. UTC 22:00 은 KST 로 **다음 날** 07:00 이지만, 함수가
 `todayInSeoul()` 로 날짜를 정하므로 저장되는 `collected_date` 는 서울 날짜 그대로다 —

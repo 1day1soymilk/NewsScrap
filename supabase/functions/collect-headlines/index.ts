@@ -8,11 +8,16 @@ import {
   extractTemplateListHtml,
   type ScrapedHeadline,
 } from './lib/headlines.ts'
-import { callEtriMorphAnalysis, extractNouns, filterNouns } from './lib/nouns.ts'
+import { extractNouns, filterNouns } from './lib/nouns.ts'
+// The node entry, which is the one the probe in Task 1 proved: `Garu.load()`
+// reads the wasm and the 1.4MB model off disk through fs/promises, and npm
+// packages sit on disk under Deno, so it simply works. The browser entry and
+// the raw wasm-bindgen glue both need subpaths this package's `exports` map
+// does not define, so neither is a fallback — they cannot resolve at all.
+import { Garu } from 'npm:garu-ko@0.9.12'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const ETRI_API_KEY = Deno.env.get('ETRI_API_KEY')!
 
 // A section's first page carries ~45 headlines and each "더보기" page adds ~36,
 // so this cap is reached in four pages (measured across all six sections).
@@ -45,11 +50,14 @@ const ETRI_API_KEY = Deno.env.get('ETRI_API_KEY')!
 const MAX_HEADLINES_PER_CATEGORY = 150
 const MAX_LIST_PAGES = 8
 
-// Every headline costs one ETRI round trip (~0.5s) plus two or three DB calls,
-// all of it I/O wait, so the CPU-time limit (2s) is never the binding one.
-// Sequentially, 900 headlines would take ~12 minutes against a wall-clock
-// budget of 150s (free plan) / 400s (paid). At 8 in flight it lands near 90s.
-const ANALYSIS_CONCURRENCY = 8
+// **ANALYSIS_CONCURRENCY is gone rather than left unreasoned.** Eight in flight
+// existed because every headline waited ~500ms on ETRI and the pool was what
+// hid that wait. Analysis is now in-process, and storage is batched per
+// category, so a category is five or six sequential requests — there is no wait
+// left for a pool to overlap and nothing for the constant to mean. Its comment
+// claimed "the CPU-time limit is never the binding one", which was true only
+// because of the wait it was compensating for; the CPU limit is now the only
+// binding one. See processHeadlines.
 
 // Stop handing out new work here so the function returns its summary instead of
 // being killed mid-flight. Anything left over is picked up by the next run,
@@ -124,108 +132,146 @@ interface CategoryTally {
   processed: number
 }
 
-// Pulls from a shared cursor so a slow headline never blocks the others, and
-// re-checks the deadline before each item rather than after the batch.
+// Links per lookup request. The links go into the query string, so this is
+// bounded by URL length rather than by anything about Postgres — 50 of them is
+// about 2.5kB.
+const LOOKUP_CHUNK = 50
+// Rows per write. A category yields at most 150 headlines and around 1,000
+// noun rows, so this is two or three requests rather than one per row.
+const INSERT_CHUNK = 500
+
+/**
+ * Stores a category's scrape in a handful of requests rather than three per
+ * headline.
+ *
+ * **The per-headline shape is what killed this function**, and not for the
+ * reason it looks like. Analysis is 0.88ms and the whole day's 900 headlines
+ * cost 0.8s of CPU — measured on the platform, with the heap flat at 9MB. What
+ * exceeded the worker's CPU budget was the ~2,700 round trips around it: with
+ * ETRI every one of them sat behind a 500ms wait, so the worker was idle
+ * ~98% of a 64s run and its cumulative CPU stayed small. Removing the wait did
+ * not add CPU, it removed the idling, and the platform kills on **CPU time**,
+ * not on the wall clock — a 45s run died where a 64.6s one had passed.
+ *
+ * So the batching is not an optimisation bolted onto the analyser swap. It is
+ * what the swap requires: the round trip had been paying for the request count
+ * all along.
+ */
 async function processHeadlines(
   supabase: SupabaseClient,
+  garu: Garu,
   headlines: ScrapedHeadline[],
   categoryId: string,
   collectedDate: string,
   deadline: number,
 ): Promise<CategoryTally> {
   const tally: CategoryTally = { stored: 0, repaired: 0, failed: 0, processed: 0 }
-  let next = 0
 
-  const worker = async () => {
-    while (true) {
-      if (Date.now() >= deadline) return
-      const index = next++
-      if (index >= headlines.length) return
-      const headline = headlines[index]
-      tally.processed += 1
-
-      try {
-        const outcome = await storeHeadline(supabase, headline, categoryId, collectedDate)
-        if (outcome === 'stored') tally.stored += 1
-        else if (outcome === 'repaired') tally.repaired += 1
-      } catch (headlineError) {
-        tally.failed += 1
-        console.error(`Failed to process headline "${headline.link}":`, headlineError)
-      }
+  // The embedded count answers "does this link already have nouns" in the same
+  // round trip that answers "does this link exist", which is what the lookup
+  // and the count used to cost separately, per headline.
+  const existing = new Map<string, { id: string; nouns: number }>()
+  for (let index = 0; index < headlines.length; index += LOOKUP_CHUNK) {
+    if (Date.now() >= deadline) return tally
+    const chunk = headlines.slice(index, index + LOOKUP_CHUNK)
+    const { data, error } = await supabase
+      .from('headlines')
+      .select('id, link, headline_nouns(count)')
+      .eq('category_id', categoryId)
+      .in('link', chunk.map((headline) => headline.link))
+    if (error) throw error
+    for (const row of data ?? []) {
+      existing.set(row.link, { id: row.id, nouns: row.headline_nouns?.[0]?.count ?? 0 })
     }
   }
 
-  await Promise.all(Array.from({ length: ANALYSIS_CONCURRENCY }, worker))
+  // Everything is analysed before anything is written, so a headline is still
+  // never inserted without its nouns in hand — the rule the ETRI version stated
+  // as "nouns first". A row with no nouns at all is a word cloud that cannot
+  // see the headline, which is why the repair below exists as well.
+  const fresh: { headline: ScrapedHeadline; nouns: string[] }[] = []
+  const repairs: { id: string; nouns: string[] }[] = []
+  for (const headline of headlines) {
+    tally.processed += 1
+    const seen = existing.get(headline.link)
+    if (seen && seen.nouns > 0) continue
+    const nouns = analyseNouns(garu, headline.title)
+    if (nouns.length === 0) continue
+    if (seen) repairs.push({ id: seen.id, nouns })
+    else fresh.push({ headline, nouns })
+  }
+
+  const nounRows: { headline_id: string; word: string }[] = repairs.flatMap(({ id, nouns }) =>
+    nouns.map((word) => ({ headline_id: id, word }))
+  )
+  tally.repaired = repairs.length
+
+  // Upsert rather than insert so an overlapping cron cannot turn a duplicate
+  // into a failed batch. ON CONFLICT DO NOTHING returns only the rows actually
+  // inserted, which is exactly the set whose nouns this run owns — a row the
+  // other run inserted is that run's to fill in, and the repair path above
+  // catches it either way.
+  for (let index = 0; index < fresh.length; index += INSERT_CHUNK) {
+    if (Date.now() >= deadline) break
+    const chunk = fresh.slice(index, index + INSERT_CHUNK)
+    const { data, error } = await supabase
+      .from('headlines')
+      .upsert(
+        chunk.map(({ headline }) => ({
+          category_id: categoryId,
+          title: headline.title,
+          link: headline.link,
+          collected_date: collectedDate,
+        })),
+        { onConflict: 'category_id,link', ignoreDuplicates: true },
+      )
+      .select('id, link')
+    if (error) throw error
+
+    const nounsByLink = new Map(chunk.map(({ headline, nouns }) => [headline.link, nouns]))
+    for (const row of data ?? []) {
+      for (const word of nounsByLink.get(row.link) ?? []) {
+        nounRows.push({ headline_id: row.id, word })
+      }
+      tally.stored += 1
+    }
+  }
+
+  // A failed chunk is logged and counted rather than thrown, because the
+  // headlines are already in: throwing would lose the category's whole scrape
+  // over rows the next run repairs anyway.
+  for (let index = 0; index < nounRows.length; index += INSERT_CHUNK) {
+    const chunk = nounRows.slice(index, index + INSERT_CHUNK)
+    const { error } = await supabase.from('headline_nouns').insert(chunk)
+    if (error) {
+      tally.failed += chunk.length
+      console.error(`noun insert of ${chunk.length} rows failed:`, error)
+    }
+  }
+
   return tally
 }
 
-async function storeHeadline(
-  supabase: SupabaseClient,
-  headline: ScrapedHeadline,
-  categoryId: string,
-  collectedDate: string,
-): Promise<'stored' | 'repaired' | 'skipped'> {
-  const { data: existing, error: lookupError } = await supabase
-    .from('headlines')
-    .select('id')
-    .eq('category_id', categoryId)
-    .eq('link', headline.link)
-    .maybeSingle()
-  if (lookupError) throw lookupError
-
-  if (existing) {
-    // Self-healing: an earlier run may have been interrupted between the
-    // headline insert and the noun insert, leaving a headline that is
-    // invisible to the word cloud. Backfill it instead of skipping.
-    const { count, error: countError } = await supabase
-      .from('headline_nouns')
-      .select('id', { count: 'exact', head: true })
-      .eq('headline_id', existing.id)
-    if (countError) throw countError
-    if ((count ?? 0) > 0) return 'skipped'
-
-    const nouns = await analyseNouns(headline.title)
-    if (nouns.length === 0) return 'skipped'
-
-    const { error: backfillError } = await supabase
-      .from('headline_nouns')
-      .insert(nouns.map((word) => ({ headline_id: existing.id, word })))
-    if (backfillError) throw backfillError
-    return 'repaired'
-  }
-
-  // Nouns first: if ETRI fails or yields nothing usable we leave no row
-  // behind, so the next run re-scrapes this link and retries naturally.
-  const nouns = await analyseNouns(headline.title)
-  if (nouns.length === 0) return 'skipped'
-
-  const { data: inserted, error: insertError } = await supabase
-    .from('headlines')
-    .insert({
-      category_id: categoryId,
-      title: headline.title,
-      link: headline.link,
-      collected_date: collectedDate,
-    })
-    .select('id')
-    .single()
-  if (insertError) throw insertError
-
-  const { error: nounsError } = await supabase
-    .from('headline_nouns')
-    .insert(nouns.map((word) => ({ headline_id: inserted.id, word })))
-  if (nounsError) throw nounsError
-  return 'stored'
+// The analyser is loaded once per invocation and reused for every headline in
+// the run. Loading is the expensive part — a 1.4MB model and the WASM — and
+// analysis itself is 0.79ms a headline, measured over 2,197 real ones.
+let analyser: Garu | null = null
+async function loadAnalyser(): Promise<Garu> {
+  if (!analyser) analyser = await Garu.load()
+  return analyser
 }
 
-async function analyseNouns(title: string): Promise<string[]> {
-  return filterNouns(extractNouns(await callEtriMorphAnalysis(title, ETRI_API_KEY)))
+function analyseNouns(garu: Garu, title: string): string[] {
+  const normalised = title.normalize('NFC')
+  const tokens = garu.analyze(normalised).tokens
+  return filterNouns(extractNouns(normalised, tokens))
 }
 
 Deno.serve(async () => {
   const startedAt = Date.now()
   const deadline = startedAt + RUN_BUDGET_MS
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  const garu = await loadAnalyser()
   const collectedDate = todayInSeoul()
   const summary: Record<string, string> = {}
 
@@ -252,21 +298,32 @@ Deno.serve(async () => {
         throw new Error(`category "${category.slug}" not found in DB — did the migration run?`)
       }
 
+      const scrapeStart = Date.now()
       const headlines = await fetchSectionHeadlines(
         category.sectionId,
         MAX_HEADLINES_PER_CATEGORY,
       )
+      console.log(
+        `CHK ${category.slug} scraped ${headlines.length} in ${Date.now() - scrapeStart}ms ` +
+          `(run ${Date.now() - startedAt}ms)`,
+      )
+      const processStart = Date.now()
       const tally = await processHeadlines(
         supabase,
+        garu,
         headlines,
         categoryRow.id,
         collectedDate,
         sliceDeadline,
       )
 
+      console.log(
+        `CHK ${category.slug} processed ${tally.processed} in ${Date.now() - processStart}ms ` +
+          `(run ${Date.now() - startedAt}ms)`,
+      )
       summary[category.slug] =
         `ok: ${headlines.length} collected, ${tally.processed} processed, ` +
-        `${tally.stored} new, ${tally.repaired} repaired, ${tally.failed} failed`
+        `${tally.stored} new, ${tally.repaired} repaired, ${tally.failed} noun rows failed`
     } catch (categoryError) {
       console.error(`Category "${category.slug}" failed:`, categoryError)
       summary[category.slug] = `failed: ${String(categoryError)}`
