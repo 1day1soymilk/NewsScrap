@@ -206,6 +206,53 @@ export const EVENT_GRAPH: GraphPayload = {
 //
 // 가N always outranks 나N inside its pair, so 가N is the event's first word and
 // the one MANY_EVENT_HEADLINE_COUNTS is keyed by.
+// 정육면체 위상 — 여덟 단어가 네 개씩 두 고리를 이루고 마주 보는 자리끼리 이어진다.
+//
+// **이 픽스처가 있는 이유는 다른 픽스처가 새 배치 경로를 하나도 안 밟기 때문이다.**
+// DEFAULT_GRAPH는 사건 멤버가 둘이라 "둘이면 나란히" 분기로 빠지고,
+// EVENT_GRAPH의 삼각형은 교차가 0이라 layoutCluster가 즉시 반환하며,
+// MANY_EVENTS_GRAPH는 쌍 여덟 개라 역시 나란히다. 그래서 planar.ts는 브라우저에서
+// 한 번도 실행된 적이 없었고, e2e 40개가 초록인 것이 새 코드에 대해 아무 말도
+// 하지 않았다.
+//
+// 정육면체는 평면 그래프인데 힘 균형으로 놓으면 **교차가 23개** 나온다(측정값).
+// 즉 layoutCluster의 `forced > 0` 분기가 반드시 열리고, nearPlanarPositions →
+// triangulate → tutte → spreadPlanar가 전부 돈 뒤 0이 되어야 한다. 이 하나로
+// 새 경로 전체가 브라우저에서 실행된다.
+//
+// 단어는 두 섹션에 걸친다 — 한 섹션이면 색이 하나뿐이라 그림이 실제 화면과
+// 덜 닮는다. count는 전부 다르게 두어 글자 크기가 제각각이고, 그래야 라벨 폭
+// 편차가 있는 상태에서 겹침을 본다.
+export const DENSE_GRAPH: GraphPayload = {
+  nodes: [
+    node('예산안', 12, 'politics'),
+    node('국회', 11, 'politics'),
+    node('본회의', 10, 'politics'),
+    node('여야', 9, 'politics'),
+    node('물가', 8, 'economy'),
+    node('환율', 7, 'economy'),
+    node('금리', 6, 'economy'),
+    node('수출', 5, 'economy'),
+  ],
+  edges: [
+    // 바깥 고리
+    { a: '예산안', b: '국회', cooc: 6, npmi: 0.9 },
+    { a: '국회', b: '본회의', cooc: 6, npmi: 0.9 },
+    { a: '본회의', b: '여야', cooc: 6, npmi: 0.9 },
+    { a: '여야', b: '예산안', cooc: 6, npmi: 0.9 },
+    // 안쪽 고리
+    { a: '물가', b: '환율', cooc: 5, npmi: 0.88 },
+    { a: '환율', b: '금리', cooc: 5, npmi: 0.88 },
+    { a: '금리', b: '수출', cooc: 5, npmi: 0.88 },
+    { a: '수출', b: '물가', cooc: 5, npmi: 0.88 },
+    // 기둥
+    { a: '예산안', b: '물가', cooc: 4, npmi: 0.85 },
+    { a: '국회', b: '환율', cooc: 4, npmi: 0.85 },
+    { a: '본회의', b: '금리', cooc: 4, npmi: 0.85 },
+    { a: '여야', b: '수출', cooc: 4, npmi: 0.85 },
+  ],
+}
+
 export const MANY_EVENTS_GRAPH: GraphPayload = {
   nodes: Array.from({ length: 8 }, (_, i) => [
     node(`가${i}`, 20 - i, 'politics'),

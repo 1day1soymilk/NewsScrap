@@ -155,6 +155,20 @@ interface Row {
   lenMax: number
   overlap: number
   height: number
+  /**
+   * 한 번의 `computeGraphLayout`에 걸린 시간(ms), 세 번 중 제일 짧은 것.
+   *
+   * CLAUDE.md가 재작성 전의 48ms를 적어 두고 "이후로 다시 안 쟀다"고 스스로
+   * 밝히고 있었다. 그 뒤로 평면 경로가 얹혔는데 그 비용이 만만치 않다 —
+   * `triangulate`는 비인접 쌍마다 평면성 판정을 한 번씩 돌리고(13점이면 78회),
+   * `minimumDropSet`은 크기 2에서 C(27,2)=351회, `flatPositions`는 후보 테두리
+   * 예순네 개마다 가우스 소거와 교차 검사를 한다. 그리고 **리사이즈는 8px마다
+   * 이걸 다시 돈다.**
+   *
+   * 최소값을 쓰는 것은 GC와 JIT 예열을 빼기 위해서다. 절대값은 이 기계의 것이고,
+   * 이 자의 다른 열들과 마찬가지로 **두 배치를 서로 비교하기 위한 것**이다.
+   */
+  ms: number
 }
 
 const rows: Row[] = []
@@ -162,6 +176,14 @@ const rows: Row[] = []
 for (const view of VIEWS) {
   for (const [day, graph] of Object.entries(fixture)) {
     const words = measuredWords(graph.nodes)
+
+    let fastest = Infinity
+    for (let run = 0; run < 3; run++) {
+      const started = performance.now()
+      computeGraphLayout(measuredWords(graph.nodes), graph.edges, { width: view.width })
+      fastest = Math.min(fastest, performance.now() - started)
+    }
+
     const layout = computeGraphLayout(words, graph.edges, { width: view.width })
     const drawn = layout.edges.filter((e) => e.curve !== null)
     const lengths = drawn.map((e) => Math.hypot(e.x2 - e.x1, e.y2 - e.y1))
@@ -191,13 +213,14 @@ for (const view of VIEWS) {
       lenMax: Math.round(Math.max(0, ...lengths)),
       overlap: overlaps(layout.nodes),
       height: layout.bounds.height,
+      ms: Math.round(fastest * 10) / 10,
     })
   }
 }
 
 const columns: (keyof Row)[] = [
   'view', 'day', 'nodes', 'edges', 'drawn', 'crowded', 'crossings', 'xIn', 'xBr',
-  'bridges', 'lenMed', 'lenMax', 'overlap', 'height',
+  'bridges', 'lenMed', 'lenMax', 'overlap', 'height', 'ms',
 ]
 const widths = columns.map((c) =>
   Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)),
