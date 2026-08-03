@@ -1,5 +1,5 @@
 export type CategoryRow = { id: string; slug: string; label: string }
-export type CollectedDateRow = { collected_date: string }
+export type CollectedDateRow = { collected_date: string; headline_count: number }
 export type HeadlineSummary = {
   id: string
   title: string
@@ -40,24 +40,31 @@ export const CATEGORIES: CategoryRow[] = [
   { id: '00000000-0000-4000-8000-000000000105', slug: 'it', label: 'IT/과학' },
 ]
 
-// Two dates, so the prev/next buttons have somewhere to go and the surge
-// comparison has a previous day to compare against. Newest first, matching
-// fetchAvailableDates()'s ordering.
-export const COLLECTED_DATES: CollectedDateRow[] = [
-  { collected_date: todayInSeoul() },
-  { collected_date: previousDayInSeoul() },
-]
-
 export type WordCountRow = { collected_date: string; word: string; count: number }
 
-// Headlines collected each day — the denominator computeSurges normalises by,
-// served through the content-range header the way a PostgREST head-count is.
+// Headlines collected each day — the denominator computeSurges normalises by.
 // Today is the larger of the two, so a word has to gain share rather than
 // merely gain count to be marked.
+//
+// The app reads these from collected_dates now; the head-count endpoint they
+// used to be served through is the fallback for a date that view did not
+// return, and `headlines` in MockOptions still answers it.
 export const HEADLINE_COUNTS: Record<string, number> = {
   [todayInSeoul()]: 12,
   [previousDayInSeoul()]: 8,
 }
+
+// Two dates, so the prev/next buttons have somewhere to go and the surge
+// comparison has a previous day to compare against. Newest first, matching
+// fetchCollectedDates()'s ordering.
+//
+// The counts are read from HEADLINE_COUNTS rather than written out again: the
+// two fixtures are the same day totals reached by two routes, and a copy that
+// drifted would make the surge assertions describe a day that does not exist.
+export const COLLECTED_DATES: CollectedDateRow[] = [
+  { collected_date: todayInSeoul(), headline_count: HEADLINE_COUNTS[todayInSeoul()] },
+  { collected_date: previousDayInSeoul(), headline_count: HEADLINE_COUNTS[previousDayInSeoul()] },
+]
 
 // daily_word_counts rows for the two days above, which is what computeSurges
 // compares. Counts match DEFAULT_GRAPH's so the two fixtures tell one story.

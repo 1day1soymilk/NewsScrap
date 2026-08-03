@@ -122,10 +122,21 @@ drawn words into false "new"s. Two rules follow, and `fetchWordCountsFor` /
 
 - **Name the words you want** (`.in('word', …)`). The graph draws at most
   `render_cap` (70) of them, so a response bounded by that list cannot be cut.
-- **Never sum a response to get a denominator.** Day totals come from a
-  `head: true, count: 'exact'` query, which returns no rows at all and so cannot
-  be truncated. `computeSurges` takes the total as an argument rather than
-  summing the counts it was handed, so the mistake cannot recur by accident.
+- **Never sum a response to get a denominator.** Day totals are counted by
+  Postgres and read as a number. `computeSurges` takes the total as an argument
+  rather than summing the counts it was handed, so the mistake cannot recur by
+  accident.
+
+Those totals now ride along on `collected_dates` (migration `0011`), which the
+date picker reads once per load anyway — `fetchCollectedDates` returns
+`{date, headlines}[]` and `App.tsx` derives both the `string[]` the date stepper
+wants and a `Map` of denominators. That is still not a summed response: the
+column is `count(*)` grouped by day. **`fetchHeadlineCount` survives as the
+fallback** for a date the view did not return, because `collected_dates` is one
+row per collected day and so is itself subject to the 1,000-row cap — about 2.7
+years out. Being truncated then costs one `head: true, count: 'exact'` request
+instead of producing a wrong ratio for every word on screen. Measured cold load:
+9 requests → 7, with no `HEAD` among them.
 
 `fetchWordCounts` (the whole-day read) is still exported and tested but nothing
 calls it; it is the one function here that can be silently truncated.
@@ -655,7 +666,10 @@ already caused a false pass or a failure:
   body, so a handler keying off `p_category` must read
   `route.request().postDataJSON()`, not the query string.
 - `fetchHeadlineCount` is a **HEAD** request and reads its answer from the
-  `content-range` header, not from a body.
+  `content-range` header, not from a body. It is now only the fallback path, so
+  `COLLECTED_DATES` carries the same totals as `HEADLINE_COUNTS` — derived from
+  it rather than written out twice, since a drifted copy would make the surge
+  assertions describe a day that does not exist.
 - A default that varies by request has to be a function, and `resolve()` has to
   call it. Returning the function itself serialises to `undefined`, which reaches
   the app as an empty result and reads exactly like "no data" — the surge markers

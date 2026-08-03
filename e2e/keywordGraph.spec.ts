@@ -113,7 +113,9 @@ test('marks a word that grew against the previous collected day', async ({ page 
 })
 
 test('marks nothing when there is no previous day to compare against', async ({ page }) => {
-  await mockSupabase(page, { collected_dates: [{ collected_date: todayInSeoul() }] })
+  await mockSupabase(page, {
+    collected_dates: [{ collected_date: todayInSeoul(), headline_count: 12 }],
+  })
   await page.goto('/')
 
   // On the first collected day every word is new, which is true and useless.

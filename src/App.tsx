@@ -7,8 +7,8 @@ import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
 import {
-  fetchAvailableDates,
   fetchCategories,
+  fetchCollectedDates,
   fetchEventHeadlineCounts,
   fetchHeadlineCount,
   fetchHeadlinesForEvent,
@@ -22,6 +22,7 @@ import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { sameState, stateFromUrl, toSearch } from './lib/urlState'
+import type { CollectedDate } from './lib/queries'
 import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
@@ -44,7 +45,7 @@ function errorMessage(e: unknown): string {
 
 function App() {
   const [categories, setCategories] = useState<Category[]>([])
-  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [collectedDates, setCollectedDates] = useState<CollectedDate[]>([])
   const [selectedDate, setSelectedDate] = useState(() => stateFromUrl().date ?? todayInSeoul())
   const [selectedCategory, setSelectedCategory] = useState<string | null>(
     () => stateFromUrl().category,
@@ -63,8 +64,17 @@ function App() {
 
   useEffect(() => {
     fetchCategories().then(setCategories).catch((e) => setError(errorMessage(e)))
-    fetchAvailableDates().then(setAvailableDates).catch((e) => setError(errorMessage(e)))
+    fetchCollectedDates().then(setCollectedDates).catch((e) => setError(errorMessage(e)))
   }, [])
+
+  // One query answers two questions. The date stepper and the masthead want the
+  // days; the surge comparison wants each day's headline total as the
+  // denominator that makes two days of different sizes comparable.
+  const availableDates = useMemo(() => collectedDates.map((day) => day.date), [collectedDates])
+  const headlinesByDate = useMemo(
+    () => new Map(collectedDates.map((day) => [day.date, day.headlines])),
+    [collectedDates],
+  )
 
   // A slug from a hand-edited or stale link that matches no section would leave
   // every tab unselected while the graph filtered on nothing — a state the UI
@@ -171,10 +181,19 @@ function App() {
       return
     }
     let cancelled = false
+
+    // The day totals ride along with the date list, so the common path costs no
+    // request at all. The fallback is not decoration: collected_dates is one row
+    // per collected day, which reaches PostgREST's 1,000-row cap in about 2.7
+    // years, and a silently truncated denominator is the specific failure this
+    // codebase has already paid for once. Being truncated then costs one request
+    // rather than producing a wrong ratio for every word on screen.
+    const headlineCount = (date: string) => headlinesByDate.get(date) ?? fetchHeadlineCount(date)
+
     Promise.all([
       fetchWordCountsFor([selectedDate, previousDate], graphWords),
-      fetchHeadlineCount(selectedDate),
-      fetchHeadlineCount(previousDate),
+      headlineCount(selectedDate),
+      headlineCount(previousDate),
     ])
       .then(([counts, todayHeadlines, previousHeadlines]) => {
         if (cancelled) return
@@ -196,7 +215,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedDate, previousDate, graphWords])
+  }, [selectedDate, previousDate, graphWords, headlinesByDate])
 
   // --- 사건 ------------------------------------------------------------------
 
