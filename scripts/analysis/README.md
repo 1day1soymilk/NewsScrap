@@ -453,5 +453,53 @@ the four days. Anything measured against the drawn set is now stale — includin
 the canvas-layout harness, whose fixture is a copy of `keyword_graph`'s output
 and must be re-pulled before its numbers mean anything again.
 
+## Round seven: the floor that turned out to be unnecessary
+
+The natural next question after round six was whether the places the demotion
+frees should be filled at all. A word with three headlines is thin, and the
+words sitting at ranks 71 to 78 across the four days were all exactly df 3, so
+a floor under promotion looked obviously right.
+
+`min_headlines` **is** that floor; there is no second knob to invent. Measured:
+
+| floor | mean F1, 4 days |
+| --- | --- |
+| 3 (ships) | **67.30** |
+| 4 | 59.20 |
+| 5 | 52.98 |
+| 6 | 45.35 |
+
+Precision barely moves (84.3 to 84.3, 71.4 to 65.7) while recall collapses
+(61.9 to 44.3). That is rule 5 in its purest form: a floor does not punish
+discarding good words, and this one discards them wholesale.
+
+**The reason is the corpus, and the reason is measurable.** At 700 to 1,100
+headlines a day only 51 to 63 words clear df >= 4, so three of the four days can
+no longer fill the 70 places on the canvas. The collector then went from one
+cron run a day to six and 2026-08-03 went from 900 headlines to 2,197 in an
+afternoon — and on that day the floor changes **nothing at all**:
+
+| day | headlines | eligible df>=3 | >=4 | >=5 | >=6 | >=8 | df at rank 70 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-31 | 899 | 75 | 51 | 38 | 33 | 19 | **3** |
+| 2026-08-01 | 1,144 | 85 | 54 | 46 | 37 | 28 | **3** |
+| 2026-08-02 | 691 | 99 | 63 | 51 | 33 | 18 | **3** |
+| 2026-08-03 | 2,197 | 386 | 244 | 170 | 124 | 81 | **8** |
+
+The last column is the finding. On a thin day the word that just makes the
+canvas has three headlines, so the floor *is* the screen and raising it starves
+the canvas. On a fat day that word already has eight, so a floor of 4, 5 or even
+6 never reaches it — the drawn 70 come back identical at every one of them.
+
+**So the floor is not adopted, and not deferred either: it is unnecessary.**
+There is no corpus size at which it helps. On a thin day it hurts; on a fat day
+the ranking has already done its work. `min_headlines` stays at 3 as a safety
+net for a day whose collection failed, where it costs nothing.
+
+What the round actually bought is the collection change, which is real: six
+runs a day at four-hour spacing rather than one. See the header of
+`supabase/functions/collect-headlines/index.ts` for why the runs are spread
+rather than the per-run cap raised.
+
 `analysis` is a separate schema, so none of this is reachable from the browser —
 PostgREST only exposes `public`.

@@ -130,6 +130,41 @@ select jobid, schedule, jobname, active from cron.job;
 select cron.alter_job(job_id := 1, schedule := '0 22 * * *');
 ```
 
+### 하루 여섯 번 돈다
+
+잡은 하나가 아니라 **여섯 개**이고, 전부 같은 함수를 부른다. 4시간 간격으로
+하루를 고르게 덮는다:
+
+| jobname | UTC | KST |
+| --- | --- | --- |
+| `collect-headlines-03kst` | `0 18 * * *` | 03:00 |
+| `collect-headlines-daily` | `0 22 * * *` | 07:00 |
+| `collect-headlines-11kst` | `0 2 * * *`  | 11:00 |
+| `collect-headlines-15kst` | `0 6 * * *`  | 15:00 |
+| `collect-headlines-19kst` | `0 10 * * *` | 19:00 |
+| `collect-headlines-23kst` | `0 14 * * *` | 23:00 |
+
+**한 번에 더 많이 긁는 쪽은 안 된다.** 섹션당 150건을 300건으로 올려 봤더니
+63초에 `546 WORKER_RESOURCE_LIMIT` 으로 죽었다. 같은 날 아침 150건짜리 실행은
+64.6초에 정상 종료했으므로 이 플랜의 벽은 문서가 말하는 150초가 아니라 63초
+언저리다. 게다가 깊은 페이지는 오래된 기사고, 나중 실행은 새 기사다 — 실측으로
+07시 크론 뒤 한 번 더 돌린 것만으로 **같은 150건 창 안에서 새 기사 404건**이
+나왔다.
+
+새 잡을 추가할 때 명령문에는 service-role 키가 평문으로 들어 있으므로,
+**다시 붙여넣지 말고 기존 잡의 명령문을 그대로 복사한다**:
+
+```sql
+select cron.schedule(
+  'collect-headlines-11kst',
+  '0 2 * * *',
+  (select command from cron.job where jobname = 'collect-headlines-daily')
+);
+```
+
+ETRI 한도는 하루 5,000콜이고 중복은 조회 한 번에 콜 0이므로, 여섯 번 돌아도
+여유가 크다.
+
 pg_cron 은 UTC 로 돈다. UTC 22:00 은 KST 로 **다음 날** 07:00 이지만, 함수가
 `todayInSeoul()` 로 날짜를 정하므로 저장되는 `collected_date` 는 서울 날짜 그대로다 —
 UTC 날짜로 찍었다면 하루 전 날짜에 쌓였을 자리다.

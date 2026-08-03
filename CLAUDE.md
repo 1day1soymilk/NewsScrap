@@ -714,6 +714,30 @@ divided into a per-category slice so the last sections in the list are not the
 ones starved on every slow run. Unprocessed headlines are picked up by the next
 run, since duplicates skip ETRI entirely.
 
+**It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
+pg_cron jobs, all calling the same function). It used to run once, and going
+wider was tried first and failed: raising the cap to 300 over 12 pages returned
+**546 WORKER_RESOURCE_LIMIT at 63s**, against a successful 150-per-section run of
+64.6s the same morning. The wall on this plan is near 63s, not the 150s the docs
+quote, so a bigger cap buys a run that returns nothing. `RUN_BUDGET_MS` was
+110_000 and therefore never once fired; it is now 50_000, below the observed
+wall, because a killed run reports no summary and the summary is the only check
+`index.ts` has.
+
+Running more often is also the better instrument on its own terms: **a deeper
+page is older news, a later run is newer news.** Measured on 2026-08-03, one run
+some hours after the 07:00 cron found 404 new headlines inside the same
+150-per-section window — the sections churn all day. The day went from 900
+headlines to 2,197, and ETRI's 5,000-call limit is not close to binding, since a
+duplicate costs a lookup and no call.
+
+That change is what settled the `min_headlines` question — see the round-seven
+section of `scripts/analysis/README.md`. The short version: on a thin day the
+word at rank 70 has three headlines, so a floor is the screen; on a fat day it
+already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion floor
+is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a safety
+net for a day whose collection failed.
+
 Nouns are fetched *before* the headline row is inserted, so a failure leaves
 nothing behind and the next run retries naturally. The duplicate path also
 backfills headlines that somehow have no nouns.

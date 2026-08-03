@@ -17,6 +17,31 @@ const ETRI_API_KEY = Deno.env.get('ETRI_API_KEY')!
 // A section's first page carries ~45 headlines and each "더보기" page adds ~36,
 // so this cap is reached in four pages (measured across all six sections).
 // MAX_LIST_PAGES is slack for a section whose pages come back short.
+//
+// **Raising this is the wrong way to collect more, and it was tried.** 300 over
+// 12 pages killed the run: status 546, WORKER_RESOURCE_LIMIT, at 63s, against a
+// successful 150-page run of 64.6s the same morning. The wall on this plan is
+// near 63s and not the 150s the docs quote, so a bigger cap does not buy a
+// bigger run — it buys a run that returns nothing.
+//
+// The way to collect more is **to run more often**, and it is better on its own
+// terms. A deeper page is older news; a later run is newer news. Measured on
+// 2026-08-03, one manual run some hours after the 07:00 cron found **404 new
+// headlines inside this same 150-per-section window** — the sections churn
+// through the day. There are now four cron jobs (07, 11, 15, 19 KST) rather
+// than one, all calling this same function.
+//
+// Why more headlines are wanted at all: `min_headlines` is the floor under
+// which a word is noise, and at ~900 a day raising it from 3 to 4 leaves only
+// 51 to 71 words eligible, so three of the four archived days can no longer
+// fill the 70 places on the canvas. Measured, that floor costs 8.1 mean F1
+// (67.30 to 59.20) with precision flat and recall collapsing — rule 5 in
+// scripts/analysis/README.md exactly. **The floor is not wrong, the corpus is
+// thin.** A word needs four headlines to be worth drawing whether the day holds
+// 900 or 1,800; what changes is how many words clear it.
+//
+// ETRI allows 5,000 calls a day and a duplicate costs none, so four runs at a
+// few hundred new headlines each sit comfortably inside it.
 const MAX_HEADLINES_PER_CATEGORY = 150
 const MAX_LIST_PAGES = 8
 
@@ -27,9 +52,19 @@ const MAX_LIST_PAGES = 8
 const ANALYSIS_CONCURRENCY = 8
 
 // Stop handing out new work here so the function returns its summary instead of
-// being killed mid-flight. Raise toward 360_000 on a paid plan. Anything left
-// over is picked up by the next run, since duplicates skip ETRI entirely.
-const RUN_BUDGET_MS = 110_000
+// being killed mid-flight. Anything left over is picked up by the next run,
+// since duplicates skip ETRI entirely.
+//
+// **This was 110_000 and that number was never real.** The platform returned
+// 546 WORKER_RESOURCE_LIMIT at 63s on a heavier run, while a successful run the
+// same morning took 64.6s — so the wall is around 63s and this budget never
+// once fired. It now sits below the wall, which is the whole point of having
+// it: a killed run reports nothing, and the summary is the only way index.ts is
+// checked at all (it is not type-checked and not unit-tested).
+//
+// Raise toward 360_000 on a paid plan, but measure the wall first rather than
+// trusting the documented limit.
+const RUN_BUDGET_MS = 50_000
 
 function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })

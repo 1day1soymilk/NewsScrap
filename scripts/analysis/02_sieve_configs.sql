@@ -223,12 +223,38 @@ values
   (113, 'r6: demote head_pos > .75',      3, 0.10,  3, 9.90, -1.0, 0.75, true),
   (114, 'r6: demote head_pos > .50',      3, 0.10,  3, 9.90, -1.0, 0.50, true);
 
+-- Round seven: a floor under promotion.
+--
+-- The demotion frees places under the cap, and whatever sits at rank 71 rises
+-- into them whatever it is. The question here is whether those places should be
+-- filled at all — a word with three headlines is thin, and the words that sat at
+-- ranks 71 to 78 across the four days are all exactly df 3.
+--
+-- `min_headlines` **is** that floor; there is no second knob to invent. What is
+-- new is that it now has to be judged with the render cap in mind rather than
+-- against it. At 4 the eligible set falls to 51 / 54 / 63 / 71 words on the four
+-- days, so three of them can no longer fill 70 places and the graph draws fewer.
+-- That is the cost, and the harness prices it directly: the recall denominator
+-- is fixed at df >= 3, so a day that draws 51 words is scored on the same pool
+-- as one that draws 70.
+--
+-- 122 separates the floor from the demotion, because two changes measured
+-- together are one measurement.
+insert into analysis.sieve_configs
+  (ord, name, min_headlines, min_standalone, min_word_len, min_spec, max_npd, demote_head_pos, use_dict)
+values
+  (120, 'r7: floor df>=4, demote .70',   4, 0.10,  3, 9.90, -1.0, 0.70, true),
+  (121, 'r7: floor df>=5, demote .70',   5, 0.10,  3, 9.90, -1.0, 0.70, true),
+  (122, 'r7: floor df>=4, no demote',    4, 0.10,  3, 9.90, -1.0, 9.90, true),
+  (123, 'r7: floor df>=6, demote .70',   6, 0.10,  3, 9.90, -1.0, 0.70, true);
+
 -- The round under comparison, plus the shipped configuration it is compared
--- against. 60 is the sieve as deployed: min_headlines 3, standalone .10, length
--- 3, specificity off, neighbours off, dictionary on.
+-- against. 112 is the sieve as deployed after migration 0015: min_headlines 3,
+-- standalone .10, length 3, specificity off, neighbours off, dictionary on,
+-- head_pos demoted above 0.70. 60 is what shipped before it.
 update analysis.sieve_configs
    set active = true
- where ord in (60, 103, 110, 111, 112, 113, 114);
+ where ord in (60, 112, 120, 121, 122, 123);
 
 select count(*) filter (where active) as active,
        count(*)                       as total
