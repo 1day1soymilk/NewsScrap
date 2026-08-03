@@ -4,6 +4,7 @@
 -- analysis.word_labels and prints one row per (configuration, day). This is the
 -- only sanctioned way to change a threshold in scoring_weights.
 --
+--   scripts/analysis/run.sh scripts/analysis/12_eval_days.sql
 --   scripts/analysis/run.sh scripts/analysis/02_sieve_configs.sql
 --   scripts/analysis/run.sh scripts/analysis/20_unlabeled.sql    -- must be empty
 --   scripts/analysis/run.sh scripts/analysis/10_sieve_eval.sql
@@ -13,12 +14,12 @@
 --
 -- Signals come from keyword_signals(), the same function keyword_graph() uses, so
 -- what is measured here is what ships. Do not reimplement the formulas.
+--
+-- The days come from analysis.eval_days rather than from a literal list here,
+-- so this file and 20_unlabeled.sql cannot drift apart on which days they cover.
 
 with
-params (d) as (values
-  ('2026-07-31'::date),
-  ('2026-08-01'::date)
-),
+params as (select d from analysis.eval_days),
 
 -- The number of words drawn at full opacity; scoring_weights.node_limit.
 top_n (n) as (values (70)),
@@ -38,7 +39,8 @@ passed as (
   from analysis.sieve_configs c
   cross join sig s
   left join word_overrides ov on ov.word = s.word
-  where s.df >= c.min_headlines
+  where c.active
+    and s.df >= c.min_headlines
     and s.standalone >= c.min_standalone
     and (not c.use_dict or ov.mode is distinct from 'exclude')
     and (
@@ -66,17 +68,23 @@ pool as (
 
 metrics as (
   select
-    sh.ord, sh.name, sh.d,
+    sh.ord, sh.name, sh.d, ed.top_story,
     count(*)::int                                  as shown,
     count(*) filter (where l.label = 'good')::int  as good,
     count(*) filter (where l.label = 'bad')::int   as bad,
     count(*) filter (where l.label is null)::int   as unlabeled,
     -- The day's biggest story. A configuration that drops it is rejected no
     -- matter what its precision says — see README.md, rule 5.
-    max(sh.rank) filter (where sh.word = '폭염')    as heatwave_rank
+    --
+    -- The word is per day and not a constant: 폭염 leads three of the four days
+    -- and 김민석 leads 2026-08-02, where 폭염 is third. Hardcoding one word was
+    -- right while the harness measured two days and would quietly excuse a
+    -- configuration that dropped 08-02's real story.
+    max(sh.rank) filter (where sh.word = ed.top_story) as top_story_rank
   from shown sh
   left join analysis.word_labels l on l.word = sh.word
-  group by sh.ord, sh.name, sh.d
+  join analysis.eval_days ed on ed.d = sh.d
+  group by sh.ord, sh.name, sh.d, ed.top_story
 )
 
 select
@@ -90,7 +98,8 @@ select
   round(100.0 * m.good / nullif(p.good_pool, 0), 1)                  as recall_pct,
   -- 2g / (2g + b + (G - g)) — the algebraic form of 2PR/(P+R).
   round(200.0 * m.good / nullif(2 * m.good + m.bad + (p.good_pool - m.good), 0), 1) as f1_pct,
-  coalesce(m.heatwave_rank::text, 'DROPPED')                         as heatwave
+  m.top_story                                                        as story,
+  coalesce(m.top_story_rank::text, 'DROPPED')                        as story_rank
 from metrics m
 join pool p on p.d = m.d
 order by m.ord, m.d;

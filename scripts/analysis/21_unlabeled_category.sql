@@ -13,13 +13,11 @@
 --
 -- The variant list is duplicated from 11_category_eval.sql for the same reason
 -- 20_unlabeled.sql mirrors the harness: a variant present in one and missing
--- from the other reopens the blind spot rule 4 exists to close.
+-- from the other reopens the blind spot rule 4 exists to close. The days are
+-- not duplicated — both read analysis.eval_days (12_eval_days.sql).
 
 with
-params (d) as (values
-  ('2026-07-31'::date),
-  ('2026-08-01'::date)
-),
+params as (select d from analysis.eval_days),
 
 w as (
   select
@@ -52,12 +50,11 @@ scoped_df as (
 ),
 
 day_pass as (
-  select s.d, s.word, s.df as day_df
+  select s.d, s.word, s.df as day_df, s.standalone
   from sig s
   cross join w
   left join word_overrides ov on ov.word = s.word
-  where s.standalone >= w.min_standalone
-    and ov.mode is distinct from 'exclude'
+  where ov.mode is distinct from 'exclude'
     and (
       char_length(s.word) >= w.min_word_len
       or s.spec >= w.min_spec
@@ -68,11 +65,15 @@ day_pass as (
 
 -- Must match 11_category_eval.sql exactly, including the absence of
 -- `scoped >= 2` — a variant in one file and not the other reopens the blind
--- spot rule 4 exists to close.
-variants (ord, mode, min_h) as (values
-  (1, 'scoped', 3),
-  (3, 'day',    3),
-  (4, 'both',   3)
+-- spot rule 4 exists to close. Rows 5 and 6 are the standalone arm, and 5 in
+-- particular reaches words the other four never draw, which is the whole reason
+-- this list has to be re-run after the variants change.
+variants (ord, mode, min_h, min_sa) as (values
+  (1, 'scoped', 3, null::numeric),
+  (3, 'day',    3, null::numeric),
+  (4, 'both',   3, null::numeric),
+  (5, 'day',    3, 0.00),
+  (6, 'day',    3, 0.50)
 ),
 
 shown as (
@@ -83,8 +84,10 @@ shown as (
     ) as rank
   from variants v
   cross join scoped_df sd
+  cross join w
   join day_pass dp on dp.d = sd.d and dp.word = sd.word
-  where case v.mode
+  where dp.standalone >= coalesce(v.min_sa, w.min_standalone)
+    and case v.mode
           when 'scoped' then sd.df >= v.min_h
           when 'day'    then dp.day_df >= v.min_h
           else               dp.day_df >= v.min_h and sd.df >= 2

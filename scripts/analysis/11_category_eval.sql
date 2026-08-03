@@ -15,10 +15,18 @@
 --
 -- Three ways to set that cut, measured against the same labels:
 --
---   scoped >= 3   what ships
+--   scoped >= 3   what shipped before migration 0004
 --   day >= 3      sieve 1 moves day-wide, like every other clause; the category
---                 filter then only decides which of the day's words are shown
+--                 filter then only decides which of the day's words are shown.
+--                 **This is what ships** — 0004 adopted it at 61.2 mean F1
+--                 against 40.4, winning in all twelve cells
 --   day >= 3 and scoped >= 2   the same, but a word must recur in the section
+--
+-- Two further variants hold sieve 1 at what ships and move the fragment cut
+-- instead, because a category tab is where that cut should hurt most if it
+-- hurts: a tab draws far fewer than node_limit words, so a word the cut removes
+-- is not replaced by a deeper one the way it is in the all-categories view.
+-- 10_sieve_eval.sql asks the same question of the day as a whole.
 --
 -- A fourth, `scoped >= 2`, is deliberately absent: it draws words appearing
 -- twice in the day, and pricing it under rule 4 costs 180 more labels. See
@@ -29,13 +37,12 @@
 -- and a row with unlabelled words in it is measuring a fraction of the screen.
 --
 -- Thresholds come from scoring_weights so this cannot drift from what ships.
--- Signals come from keyword_signals() for the same reason.
+-- Signals come from keyword_signals() for the same reason. The days come from
+-- analysis.eval_days (12_eval_days.sql), so this file and its worklist
+-- 21_unlabeled_category.sql cannot drift apart on which days they cover.
 
 with
-params (d) as (values
-  ('2026-07-31'::date),
-  ('2026-08-01'::date)
-),
+params as (select d from analysis.eval_days),
 
 w as (
   select
@@ -70,15 +77,16 @@ scoped_df as (
   group by s.d, s.cat, s.word
 ),
 
--- Sieves 2, 3 and 4 — everything except the headline-count cut under test.
--- Identical to the shipped sieve, thresholds and all.
+-- Sieves 3 and 4 — everything except the two clauses under test. Identical to
+-- the shipped sieve, thresholds and all. Sieve 2 moved out of here and into the
+-- variant list, so a variant can turn it off; `standalone` is carried through
+-- for that.
 day_pass as (
-  select s.d, s.word, s.df as day_df
+  select s.d, s.word, s.df as day_df, s.standalone
   from sig s
   cross join w
   left join word_overrides ov on ov.word = s.word
-  where s.standalone >= w.min_standalone
-    and ov.mode is distinct from 'exclude'
+  where ov.mode is distinct from 'exclude'
     and (
       char_length(s.word) >= w.min_word_len
       or s.spec >= w.min_spec
@@ -87,10 +95,18 @@ day_pass as (
     )
 ),
 
-variants (ord, name, mode, min_h) as (values
-  (1, 'scoped df >= 3  (ships)',    'scoped', 3),
-  (3, 'day df >= 3, present in cat','day',    3),
-  (4, 'day df >= 3 and scoped >= 2','both',   3)
+-- `min_sa` of null means "whatever ships", so the three sieve-1 variants stay
+-- exactly what they were and only rows 5 and 6 move the fragment cut.
+--
+-- Variant 1 is what shipped *before* migration 0004, not what ships now: that
+-- migration moved sieve 1 day-wide after this file measured it at 40.4 mean F1
+-- against 61.2. It is kept as the losing baseline it is.
+variants (ord, name, mode, min_h, min_sa) as (values
+  (1, 'sieve1 scoped >= 3 (pre-0004)', 'scoped', 3, null::numeric),
+  (3, 'sieve1 day >= 3       (ships)', 'day',    3, null::numeric),
+  (4, 'sieve1 day >= 3 and scoped >=2','both',   3, null::numeric),
+  (5, 'ships, standalone off',         'day',    3, 0.00),
+  (6, 'ships, standalone >= .50',      'day',    3, 0.50)
 ),
 
 shown as (
@@ -101,8 +117,10 @@ shown as (
     ) as rank
   from variants v
   cross join scoped_df sd
+  cross join w
   join day_pass dp on dp.d = sd.d and dp.word = sd.word
-  where case v.mode
+  where dp.standalone >= coalesce(v.min_sa, w.min_standalone)
+    and case v.mode
           when 'scoped' then sd.df >= v.min_h
           when 'day'    then dp.day_df >= v.min_h
           else               dp.day_df >= v.min_h and sd.df >= 2

@@ -722,7 +722,17 @@ Two habits it enforces, both learned the hard way:
   finds. That fired three times in one sitting.
 - **Never optimise precision alone.** It does not punish discarding good words, so
   maximising it converges on dropping the day's biggest story — measured, not
-  hypothetical. Judge on F1 and the `heatwave` column together.
+  hypothetical. Judge on F1 and the `story_rank` column together. That story is
+  per day and comes from `analysis.eval_days`, not from a hardcoded 폭염: it
+  leads three of the four days and 김민석 leads 2026-08-02.
+
+**The days and the configurations under measurement are each named in one
+place.** `analysis.eval_days` (`12_eval_days.sql`) holds the days, and the
+`active` flag in `analysis.sieve_configs` scopes the round without deleting its
+history — `10_sieve_eval.sql`, `11_category_eval.sql`, `20_unlabeled.sql` and
+`21_unlabeled_category.sql` all read both. A second copy is how rule 4 returns
+silently: a day the harness scores but the worklist does not cover is a day
+whose promoted words are never put in front of anyone to label.
 
 `30_word_scores.sql` and `31_fragments.sql` are the other half: they explain one
 day's screen word by word rather than comparing configurations. **They are

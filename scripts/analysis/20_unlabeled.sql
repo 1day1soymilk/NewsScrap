@@ -6,7 +6,9 @@
 -- measuring a fraction of the screen and cannot be compared.
 --
 -- Taking only the extreme configurations is not enough, which is why this reads
--- the same table the harness does. A tighter sieve removes words from the top 70
+-- the same table the harness does, active rows and all — the two must agree on
+-- which configurations are in play or this list is short exactly where it
+-- matters. A tighter sieve removes words from the top 70
 -- and pulls deeper-ranked ones up to fill the gap, so each configuration puts a
 -- slightly different set on screen — and those promoted words are precisely the
 -- ones rule 4 exists to catch.
@@ -16,12 +18,14 @@
 -- says whether it recurs or belongs to one day's news.
 --
 --   scripts/analysis/run.sh scripts/analysis/20_unlabeled.sql
+--
+-- The days come from analysis.eval_days, the same table 10_sieve_eval.sql reads,
+-- for the reason above applied to days rather than to configurations: a day the
+-- harness scores and this file does not is a day whose promoted words are never
+-- put in front of anyone to label.
 
 with
-params (d) as (values
-  ('2026-07-31'::date),
-  ('2026-08-01'::date)
-),
+params as (select d from analysis.eval_days),
 top_n (n) as (values (70)),
 
 sig as (
@@ -37,7 +41,8 @@ passed as (
   from analysis.sieve_configs c
   cross join sig s
   left join word_overrides ov on ov.word = s.word
-  where s.df >= c.min_headlines
+  where c.active
+    and s.df >= c.min_headlines
     and s.standalone >= c.min_standalone
     and (not c.use_dict or ov.mode is distinct from 'exclude')
     and (
