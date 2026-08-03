@@ -34,6 +34,13 @@ create table analysis.sieve_configs (
   min_word_len   numeric not null,
   min_spec       numeric not null,
   max_npd        numeric not null,
+  -- Sieve 5, added in round five: where in the headline the word sits. 9.9
+  -- disables it, the same convention min_spec uses, since the signal maxes at 1.
+  max_head_pos   numeric not null default 9.90,
+  -- The same signal used as a **demotion** rather than a cut: a word above this
+  -- sorts below every word under it, so it falls out only when the render cap is
+  -- binding. 9.9 disables it. See round six for why both forms are here.
+  demote_head_pos numeric not null default 9.90,
   use_dict       boolean not null,
   active         boolean not null default false
 );
@@ -153,12 +160,75 @@ values
   -- same question migration 0005's measurement asked of the sieve as a whole.
   (95, 'r4: standalone off, no dict',      3, 0.00,  3, 9.90, -1.0, false);
 
+-- Round five: the fifth signal, `head_pos`, added by migration 0014.
+--
+-- The question this round exists to answer is the one CLAUDE.md left open —
+-- the length clause is effectively the whole sieve, and none of the four
+-- existing signals separates the good words inside it from the bad ones, so
+-- the dictionary has been doing that work. `head_pos` is the first signal that
+-- is not a restatement of frequency, length or category: Korean headlines are
+-- topic-first, so a story's names lead and generic qualifiers trail.
+--
+-- Measured over the 280 drawn word-days across the four labelled days before
+-- any of these rows existed: mean 0.347 for good, 0.466 for bad. Above 0.70 it
+-- catches 가능성, 시험대(×2), 승부수, 변동성, 무방비, 막바지, 월요일, 테러범,
+-- 수도권 and 로보틱스 — eleven bad — against six good. That ratio is the whole
+-- case for the clause, and it is not enough on its own to justify one, because
+-- cutting a word promotes a deeper-ranked one into its place. What that trade
+-- is actually worth is what these rows measure.
+--
+-- Everything is held at config 60's values, so the only thing moving is the new
+-- cut. Swept from 0.50 (well below the good mean, where it must start costing
+-- real words) to 0.90, plus off, so an optimum at the edge would be visible as
+-- one — rule 2.
+insert into analysis.sieve_configs
+  (ord, name, min_headlines, min_standalone, min_word_len, min_spec, max_npd, max_head_pos, use_dict)
+values
+  (100, 'r5: head_pos <= .50',             3, 0.10,  3, 9.90, -1.0, 0.50, true),
+  (101, 'r5: head_pos <= .60',             3, 0.10,  3, 9.90, -1.0, 0.60, true),
+  (102, 'r5: head_pos <= .65',             3, 0.10,  3, 9.90, -1.0, 0.65, true),
+  (103, 'r5: head_pos <= .70',             3, 0.10,  3, 9.90, -1.0, 0.70, true),
+  (104, 'r5: head_pos <= .75',             3, 0.10,  3, 9.90, -1.0, 0.75, true),
+  (105, 'r5: head_pos <= .80',             3, 0.10,  3, 9.90, -1.0, 0.80, true),
+  (106, 'r5: head_pos <= .90',             3, 0.10,  3, 9.90, -1.0, 0.90, true),
+  -- Does the clause do anything the dictionary is not already doing? The same
+  -- question migration 0005's measurement asked of the sieve as a whole, and the
+  -- one that matters most here: the dictionary exists because there was no
+  -- signal. If a signal now exists, some of those entries may be redundant.
+  (107, 'r5: head_pos <= .70, no dict',    3, 0.10,  3, 9.90, -1.0, 0.70, false),
+  (108, 'r5: head_pos off, no dict',       3, 0.10,  3, 9.90, -1.0, 9.90, false);
+
+-- Round six: the same signal as a **demotion** instead of a cut.
+--
+-- Round five said head_pos <= .70 wins day-wide (+2.25 mean F1, three days of
+-- four, none lost, top story kept on all four) and then 11_category_eval.sql
+-- said it **loses 8 of 24 category cells and wins none**. Both are true, and the
+-- reason they are both true is the render cap.
+--
+-- Day-wide the cap binds at 70, so cutting a word promotes a deeper one, and the
+-- promoted words are about as good as the screen average — the gain is the
+-- substitution, not the removal. A category tab draws 5 to 42 words and the cap
+-- never binds, so there is nothing to promote and the cut is pure loss.
+--
+-- So the mechanism has to be one that only acts where a substitution is
+-- available. A demotion is exactly that: a trailing word sorts below every other
+-- eligible word and falls off only if 70 better ones exist. On a tab it is a
+-- no-op by construction.
+insert into analysis.sieve_configs
+  (ord, name, min_headlines, min_standalone, min_word_len, min_spec, max_npd, demote_head_pos, use_dict)
+values
+  (110, 'r6: demote head_pos > .60',      3, 0.10,  3, 9.90, -1.0, 0.60, true),
+  (111, 'r6: demote head_pos > .65',      3, 0.10,  3, 9.90, -1.0, 0.65, true),
+  (112, 'r6: demote head_pos > .70',      3, 0.10,  3, 9.90, -1.0, 0.70, true),
+  (113, 'r6: demote head_pos > .75',      3, 0.10,  3, 9.90, -1.0, 0.75, true),
+  (114, 'r6: demote head_pos > .50',      3, 0.10,  3, 9.90, -1.0, 0.50, true);
+
 -- The round under comparison, plus the shipped configuration it is compared
 -- against. 60 is the sieve as deployed: min_headlines 3, standalone .10, length
 -- 3, specificity off, neighbours off, dictionary on.
 update analysis.sieve_configs
    set active = true
- where ord in (60, 90, 91, 92, 93, 94, 95);
+ where ord in (60, 103, 110, 111, 112, 113, 114);
 
 select count(*) filter (where active) as active,
        count(*)                       as total

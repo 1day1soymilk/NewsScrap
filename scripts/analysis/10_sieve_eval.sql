@@ -30,18 +30,29 @@ sig as (
   cross join lateral keyword_signals(p.d) s
 ),
 
--- Selection is always by frequency. The sieve decides who is eligible; it never
--- reorders. Ties break on the word so a rerun gives the same answer.
+-- Selection is by frequency, and `demote_head_pos` is the one thing that has
+-- ever been allowed to disturb that — it is what round six is asking about, so
+-- it is a knob here rather than a change. With it at its default (9.9) this
+-- expression is exactly `order by s.df desc, s.word` and every earlier round's
+-- numbers reproduce. Ties break on the word so a rerun gives the same answer.
 passed as (
   select
     c.ord, c.name, s.d, s.word, s.df,
-    row_number() over (partition by c.ord, s.d order by s.df desc, s.word) as rank
+    row_number() over (partition by c.ord, s.d
+      -- 강등: 제목 뒤에 앉는 단어를 자르지 않고 상한 아래로 밀어낸다.
+      -- 자르면 카테고리 탭에서 24셀 중 8셀을 지고 한 셀도 못 이긴다 —
+      -- 탭에는 상한이 걸리지 않아 잘린 자리를 메울 단어가 없기 때문이다.
+      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank
   from analysis.sieve_configs c
   cross join sig s
   left join word_overrides ov on ov.word = s.word
   where c.active
     and s.df >= c.min_headlines
     and s.standalone >= c.min_standalone
+    -- Sieve 5: where in the headline the word sits. A hard cut like sieve 1 and
+    -- 2, not one of sieve 4's rescues — trailing is a reason to drop a word, and
+    -- never a reason to keep one that failed something else.
+    and s.head_pos <= c.max_head_pos
     and (not c.use_dict or ov.mode is distinct from 'exclude')
     and (
       char_length(s.word) >= c.min_word_len

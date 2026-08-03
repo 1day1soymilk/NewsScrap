@@ -398,5 +398,60 @@ Naver's own column titles: 마켓프리즘, 디브리핑, 더차트, 급리포�
 데일리국제금융. Measure it before adopting it; the sample is a reason to
 prioritise it low, not a result.
 
+## Rounds five and six: the fifth signal, and why it is not a sieve clause
+
+The open question this directory carried for a long time was the one `CLAUDE.md`
+stated: the length clause is effectively the whole sieve, and **none of the four
+signals separates the good words inside it from the bad ones**, so the dictionary
+was doing that work for want of anything better.
+
+A fifth signal exists. `head_pos` (migration `0014`) is where in the headline the
+word starts, averaged over the day's headlines holding it, as a fraction of the
+room it could have started in — 0 leads, 1 trails. Korean headlines are
+topic-first, so a story's names lead and generic qualifiers trail. Over the 280
+drawn word-days of the four labelled days the mean is **0.347 for good and 0.466
+for bad**, and above 0.70 what it catches is almost exactly the family that means
+nothing on its own: 가능성, 시험대, 승부수, 변동성, 무방비, 막바지, 월요일,
+테러범, 수도권, 로보틱스.
+
+**Round five ran it as a hard cut and got a split verdict**, which is the part
+worth carrying forward:
+
+| | `10_sieve_eval.sql`, 4 days | `11_category_eval.sql`, 24 cells |
+| --- | --- | --- |
+| shipped | 65.05 | 65.08 |
+| `head_pos <= 0.70` as a cut | **67.30** (3 wins, 0 losses) | **63.42** (0 wins, 8 losses) |
+
+Both numbers are real, and the render cap explains both. Day-wide the cap binds
+at 70, so cutting a word promotes a deeper one — and the promoted words are about
+as good as the screen average, so **the gain was the substitution and never the
+removal**. A category tab draws at most 46 words, the cap never binds, and there
+a cut is loss with nothing to fill the hole.
+
+**So round six changed the mechanism rather than the threshold.** A demotion —
+sorting a trailing word below every leading one instead of dropping it — can only
+act where a substitution is available, and is a no-op on a tab by construction.
+Measured, it reproduces the cut's day-wide numbers *exactly*
+(71.9 / 67.8 / 65.8 / 63.7) and leaves the category mean at 65.08 to the decimal.
+Shipped as `demote_head_pos` in migration `0015`.
+
+Three things follow that are easy to get wrong later:
+
+- **A day-wide win with a category loss is a signature, not a tuning problem.**
+  It says the mechanism needs the cap to be binding. Reach for the mechanism, not
+  for another threshold.
+- **0.70 is interior to its sweep** (rule 2): 0.65 gives mean 66.68, 0.75 gives
+  65.68, and at 0.50 폭염 sinks to rank 66 on 2026-07-31 and off the screen on
+  08-03.
+- **`rank` in `10_sieve_eval.sql` is no longer purely `df desc`.** With
+  `demote_head_pos` at its 9.9 default the expression is identical to the old one
+  and every earlier round reproduces, but it is a knob now and the comment above
+  it says so.
+
+**This round moved the drawn words**, from 211 good / 69 bad to 218 / 62 across
+the four days. Anything measured against the drawn set is now stale — including
+the canvas-layout harness, whose fixture is a copy of `keyword_graph`'s output
+and must be re-pulled before its numbers mean anything again.
+
 `analysis` is a separate schema, so none of this is reachable from the browser —
 PostgREST only exposes `public`.

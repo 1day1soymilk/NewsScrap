@@ -156,7 +156,7 @@ at 1000. It returns `{nodes, edges}` as JSON. SQL functions default to
 `SECURITY INVOKER`, so the select-only policies still apply; `anon` needs
 `execute` on both it and `keyword_signals`.
 
-`keyword_signals(p_date)` computes the four per-word signals and is called by
+`keyword_signals(p_date)` computes the five per-word signals and is called by
 both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
 tuning that measures a hand-copied second copy is measuring the wrong thing, the
 same hazard as the rule above.
@@ -171,9 +171,14 @@ harness measures. With it equal to `node_limit`, `faded` can now only mean a
 
 Word selection is a **sieve** (thresholds in series), not a weighted score.
 Blending the signals measurably makes it worse: each one catches a different kind
-of bad word, and averaging dilutes each where it is strong. Ranking is by
-frequency alone — the sieve only decides who is drawn, and size stays
-proportional to headline count.
+of bad word, and averaging dilutes each where it is strong.
+
+Ranking is by frequency, and **`demote_head_pos` is the single exception**, added
+by migration `0015`. A word that trails its headlines sorts below every word that
+leads one, so it falls out only where the render cap is binding. Size is
+untouched and stays proportional to headline count; what moves is which words
+fill the last places under the cap. Why it is a demotion rather than a sixth
+sieve clause is measured, and is the entry below.
 
 Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
 (`exclude` / `demote` / `allow`), so retuning needs no redeploy. **Never change a
@@ -194,13 +199,44 @@ time and should not be rediscovered:
   rescues are now retired and **the length clause is the sieve**: it admits 68
   of the 70 drawn words, and its precision, 84.3%, is the whole sieve's. Do not
   read that as a leak to be plugged. The four signals were measured against the
-  labels inside the length group and **not one of them separates its 112 good
-  words from its 22 bad** — character length runs the wrong way (bad 3.59, good
-  3.33), headline count is flat (7.0 against 7.2), and recurrence across the
-  archive's days is flat too, because at three days it measures "story that is
-  still running" rather than "word that recurs whatever the news". That is why
-  the dictionary is doing this work: there is no signal left, not because the
-  dictionary is a shortcut.
+  labels inside the length group and **not one of them separates its good words
+  from its bad** — character length runs the wrong way (bad 3.59, good 3.33),
+  headline count is flat, and recurrence across the archive's days is flat too,
+  because at three days it measures "story that is still running" rather than
+  "word that recurs whatever the news".
+- **A fifth signal was found, and its shape is the lesson.** `head_pos` — where
+  in the headline the word starts, averaged over the day's headlines holding it,
+  0 leading and 1 trailing. Korean headlines are topic-first: a story's names
+  lead and generic qualifiers trail. Over the 280 drawn word-days of the four
+  labelled days the mean is 0.347 for good and 0.466 for bad, and above 0.70 it
+  catches almost exactly the family that means nothing on its own — 가능성,
+  시험대, 승부수, 변동성, 무방비, 막바지, 월요일, 테러범, 수도권.
+
+  **As a hard cut it was right day-wide and wrong on the tabs**, and both
+  measurements are real: `head_pos <= 0.70` took mean F1 from 65.05 to 67.30 over
+  four days, winning three and losing none, and then took the 24 category cells
+  from 65.08 to 63.42, **losing 8 and winning none**. The render cap explains
+  both. Day-wide it binds at 70, so cutting a word promotes a deeper one and the
+  promoted words are about as good as the screen average — **the gain was the
+  substitution, never the removal**. A tab draws at most 46 words, the cap never
+  binds, and a cut there is loss with nothing to fill the hole.
+
+  So it ships as a **demotion**, which can only act where a substitution exists.
+  Round six measured that it reproduces the cut's day-wide numbers exactly
+  (71.9 / 67.8 / 65.8 / 63.7 against 70.7 / 67.8 / 63.1 / 58.6) and leaves the
+  category mean at 65.08 to the decimal. 0.70 is interior to its sweep — 0.65
+  gives 66.68 and 0.75 gives 65.68 — and at 0.50 폭염 sinks to rank 66 on
+  2026-07-31 and off the screen on 08-03.
+
+  **Do not re-file this as a sieve clause.** A day-wide win with a category loss
+  is the signature of a mechanism that needs the cap to be binding, and the fix
+  is the mechanism rather than the threshold.
+- **The dictionary is still doing real work**, and the fifth signal does not
+  replace it. With the dictionary off, the demotion is worth about 2.5 mean F1
+  on its own — so it is not merely re-catching what `word_overrides` already
+  catches — but every dictionary-off configuration still drops the day's biggest
+  story on three of four days, because 폭염 is two characters and lives on its
+  `allow` entry.
 - **`allow` entries are load-bearing, not decoration.** 폭염 and 양산 were given
   theirs in `0003` as insurance against exactly the retune `0009` performed, and
   they are now the only two words on the canvas not admitted by length.
@@ -218,8 +254,10 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words, four days, from the round-four run of
-2026-08-03: **84.3 / 84.3 / 67.1 / 62.9**, mean F1 64.4. Those figures come from
+Measured precision of the top 70 words, four days, after the round-six demotion
+shipped (`0015`): **85.7 / 84.3 / 70.0 / 71.4**, mean F1 67.3, against
+84.3 / 84.3 / 67.1 / 65.7 and mean F1 65.05 immediately before it. The drawn set
+went from 211 good and 69 bad to **218 good and 62 bad** across the four days. Those figures come from
 `analysis.word_labels` and are **not comparable to any percentage quoted
 elsewhere, or to any earlier figure in this file's history** — the label set has
 been extended six times and each extension moves them, most recently by
