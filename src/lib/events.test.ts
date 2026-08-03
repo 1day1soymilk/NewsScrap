@@ -333,6 +333,25 @@ describe('topEvents — pinned', () => {
     expect(ranked.slice(5).map((r) => r.event.words[0].word)).toEqual(['a5', 'a7'])
   })
 
+  // 상한을 풀면 하루 전부가 랭킹 순서로 나온다. 목록을 펼치는 쪽이 기대는 동작이라
+  // 여기서 고정한다.
+  it('returns every event in rank order when the limit is lifted', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, { limit: Infinity })
+
+    expect(ranked).toHaveLength(8)
+    expect(ranked.map((r) => r.event.words[0].word)).toEqual([
+      'a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7',
+    ])
+  })
+
+  it('adds nothing when a pinned event is already shown by a lifted limit', () => {
+    const events = manyEvents()
+    const ranked = topEvents(events, null, { limit: Infinity, pinned: [indexOf(events, 'a7')] })
+
+    expect(ranked).toHaveLength(8)
+  })
+
   it('pin은 잘리는 쪽의 상한을 늘리지 않는다', () => {
     const events = manyEvents()
     const ranked = topEvents(events, null, { pinned: [indexOf(events, 'a7')] })

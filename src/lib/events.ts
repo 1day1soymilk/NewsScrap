@@ -67,7 +67,10 @@ const MERGE_MIN_EDGES = 2
 // 것은 surgeLimitFor가 이미 측정한 것과 같은 이야기다. 합쳐진 뒤 하루의 사건은
 // 14~17개이므로 상위 5개는 3분의 1이고, 잘려 나가는 꼬리는 대부분 캔버스에서
 // 이미 선으로 이어진 채 붙어 있는 2단어 쌍이다.
-const DEFAULT_LIMIT = 5
+//
+// Exported so App.tsx can name it when it lifts the limit, rather than keeping a
+// second copy of the number.
+export const EVENT_LIST_LIMIT = 5
 
 // 목록 한 줄에 보이는 단어 수. 세 날 통틀어 이 상한에 걸리는 것은 07-31의
 // 트럼프 묶음(7단어)과 08-02의 전당대회(13단어)뿐이다.
@@ -207,7 +210,7 @@ function fullyAligned(events: NewsEvent[], headlines: number[] | null): headline
 export function topEvents(
   events: NewsEvent[],
   headlines: number[] | null,
-  { limit = DEFAULT_LIMIT, pinned = [] }: TopEventsOptions = {},
+  { limit = EVENT_LIST_LIMIT, pinned = [] }: TopEventsOptions = {},
 ): RankedEvent[] {
   // 카운트는 전부 있거나 전부 없다(RPC 한 번)는 것은 호출자의 관례일 뿐이고,
   // 이 함수는 그 관례를 믿지 않는다. fullyAligned가 배열 전체가 채워져
