@@ -1,35 +1,46 @@
 // src/App.tsx
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CategoryTabs } from './components/CategoryTabs'
+import { EventList } from './components/EventList'
+import { GraphSkeleton } from './components/GraphSkeleton'
 import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
+import { Masthead } from './components/Masthead'
 import {
-  fetchAvailableDates,
   fetchCategories,
+  fetchCollectedDates,
+  fetchEventHeadlineCounts,
   fetchHeadlineCount,
+  fetchHeadlinesForEvent,
   fetchHeadlinesForWord,
   fetchKeywordGraph,
   fetchWordCountsFor,
 } from './lib/queries'
-import { adjacentDate } from './lib/dateNav'
+import { adjacentDate, todayInSeoul } from './lib/dateNav'
+import {
+  EVENT_LIST_LIMIT,
+  buildEvents,
+  eventLabel,
+  eventsOf,
+  sameCommunities,
+  topEvents,
+} from './lib/events'
+import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
-import { parseUrlState, sameState, toSearch } from './lib/urlState'
+import { sameState, stateFromUrl, toSearch } from './lib/urlState'
+import type { CollectedDate } from './lib/queries'
 import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
+const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
 
-function todayInSeoul(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
-}
-
-// Read before the categories query has resolved, so slugs cannot be validated
-// yet; parseUrlState takes an empty list to mean "not yet known" rather than
-// "nothing is valid". The check happens once they arrive.
-function stateFromUrl() {
-  return parseUrlState(window.location.search, [])
-}
+// A Louvain partition is carried around paired with the graph it came from,
+// because it arrives from an effect that runs **after** the canvas has painted:
+// for one frame, while a new day is first drawn, this Map still belongs to the
+// previous one.
+type Partition = { graph: KeywordGraphData; communities: Map<string, number> }
 
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -41,12 +52,19 @@ function errorMessage(e: unknown): string {
 
 function App() {
   const [categories, setCategories] = useState<Category[]>([])
-  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [collectedDates, setCollectedDates] = useState<CollectedDate[]>([])
   const [selectedDate, setSelectedDate] = useState(() => stateFromUrl().date ?? todayInSeoul())
   const [selectedCategory, setSelectedCategory] = useState<string | null>(
     () => stateFromUrl().category,
   )
   const [selectedWord, setSelectedWord] = useState<string | null>(() => stateFromUrl().word)
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(() => stateFromUrl().event)
+  const [partition, setPartition] = useState<Partition | null>(null)
+  const [eventCounts, setEventCounts] = useState<{ of: EventGraph; counts: number[] } | null>(null)
+  // Deliberately not in the query string: it is not a shareable claim about the
+  // data, and the URL already carries a mutual-exclusion rule between ?word= and
+  // ?event= that a third axis would only complicate.
+  const [eventsExpanded, setEventsExpanded] = useState(false)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
@@ -57,8 +75,17 @@ function App() {
 
   useEffect(() => {
     fetchCategories().then(setCategories).catch((e) => setError(errorMessage(e)))
-    fetchAvailableDates().then(setAvailableDates).catch((e) => setError(errorMessage(e)))
+    fetchCollectedDates().then(setCollectedDates).catch((e) => setError(errorMessage(e)))
   }, [])
+
+  // One query answers two questions. The date stepper and the masthead want the
+  // days; the surge comparison wants each day's headline total as the
+  // denominator that makes two days of different sizes comparable.
+  const availableDates = useMemo(() => collectedDates.map((day) => day.date), [collectedDates])
+  const headlinesByDate = useMemo(
+    () => new Map(collectedDates.map((day) => [day.date, day.headlines])),
+    [collectedDates],
+  )
 
   // A slug from a hand-edited or stale link that matches no section would leave
   // every tab unselected while the graph filtered on nothing — a state the UI
@@ -76,7 +103,12 @@ function App() {
   const urlSynced = useRef(false)
 
   useEffect(() => {
-    const next = { date: selectedDate, category: selectedCategory, word: selectedWord }
+    const next = {
+      date: selectedDate,
+      category: selectedCategory,
+      word: selectedWord,
+      event: selectedEvent,
+    }
     if (sameState(stateFromUrl(), next)) return
 
     // The first write only fills in the date the app defaulted to. Pushing it
@@ -85,7 +117,7 @@ function App() {
     const write = urlSynced.current ? window.history.pushState : window.history.replaceState
     write.call(window.history, null, '', `${window.location.pathname}${toSearch(next)}`)
     urlSynced.current = true
-  }, [selectedDate, selectedCategory, selectedWord])
+  }, [selectedDate, selectedCategory, selectedWord, selectedEvent])
 
   useEffect(() => {
     function onPopState() {
@@ -93,6 +125,7 @@ function App() {
       setSelectedDate(state.date ?? todayInSeoul())
       setSelectedCategory(state.category)
       setSelectedWord(state.word)
+      setSelectedEvent(state.event)
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -101,8 +134,14 @@ function App() {
   // --- Data -----------------------------------------------------------------
 
   function loadGraph(isCancelled: () => boolean = () => false) {
-    setLoading(true)
     setError(null)
+    // The skeleton is raised only when there is something to wait for. A view
+    // already held by the cache resolves without a round trip, and flashing a
+    // skeleton for that frame would undo the whole saving — nothing would look
+    // any faster. The cache answers this directly rather than the answer being
+    // inferred from the order promises happen to resolve in.
+    setLoading(!fetchKeywordGraph.isReady(selectedDate, selectedCategory))
+
     fetchKeywordGraph(selectedDate, selectedCategory)
       .then((data) => {
         if (isCancelled()) return
@@ -153,10 +192,19 @@ function App() {
       return
     }
     let cancelled = false
+
+    // The day totals ride along with the date list, so the common path costs no
+    // request at all. The fallback is not decoration: collected_dates is one row
+    // per collected day, which reaches PostgREST's 1,000-row cap in about 2.7
+    // years, and a silently truncated denominator is the specific failure this
+    // codebase has already paid for once. Being truncated then costs one request
+    // rather than producing a wrong ratio for every word on screen.
+    const headlineCount = (date: string) => headlinesByDate.get(date) ?? fetchHeadlineCount(date)
+
     Promise.all([
       fetchWordCountsFor([selectedDate, previousDate], graphWords),
-      fetchHeadlineCount(selectedDate),
-      fetchHeadlineCount(previousDate),
+      headlineCount(selectedDate),
+      headlineCount(previousDate),
     ])
       .then(([counts, todayHeadlines, previousHeadlines]) => {
         if (cancelled) return
@@ -178,18 +226,162 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedDate, previousDate, graphWords])
+  }, [selectedDate, previousDate, graphWords, headlinesByDate])
+
+  // --- 사건 ------------------------------------------------------------------
+
+  // 캔버스가 쓴 것과 같은 루뱅 분할을 그대로 받는다. 레이아웃은 폭에 반응하므로
+  // 리사이즈마다 새 Map이 올라오지만, 배정은 위상만의 함수라 값이 바뀌지 않는다
+  // — 내용을 비교해 재요청을 막는다.
+  //
+  // 올라온 분할은 **그것이 나온 그래프와 함께** 저장한다. 그것이 그래프와 거기서
+  // 파생되는 모든 것 사이의 유일한 장벽이고, 두 개가 아니라 하나다: 날짜나
+  // 카테고리가 바뀌면 graph의 신원이 바뀌고, 그 순간 짝이 어긋나 사건도 기사
+  // 수도 목록도 한꺼번에 비어 버린다. 한 프레임 빈 목록이, 어제의 사건과 어제의
+  // 숫자를 오늘 것처럼 내거는 것보다 낫다 — 그리고 하루의 사건 수는 세 날
+  // 15/14/15라 배열 길이만으로는 어긋남을 알아차릴 수 없다.
+  //
+  // ref로 읽는 이유: 이 콜백은 KeywordGraph의 effect가 부르므로 그 시점의 graph는
+  // 이미 방금 그려진 것이다. 콜백을 graph에 의존시키면 매 그래프마다 새 함수가
+  // 되어 effect가 다시 돌고, 여기서 읽지 않고 렌더에만 쓰므로 값도 갈리지 않는다.
+  const renderedGraph = useRef(graph)
+  renderedGraph.current = graph
+
+  const onCommunities = useCallback((next: Map<string, number>) => {
+    const from = renderedGraph.current
+    setPartition((current) =>
+      current && current.graph === from && sameCommunities(current.communities, next)
+        ? current
+        : { graph: from, communities: next },
+    )
+  }, [])
+
+  const eventGraph = useMemo(() => {
+    if (!partition || partition.graph !== graph) return NO_EVENTS
+    return buildEvents(
+      graph.nodes.map((node) => ({ word: node.word, count: node.count })),
+      graph.edges,
+      partition.communities,
+    )
+  }, [graph, partition])
+
+  // 하루의 사건 전부를 한 번에 센다. 상위 5개를 먼저 자르면 순위가 멤버 카운트의
+  // 합으로 정해지는데, 그 합이 바로 이 요청이 고치려는 값이다 — 2026-08-01의
+  // 실제 1위는 트럼프(합계 73 / 실제 51)가 아니라 폭염(69 / 61)이다.
+  useEffect(() => {
+    // 무엇이 바뀌었든 먼저 버린다. 사건 목록의 숫자는 이 요청의 답이지 이전
+    // 요청의 답이 아니고, 그 둘은 길이만으로는 구별되지 않는다.
+    setEventCounts(null)
+    if (eventGraph.events.length === 0) return
+    let cancelled = false
+    fetchEventHeadlineCounts(
+      selectedDate,
+      selectedCategory,
+      eventGraph.events.map((event) => event.words.map((word) => word.word)),
+    )
+      .then((counts) => {
+        if (!cancelled) setEventCounts({ of: eventGraph, counts })
+      })
+      .catch(() => {
+        // 목록은 그린다. 숫자 자리를 비운다. 사건 이름이 숫자보다 중요하고,
+        // 목록 전체를 감추면 캡션조차 없어진다.
+        if (!cancelled) setEventCounts(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [eventGraph, selectedDate, selectedCategory])
+
+  // 숫자는 그것을 물어본 바로 그 사건 목록에만 붙는다. 신원이 어긋나면 null로
+  // 떨어지고 topEvents는 countSum 순서로 돌아간다 — 어제의 숫자로 오늘을 정렬하는
+  // 일은 여기서 구조적으로 불가능하다.
+  // The events the word clicked on the canvas belongs to. A bridging word gives
+  // every event it touches — the same set focusWords lights on the canvas.
+  //
+  // Canvas and list deliberately light different things: the canvas lights a
+  // word and its neighbours, which can cross an event boundary, while the list
+  // states membership. Two different questions, so they are not reconciled.
+  const relatedEvents = useMemo(
+    () => (selectedWord ? eventsOf(eventGraph, selectedWord) : []),
+    [eventGraph, selectedWord],
+  )
+
+  const rankedEvents = useMemo(
+    () =>
+      topEvents(eventGraph.events, eventCounts?.of === eventGraph ? eventCounts.counts : null, {
+        limit: eventsExpanded ? Infinity : EVENT_LIST_LIMIT,
+        // So that a word belonging to an event ranked below the list's five
+        // still has a name, that event is appended as one more row. Lifting the
+        // limit makes this a no-op by construction rather than by a branch.
+        pinned: relatedEvents,
+      }),
+    [eventGraph, eventCounts, relatedEvents, eventsExpanded],
+  )
+
+  // A day holds 14 to 17 events and a category tab far fewer, so an expansion
+  // carried across a change leaves the page at the previous view's height
+  // showing a different view's content. eventGraph is the identity that moves on
+  // both a date and a category change.
+  useEffect(() => {
+    setEventsExpanded(false)
+  }, [eventGraph])
+
+
+  const activeEvent = useMemo(() => {
+    if (!selectedEvent) return null
+    return eventGraph.events.find((event) => event.words[0].word === selectedEvent) ?? null
+  }, [eventGraph, selectedEvent])
+
+  // 사전 변경이나 재수집으로 그 단어가 그날 화면에서 사라졌으면 조용히 버린다 —
+  // category가 이미 그렇게 동작한다. 사건이 0개인 동안은 아직 판단할 수 없으므로
+  // 건드리지 않는다: 공유된 링크가 그래프가 도착하기 전에 버려지면 안 된다.
+  useEffect(() => {
+    if (selectedEvent === null || eventGraph.events.length === 0) return
+    if (!eventGraph.events.some((event) => event.words[0].word === selectedEvent)) {
+      setSelectedEvent(null)
+    }
+  }, [eventGraph, selectedEvent])
+
+  // 캔버스에서 살아남는 단어들. 사건이면 멤버 전부, 다리 단어면 그 단어가 닿는
+  // 모든 사건의 멤버 전부. 둘 다 아니면 null이고 KeywordGraph의 단어 포커스가
+  // 그대로 돈다.
+  const focusWords = useMemo(() => {
+    if (activeEvent) return new Set(activeEvent.words.map((word) => word.word))
+    if (!selectedWord) return null
+    const touched = eventGraph.bridges.get(selectedWord)
+    if (!touched) return null
+    const lit = new Set<string>()
+    for (const index of touched) {
+      for (const word of eventGraph.events[index].words) lit.add(word.word)
+    }
+    return lit
+  }, [activeEvent, selectedWord, eventGraph])
+
+  // 패널 제목. 목록의 한 줄과 같은 규칙으로 자른다.
+  const eventSubject = useMemo(() => {
+    if (!activeEvent) return null
+    const { shown, rest } = eventLabel(activeEvent.words)
+    return rest > 0 ? `${shown.join(' · ')} 외 ${rest}` : shown.join(' · ')
+  }, [activeEvent])
 
   useEffect(() => {
     setHeadlinesError(null)
-    if (!selectedWord) {
+    // 다리 단어를 눌러도 열리는 것은 **그 단어의** 헤드라인이다. 두 사건의
+    // 헤드라인을 합쳐 열면 그 단어가 왜 접점인지가 오히려 묻힌다.
+    const eventWords = activeEvent?.words.map((word) => word.word) ?? null
+    if (!selectedWord && !eventWords) {
       setHeadlinesForWord([])
       setHeadlinesLoading(false)
       return
     }
+
     let cancelled = false
     setHeadlinesLoading(true)
-    fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
+    const request = selectedWord
+      ? fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
+      : fetchHeadlinesForEvent(selectedDate, selectedCategory, eventWords!)
+
+    request
       .then((data) => {
         if (cancelled) return
         setHeadlinesForWord(data)
@@ -205,7 +397,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedWord, selectedDate, selectedCategory])
+  }, [selectedWord, activeEvent, selectedDate, selectedCategory])
 
   return (
     <div className="min-h-svh bg-ground text-ink">
@@ -257,158 +449,56 @@ function App() {
           // the picture slides intact out from under the panel.
           <div
             className={`origin-top transition-transform duration-300 motion-reduce:transition-none ${
-              selectedWord ? 'sm:-translate-x-24 sm:scale-90' : ''
+              selectedWord || selectedEvent ? 'sm:-translate-x-24 sm:scale-90' : ''
             }`}
           >
             <KeywordGraph
               graph={graph}
               selectedWord={selectedWord}
-              // Clicking a lit word again clears the focus and closes the panel.
-              onWordClick={(word) => setSelectedWord((current) => (current === word ? null : word))}
+              // 단어를 누르면 사건 선택이 풀린다. 둘 다 켜진 상태는 캔버스에서
+              // 무엇이 살아 있는지 읽을 수 없다.
+              onWordClick={(word) => {
+                setSelectedEvent(null)
+                setSelectedWord((current) => (current === word ? null : word))
+              }}
               colorByCategory={selectedCategory === null}
               surges={surges}
+              focusWords={focusWords}
+              onCommunities={onCommunities}
+              header={
+                <EventList
+                  events={rankedEvents}
+                  selected={selectedEvent}
+                  related={relatedEvents}
+                  total={eventGraph.events.length}
+                  expanded={eventsExpanded}
+                  onToggle={() => setEventsExpanded((current) => !current)}
+                  onSelect={(topWord) => {
+                    setSelectedWord(null)
+                    setSelectedEvent((current) => (current === topWord ? null : topWord))
+                  }}
+                />
+              }
             />
           </div>
         )}
       </main>
 
       <HeadlinePanel
-        word={selectedWord}
+        subject={selectedWord ?? eventSubject}
+        isEvent={!selectedWord && eventSubject !== null}
         headlines={headlinesForWord}
         categories={categories}
         loading={headlinesLoading}
         error={headlinesError}
-        onClose={() => setSelectedWord(null)}
+        onClose={() => {
+          setSelectedWord(null)
+          setSelectedEvent(null)
+        }}
       />
     </div>
   )
 }
 
-// The page is a dated record, so the date is what it is about — not a form
-// control tucked between a title and a row of tabs, which is where it used to
-// live. Set in 명조 against a canvas that is entirely 고딕: the masthead is the
-// one part of the page that gets read rather than scanned.
-//
-// The stepper walks the collected dates rather than the calendar, because the
-// archive has gaps and today is empty until the 07:00 KST cron has run. The
-// native picker stays for jumping further than one step.
-function Masthead({
-  date,
-  minDate,
-  maxDate,
-  previousDate,
-  nextDate,
-  onDateChange,
-  words,
-  links,
-}: {
-  date: string
-  minDate?: string
-  maxDate?: string
-  previousDate: string | null
-  nextDate: string | null
-  onDateChange: (date: string) => void
-  words: number | null
-  links: number | null
-}) {
-  const parts = formatDate(date)
-  const step =
-    'rounded-md px-1.5 text-2xl leading-none text-ink-faint hover:text-ink disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-ink-faint'
-
-  return (
-    // Everything sits in one left-aligned column. The picker used to be floated
-    // to the right edge, where the headline panel — which starts below the
-    // toolbar and runs to the bottom — covered it the moment a word was clicked.
-    <div className="mb-6">
-      <div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => previousDate && onDateChange(previousDate)}
-            disabled={!previousDate}
-            aria-label="이전 수집일"
-            className={step}
-          >
-            ‹
-          </button>
-          <p className="font-display text-3xl leading-none font-semibold tracking-tight sm:text-4xl">
-            {parts.day}
-            <span className="ml-2 align-baseline text-lg font-medium text-ink-faint sm:text-xl">
-              {parts.weekday}
-            </span>
-          </p>
-          <button
-            onClick={() => nextDate && onDateChange(nextDate)}
-            disabled={!nextDate}
-            aria-label="다음 수집일"
-            className={step}
-          >
-            ›
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-2 pl-1 text-xs text-ink-faint">
-          <span>{parts.year}</span>
-          {words !== null && links !== null && (
-            <>
-              <span>·</span>
-              <span>단어 {words}</span>
-              <span>·</span>
-              <span>관계 {links}</span>
-            </>
-          )}
-          <span>·</span>
-          {/* The stepper walks to the neighbouring collected date; this is for
-              jumping further than one step, so it is the quieter of the two. */}
-          <label className="flex items-center gap-1.5">
-            <span className="sr-only">날짜 선택</span>
-            <input
-              type="date"
-              value={date}
-              min={minDate}
-              max={maxDate}
-              onChange={(e) => onDateChange(e.target.value)}
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-ink-faint hover:text-ink"
-            />
-          </label>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Invalid dates reach this from a hand-edited query string, and Intl renders
-// those as "Invalid Date" rather than throwing — which would put that string in
-// the masthead at 36px.
-function formatDate(iso: string): { day: string; weekday: string; year: string } {
-  const parsed = new Date(`${iso}T00:00:00+09:00`)
-  if (Number.isNaN(parsed.getTime())) return { day: iso, weekday: '', year: '' }
-
-  const format = (options: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', ...options }).format(parsed)
-
-  return {
-    day: format({ month: 'long', day: 'numeric' }),
-    weekday: format({ weekday: 'short' }),
-    year: format({ year: 'numeric' }),
-  }
-}
-
-// Holds the graph's footprint while it loads, so the page does not collapse to
-// one line of text and then jump back open. Deliberately not a fake graph:
-// scattering placeholder words would suggest a layout that the real one is
-// about to contradict.
-function GraphSkeleton() {
-  return (
-    <div
-      data-testid="graph-skeleton"
-      role="status"
-      aria-busy="true"
-      aria-label="불러오는 중"
-      className="mx-auto w-full max-w-5xl"
-    >
-      <div className="mx-auto mb-3 h-4 w-56 animate-pulse rounded-full bg-line" />
-      <div className="h-[380px] w-full animate-pulse rounded-xl bg-ground" />
-    </div>
-  )
-}
 
 export default App

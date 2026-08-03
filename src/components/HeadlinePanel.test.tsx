@@ -22,7 +22,7 @@ function headline(
 function renderPanel(props: Partial<Parameters<typeof HeadlinePanel>[0]> = {}) {
   return render(
     <HeadlinePanel
-      word="예산안"
+      subject="예산안"
       headlines={[]}
       categories={CATEGORIES}
       loading={false}
@@ -35,7 +35,7 @@ function renderPanel(props: Partial<Parameters<typeof HeadlinePanel>[0]> = {}) {
 
 describe('HeadlinePanel', () => {
   it('renders nothing when no word is selected', () => {
-    const { container } = renderPanel({ word: null })
+    const { container } = renderPanel({ subject: null })
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -62,7 +62,7 @@ describe('HeadlinePanel', () => {
 
   it('does not listen for Escape once it is closed', () => {
     const onClose = vi.fn()
-    renderPanel({ word: null, onClose })
+    renderPanel({ subject: null, onClose })
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
   })
@@ -130,5 +130,12 @@ describe('HeadlinePanel', () => {
       headlines: [headline('h1', '가', 'politics'), headline('h2', '나', 'politics')],
     })
     expect(screen.getByText('2건')).toBeInTheDocument()
+  })
+
+  it('사건 이름에는 따옴표를 두르지 않는다', () => {
+    renderPanel({ subject: '폭염 · 양산 · 한반도 · 에어컨', isEvent: true })
+    expect(
+      screen.getByRole('heading', { name: /폭염 · 양산 · 한반도 · 에어컨 관련 헤드라인/ }),
+    ).toBeInTheDocument()
   })
 })

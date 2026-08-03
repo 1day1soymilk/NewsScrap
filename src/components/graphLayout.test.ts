@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeGraphLayout, convexHull, routeEdge, seededRandom } from './graphLayout'
+import { computeGraphLayout, convexHull, nextLayoutWidth, routeEdge, seededRandom } from './graphLayout'
 import type { EdgeCurve, MeasuredWord, PlacedNode } from './graphLayout'
 import type { GraphEdge } from '../lib/types'
 
@@ -187,6 +187,7 @@ describe('computeGraphLayout', () => {
       nodes: [],
       edges: [],
       clusters: [],
+      communities: new Map(),
       bounds: { x: 0, y: 0, width: 0, height: 0 },
     })
   })
@@ -487,5 +488,70 @@ describe('computeGraphLayout', () => {
 
     expect(find(nodes, '폭염')).toMatchObject({ fontSize: 48, faded: false })
     expect(find(nodes, '양산')).toMatchObject({ fontSize: 14, faded: true })
+  })
+})
+
+describe('communities', () => {
+  it('그려진 모든 단어에 배정을 준다 — 엣지가 없는 단어까지', () => {
+    const words = [word('폭염'), word('양산'), word('까마귀')]
+    const layout = computeGraphLayout(words, [edge('폭염', '양산')], SIZE)
+
+    expect(layout.communities.size).toBe(3)
+    expect(layout.communities.has('까마귀')).toBe(true)
+  })
+
+  it('한 클러스터의 단어들은 정확히 하나의 커뮤니티에 속한다', () => {
+    // 노출된 배정과 findClusters의 분할이 갈리면 목록이 캔버스와 다른 하루를
+    // 말하게 된다. clusterLimit을 올려 잘리지 않은 분할 전체를 본다.
+    const words = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'].map((w) => word(w))
+    const layout = computeGraphLayout(
+      words,
+      [edge('a1', 'a2'), edge('b1', 'b2'), edge('c1', 'c2')],
+      { ...SIZE, clusterLimit: 99 },
+    )
+
+    expect(layout.clusters.length).toBeGreaterThan(1)
+
+    const seen = new Set<number>()
+    for (const cluster of layout.clusters) {
+      const ids = new Set(cluster.words.map((w) => layout.communities.get(w)))
+      expect(ids.size).toBe(1)
+      const [id] = [...ids]
+      expect(id).toBeDefined()
+      expect(seen.has(id!)).toBe(false)
+      seen.add(id!)
+    }
+  })
+
+  it('단어가 없으면 빈 맵이다', () => {
+    expect(computeGraphLayout([], [], SIZE).communities.size).toBe(0)
+  })
+})
+
+describe('nextLayoutWidth', () => {
+  // 레이아웃 한 번은 루뱅 분할 + 300틱 + 엣지마다 도는 곡선 탐색이고, 그것이
+  // 렌더 경로 안에서 동기로 돈다. 창 가장자리를 끄는 동안 프레임마다 한 번씩
+  // 도는 것을 막는 문턱이다.
+  it('움직임이 문턱보다 작으면 다시 그리지 않는다', () => {
+    expect(nextLayoutWidth(800, 803)).toBeNull()
+    expect(nextLayoutWidth(800, 797)).toBeNull()
+  })
+
+  it('문턱 이상 움직이면 채택할 폭을 돌려준다', () => {
+    expect(nextLayoutWidth(800, 808)).toBe(808)
+    expect(nextLayoutWidth(800, 792)).toBe(792)
+  })
+
+  it('소수점 폭은 반올림해서 채택한다', () => {
+    // contentRect는 소수를 준다. 그대로 두면 같은 폭이 780.0001과 780.0002로
+    // 갈려 캐시도 문턱도 새어 나간다.
+    expect(nextLayoutWidth(800, 811.4)).toBe(811)
+  })
+
+  it('0 이하는 무시한다', () => {
+    // 숨겨진 컨테이너의 ResizeObserver가 0을 보고한다. 그 폭으로 레이아웃을
+    // 돌리면 라벨이 전부 한 점에 쌓인다.
+    expect(nextLayoutWidth(800, 0)).toBeNull()
+    expect(nextLayoutWidth(800, -5)).toBeNull()
   })
 })

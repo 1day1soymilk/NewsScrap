@@ -89,7 +89,10 @@ was collected twice — once by hand and once by the 13:00 KST cron, since the
 150-per-category cap applies per run — and the day went from 873 headlines to
 1,382 partway through a session. The harness immediately started reporting up to
 13 unlabelled words per row. Re-run `20_unlabeled.sql` after any collection, not
-just after editing `02_sieve_configs.sql`.
+just after editing `02_sieve_configs.sql`. Migration `0007` (2026-08-02) is
+another instance of this: it removed 386 duplicate rows and moved both labelled
+days, so the counts recorded above are stale, and both scripts must be re-run
+before trusting them again.
 
 Only about 60 of them survive from the planning stage — those were recovered by
 reading the plan document, because the 343 labels it cites lived in a chat
@@ -186,9 +189,9 @@ the `XSN` lemmas the sample actually produced. `님` was considered and rejected
 wrong word costs more than a redundant one.
 
 **The archive spans the merge's deploy, and only the last of three runs is on the
-current side of it.** `created_at` splits it into 2026-07-31 16:00 KST (900
-headlines), 2026-08-01 08:00 (873, the manual run) and 2026-08-01 13:00 (509, the
-cron), and the words fall either side of the last boundary exactly:
+current side of it.** `created_at` splits it into 2026-07-31 16:00 KST, 2026-08-01
+08:00 (the manual run) and 2026-08-01 13:00 (the cron), and the words fall either
+side of the last boundary exactly:
 
 | | 07-31 16:00 | 08-01 08:00 | 08-01 13:00 |
 | --- | --- | --- | --- |
@@ -197,13 +200,22 @@ cron), and the words fall either side of the last boundary exactly:
 | 검찰 / 검찰개혁 | 6 / – | 13 / – | 3 / 2 |
 | 도체 | 17 | 16 | 13 |
 
-So 1,773 of the 2,282 archived headlines were analysed by the pre-merge function
-and 509 by the current one, and a word can be a fragment in one row and whole in
-the next — the duplicate title `“검찰개혁 끝내 완성”… 여권, 형소법 통과에
-한목소리` is stored twice, once each way. Two consequences: any per-word count
-that spans the boundary is a blend of two analysers, and 도체 surviving all three
-runs is what makes the `XPN` failure a live bug rather than an artefact of old
-data.
+So most of the archive was analysed by the pre-merge function and only the last
+run by the current one, and a word can be a fragment in one row and whole in the
+next — the duplicate title `“검찰개혁 끝내 완성”… 여권, 형소법 통과에 한목소리`
+was stored twice, once each way. Two consequences: any per-word count that spans
+the boundary is a blend of two analysers, and 도체 surviving all three runs is
+what makes the `XPN` failure a live bug rather than an artefact of old data.
+
+The counts in the table above, and the split they came from, were measured
+**before** migration 0007 (2026-08-02) collapsed the archive onto one row per
+article, and that duplicate title is exactly the kind of row it removed. The
+ratio moved with it, and not evenly: keeping the earliest sighting cost the
+13:00 cron 509 → 327 rows against the 08:00 manual run's 873 → 817, so the
+surviving corpus leans further toward the pre-merge analyser than it did. The
+measured split now is **1,716 of the 2,043 rows on the two labelled days**
+(1,716 of 2,734 across the whole table). The boundary itself is unchanged —
+only how much sits on each side of it.
 
 The report's other half is the `standalone` signal's own blind spot, and it is
 larger than the fragments. Nine words below the cut on 2026-08-01 clear every

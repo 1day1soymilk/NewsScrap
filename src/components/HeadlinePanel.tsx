@@ -3,7 +3,10 @@ import type { Category, HeadlineSummary } from '../lib/types'
 import { sectionColor } from '../lib/sectionColors'
 
 interface HeadlinePanelProps {
-  word: string | null
+  /** 무엇에 대한 목록인가. null이면 패널이 닫힌다. */
+  subject: string | null
+  /** 사건의 이름은 단어 목록이므로 따옴표를 두르지 않는다. */
+  isEvent?: boolean
   headlines: HeadlineSummary[]
   /** In tab order, which is what the list groups by. */
   categories: Category[]
@@ -13,14 +16,16 @@ interface HeadlinePanelProps {
 }
 
 export function HeadlinePanel({
-  word,
+  subject,
+  isEvent = false,
   headlines,
   categories,
   loading,
   error,
   onClose,
 }: HeadlinePanelProps) {
-  const open = word !== null
+  const open = subject !== null
+  const heading = isEvent ? `${subject} 관련 헤드라인` : `"${subject}" 관련 헤드라인`
 
   // Registered only while the panel is open, so Escape stays free for anything
   // else on the page the rest of the time.
@@ -58,11 +63,11 @@ export function HeadlinePanel({
     // value is wrong on one side of that breakpoint.
     <aside
       className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-(--header-height) sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
-      aria-label={`"${word}" 관련 헤드라인`}
+      aria-label={heading}
     >
       <div className="mb-4 flex items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">
-          &quot;{word}&quot; 관련 헤드라인
+          {heading}
           {!loading && !error && sorted.length > 0 && (
             <span className="ml-2 font-sans text-sm font-normal text-ink-faint">
               {sorted.length}건
@@ -140,17 +145,20 @@ function HeadlineSkeleton() {
 }
 
 // Naver serves one article under two paths — /mnews/article/421/0009091462 and
-// /article/421/0009091462 — and which one the scrape returns varies between
-// runs. 2026-08-01 was collected twice, so 190 of its 1,382 rows are the same
-// article stored under both forms, and the duplicate check at insert time
-// compares links and sees two.
+// /article/421/0009091462 — but that no longer produces two rows: canonicalLink
+// (lib/headlines.ts) folds both into one before insert, and migration 0007
+// cleaned up the archive rows that had already leaked through. What this
+// function still collapses is a genuinely different case — one article listed
+// under two sections, which is two legitimate rows with two different links,
+// and the panel should still show it once.
 //
 // The identity is the press id and the article id at the end of the path, so
 // that is the key. Keyed on the link rather than on the title because two
 // genuinely different articles can carry the same headline.
 //
-// This only cleans up the list. The rows are still there, and they still inflate
-// the co-occurrence counts the graph is built from.
+// dedupe() runs before sortHeadlines() below, on rows PostgREST returns in
+// arbitrary order, so for that one cross-section article which of its two
+// section badges survives is not deterministic.
 function articleKey(headline: HeadlineSummary): string {
   const path = (headline.link ?? '').split('?')[0]
   const match = path.match(/(\d+)\/(\d+)\/?$/)

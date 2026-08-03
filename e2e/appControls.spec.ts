@@ -101,6 +101,39 @@ test('shows a skeleton in the graph’s place while it loads', async ({ page }) 
   await expect(page.getByTestId('graph-skeleton')).toBeHidden()
 })
 
+test('does not flash the skeleton when returning to a view it already holds', async ({ page }) => {
+  // The response cache hands back the same promise, so a view that has been
+  // seen resolves in a microtask. Showing the skeleton for that frame would
+  // undo the whole point of taking the round trip to zero — nothing would look
+  // any faster.
+  // toBeHidden()으로는 잡히지 않는다 — 자동 재시도 단언은 한 프레임 뒤에 이미
+  // 사라진 것을 보지 못하고 그냥 통과한다(확인함). 나타났는지 자체를
+  // MutationObserver로 관측해야 한다.
+  await mockSupabase(page, { delayOn: { endpoint: 'keyword_graph', ms: 800 } })
+  await page.goto('/')
+  await expect(page.getByTestId('graph-skeleton')).toBeHidden()
+
+  const header = page.locator('header')
+  await header.getByRole('button', { name: '정치' }).click()
+  await expect(page.getByTestId('graph-skeleton')).toBeVisible()
+  await expect(page.getByTestId('graph-skeleton')).toBeHidden()
+
+  await page.evaluate(() => {
+    const w = window as unknown as { __sawSkeleton: boolean }
+    w.__sawSkeleton = false
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid="graph-skeleton"]')) w.__sawSkeleton = true
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+
+  // 전체로 돌아온다. 이 뷰는 이미 손에 있다.
+  await header.getByRole('button', { name: '전체' }).click()
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+  expect(
+    await page.evaluate(() => (window as unknown as { __sawSkeleton: boolean }).__sawSkeleton),
+  ).toBe(false)
+})
+
 test('leaves the date stepper alone when nothing has been collected', async ({ page }) => {
   await mockSupabase(page, { collected_dates: [], keyword_graph: EMPTY_GRAPH })
   await page.goto('/')

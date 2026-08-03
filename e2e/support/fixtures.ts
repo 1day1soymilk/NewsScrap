@@ -1,5 +1,11 @@
 export type CategoryRow = { id: string; slug: string; label: string }
-export type CollectedDateRow = { collected_date: string }
+export type CollectedDateRow = { collected_date: string; headline_count: number }
+export type HeadlineSummary = {
+  id: string
+  title: string
+  link: string
+  category_slug: string
+}
 export type HeadlineNounRow = {
   word: string
   headlines: {
@@ -34,24 +40,31 @@ export const CATEGORIES: CategoryRow[] = [
   { id: '00000000-0000-4000-8000-000000000105', slug: 'it', label: 'IT/과학' },
 ]
 
-// Two dates, so the prev/next buttons have somewhere to go and the surge
-// comparison has a previous day to compare against. Newest first, matching
-// fetchAvailableDates()'s ordering.
-export const COLLECTED_DATES: CollectedDateRow[] = [
-  { collected_date: todayInSeoul() },
-  { collected_date: previousDayInSeoul() },
-]
-
 export type WordCountRow = { collected_date: string; word: string; count: number }
 
-// Headlines collected each day — the denominator computeSurges normalises by,
-// served through the content-range header the way a PostgREST head-count is.
+// Headlines collected each day — the denominator computeSurges normalises by.
 // Today is the larger of the two, so a word has to gain share rather than
 // merely gain count to be marked.
+//
+// The app reads these from collected_dates now; the head-count endpoint they
+// used to be served through is the fallback for a date that view did not
+// return, and `headlines` in MockOptions still answers it.
 export const HEADLINE_COUNTS: Record<string, number> = {
   [todayInSeoul()]: 12,
   [previousDayInSeoul()]: 8,
 }
+
+// Two dates, so the prev/next buttons have somewhere to go and the surge
+// comparison has a previous day to compare against. Newest first, matching
+// fetchCollectedDates()'s ordering.
+//
+// The counts are read from HEADLINE_COUNTS rather than written out again: the
+// two fixtures are the same day totals reached by two routes, and a copy that
+// drifted would make the surge assertions describe a day that does not exist.
+export const COLLECTED_DATES: CollectedDateRow[] = [
+  { collected_date: todayInSeoul(), headline_count: HEADLINE_COUNTS[todayInSeoul()] },
+  { collected_date: previousDayInSeoul(), headline_count: HEADLINE_COUNTS[previousDayInSeoul()] },
+]
 
 // daily_word_counts rows for the two days above, which is what computeSurges
 // compares. Counts match DEFAULT_GRAPH's so the two fixtures tell one story.
@@ -137,7 +150,7 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
     headlines: {
       id: '00000000-0000-4000-8000-00000000aaa2',
       title: '예산안 국채 발행 규모 확정',
-      link: 'https://n.news.naver.com/mnews/article/001/0000000002',
+      link: 'https://n.news.naver.com/article/001/0000000002',
       collected_date: todayInSeoul(),
       categories: { slug: 'economy' },
     },
@@ -147,9 +160,101 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
     headlines: {
       id: '00000000-0000-4000-8000-00000000aaa1',
       title: '여야 예산안 처리 합의',
-      link: 'https://n.news.naver.com/mnews/article/001/0000000001',
+      link: 'https://n.news.naver.com/article/001/0000000001',
       collected_date: todayInSeoul(),
       categories: { slug: 'politics' },
     },
   },
 ]
+
+// 두 사건과 그 사이의 다리 하나.
+//
+//   사건 A: 예산안 — 여야 — 국회   (삼각형)
+//   사건 B: 폭염 — 열대야 — 양산   (삼각형)
+//   다리:   국회 — 폭염            (약한 엣지 하나)
+//
+// 삼각형 안은 npmi를 높게, 다리는 낮게 주어 루뱅이 둘로 가르도록 한다. 엣지가
+// 하나뿐이므로 합치기 문턱 2에 걸리지 않고, 그래서 국회와 폭염이 다리가 된다 —
+// 다리는 예외 없이 합치기가 "안 합친다"고 판정한 쌍이다.
+export const EVENT_GRAPH: GraphPayload = {
+  nodes: [
+    node('예산안', 9, 'politics'),
+    node('여야', 7, 'politics'),
+    node('국회', 6, 'politics'),
+    node('폭염', 8, 'society'),
+    node('열대야', 5, 'society'),
+    node('양산', 4, 'society'),
+    // 어디에도 붙지 않는 단어. 실제 하루의 3분의 1이 이렇고, 사건에 속하지
+    // 않으므로 다리도 될 수 없다.
+    node('까마귀', 3, 'culture'),
+  ],
+  edges: [
+    { a: '예산안', b: '여야', cooc: 6, npmi: 0.92 },
+    { a: '예산안', b: '국회', cooc: 5, npmi: 0.9 },
+    { a: '여야', b: '국회', cooc: 5, npmi: 0.9 },
+    { a: '폭염', b: '열대야', cooc: 5, npmi: 0.92 },
+    { a: '폭염', b: '양산', cooc: 4, npmi: 0.9 },
+    { a: '열대야', b: '양산', cooc: 4, npmi: 0.9 },
+    { a: '국회', b: '폭염', cooc: 2, npmi: 0.32 },
+  ],
+}
+
+// Eight disjoint pairs, so Louvain gives eight communities and the merge rule —
+// which wants two edges between two communities — cannot join any of them. That
+// is three more events than the collapsed list holds, which is what makes the
+// expand toggle observable. EVENT_GRAPH's two events never reach the limit.
+//
+// 가N always outranks 나N inside its pair, so 가N is the event's first word and
+// the one MANY_EVENT_HEADLINE_COUNTS is keyed by.
+export const MANY_EVENTS_GRAPH: GraphPayload = {
+  nodes: Array.from({ length: 8 }, (_, i) => [
+    node(`가${i}`, 20 - i, 'politics'),
+    node(`나${i}`, 12 - i, 'politics'),
+  ]).flat(),
+  edges: Array.from({ length: 8 }, (_, i) => ({
+    a: `가${i}`,
+    b: `나${i}`,
+    cooc: 5,
+    npmi: 0.9,
+  })),
+}
+
+// Distinct per event, so the ranking has no ties to resolve and the list's order
+// is the one this file states rather than whatever the sort happened to keep.
+export const MANY_EVENT_HEADLINE_COUNTS: Record<string, number> = Object.fromEntries(
+  Array.from({ length: 8 }, (_, i) => [`가${i}`, 30 - i * 2]),
+)
+
+// event_headline_counts의 답. 단어별 카운트의 합(A는 22, B는 17)과 일부러 다르게
+// 두어, 화면의 숫자가 합계가 아니라 이 값에서 오는 것이 관측 가능하도록 한다.
+// 순서는 입력 순서이므로, 목이 본문의 p_events를 읽어 사건을 알아본다.
+export const EVENT_HEADLINE_COUNTS: Record<string, number> = {
+  예산안: 12,
+  폭염: 11,
+}
+
+// event_headlines의 답. 두 섹션이라 패널의 뱃지와 정렬이 관측된다.
+export const EVENT_HEADLINE_ROWS: Record<string, HeadlineSummary[]> = {
+  예산안: [
+    {
+      id: '00000000-0000-4000-8000-00000000bbb1',
+      title: '국회 예산안 심사 착수',
+      link: 'https://n.news.naver.com/article/001/0000000011',
+      category_slug: 'politics',
+    },
+    {
+      id: '00000000-0000-4000-8000-00000000bbb2',
+      title: '여야 예산안 협상 재개',
+      link: 'https://n.news.naver.com/article/001/0000000012',
+      category_slug: 'politics',
+    },
+  ],
+  폭염: [
+    {
+      id: '00000000-0000-4000-8000-00000000bbb3',
+      title: '폭염 특보 전국 확대',
+      link: 'https://n.news.naver.com/article/001/0000000013',
+      category_slug: 'society',
+    },
+  ],
+}

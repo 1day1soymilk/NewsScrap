@@ -35,7 +35,7 @@ test('reaches the real Supabase project', async ({ page }) => {
   // The retry button only renders when a query failed.
   await expect(page.getByRole('button', { name: '다시 시도' })).toHaveCount(0)
 
-  // fetchAvailableDates()/collected_dates only surfaces through the date
+  // fetchCollectedDates()/collected_dates only surfaces through the date
   // input's min/max attributes, and the .or() above does not wait on it (it
   // only catches a collected_dates failure if it lands within about a second
   // of the word-count effect settling). Assert the max attribute deterministically

@@ -65,6 +65,15 @@ Any host serving the built frontend (Vercel and the like) needs
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` configured there. They are baked
 in at build time, and `.env` is not in the repo.
 
+`index.html` is one of the places they are baked into: it carries
+`<link rel="preconnect" href="%VITE_SUPABASE_URL%">` so the DNS, TCP and TLS to
+the API host finish while the HTML is still parsing rather than after React has
+mounted — everything on the first screen comes from that origin. Vite performs
+the `%VITE_*%` substitution at build time, so a build with no `.env` ships the
+literal placeholder in the markup. That is harmless (the app is already pointing
+at a placeholder URL by then) but it is the signal that the build had no
+environment.
+
 ## Architecture
 
 ### Two runtimes, one rule
@@ -104,7 +113,7 @@ PostgREST's 1000-row cap cannot silently truncate a result set. `daily_word_coun
 is no longer on the graph's path.
 
 **`daily_word_counts` is not exempt from that cap**, and an earlier version of this
-file said it was. A day holds 3,289 distinct words (2026-08-01; 2,484 on 07-31), so
+file said it was. A day holds 3,051 distinct words (2026-08-01; 2,484 on 07-31), so
 an unfiltered read of it returns the top 1,000 and nothing says so. The surge
 comparison was written against that mistake and measured: summing the truncated
 response for a denominator inflated every ratio by 11% and turned 12 of the 110
@@ -113,10 +122,21 @@ drawn words into false "new"s. Two rules follow, and `fetchWordCountsFor` /
 
 - **Name the words you want** (`.in('word', …)`). The graph draws at most
   `render_cap` (70) of them, so a response bounded by that list cannot be cut.
-- **Never sum a response to get a denominator.** Day totals come from a
-  `head: true, count: 'exact'` query, which returns no rows at all and so cannot
-  be truncated. `computeSurges` takes the total as an argument rather than
-  summing the counts it was handed, so the mistake cannot recur by accident.
+- **Never sum a response to get a denominator.** Day totals are counted by
+  Postgres and read as a number. `computeSurges` takes the total as an argument
+  rather than summing the counts it was handed, so the mistake cannot recur by
+  accident.
+
+Those totals now ride along on `collected_dates` (migration `0011`), which the
+date picker reads once per load anyway — `fetchCollectedDates` returns
+`{date, headlines}[]` and `App.tsx` derives both the `string[]` the date stepper
+wants and a `Map` of denominators. That is still not a summed response: the
+column is `count(*)` grouped by day. **`fetchHeadlineCount` survives as the
+fallback** for a date the view did not return, because `collected_dates` is one
+row per collected day and so is itself subject to the 1,000-row cap — about 2.7
+years out. Being truncated then costs one `head: true, count: 'exact'` request
+instead of producing a wrong ratio for every word on screen. Measured cold load:
+9 requests → 7, with no `HEAD` among them.
 
 `fetchWordCounts` (the whole-day read) is still exported and tested but nothing
 calls it; it is the one function here that can be silently truncated.
@@ -169,6 +189,21 @@ time and should not be rediscovered:
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
   and 순회 all score a perfect 1.00, for the same reason the fragment 알뜰 does.
   Turning it off gained 6.8 and 14.2 F1 points on the two measured days.
+- **The neighbours clause is disabled too** (`max_neighbors_per_doc` −1, below
+  the signal's minimum of 0), by migration `0009`. Two of sieve 4's three
+  rescues are now retired and **the length clause is the sieve**: it admits 68
+  of the 70 drawn words, and its precision, 84.3%, is the whole sieve's. Do not
+  read that as a leak to be plugged. The four signals were measured against the
+  labels inside the length group and **not one of them separates its 112 good
+  words from its 22 bad** — character length runs the wrong way (bad 3.59, good
+  3.33), headline count is flat (7.0 against 7.2), and recurrence across the
+  archive's days is flat too, because at three days it measures "story that is
+  still running" rather than "word that recurs whatever the news". That is why
+  the dictionary is doing this work: there is no signal left, not because the
+  dictionary is a shortcut.
+- **`allow` entries are load-bearing, not decoration.** 폭염 and 양산 were given
+  theirs in `0003` as insurance against exactly the retune `0009` performed, and
+  they are now the only two words on the canvas not admitted by length.
 - **Category specificity must be computed across all six sections**, never within
   the filtered view. Inside one category every word sits in one bucket, entropy
   collapses to zero, and every word scores a perfect 1.
@@ -183,13 +218,70 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words on the two labelled days: 24.3% / 28.6%
-for frequency alone, 84.3% / 75.7% for the sieve with the dictionary. Those
-figures come from `analysis.word_labels` and are **not comparable to any
-percentage quoted elsewhere, or to any earlier figure in this file's history** —
-the label set has been extended four times and each extension moves them.
-Compare configurations against each other inside one run, never against a number
-someone wrote down.
+Measured precision of the top 70 words on the two labelled days: 24.3% / 30.0%
+for frequency alone, 84.3% / 84.3% for the sieve with the dictionary, from the
+run that decided `0009`. Those figures come from `analysis.word_labels` and are
+**not comparable to any percentage quoted elsewhere, or to any earlier figure in
+this file's history** — the label set has been extended five times and each
+extension moves them, most recently by `08_labels_after_dedup.sql`. Compare
+configurations against each other inside one run, never against a number someone
+wrote down.
+
+`08_labels_after_dedup.sql` is itself the second half of rule 4 firing:
+`02_sieve_configs.sql` was untouched, but migrations `0007` and `0008` moved the
+data underneath it and `20_unlabeled.sql` returned eight words that had never
+been near the cut before. **Run it before the harness, every time, whatever
+changed.**
+
+### Reading the same view twice costs nothing
+
+`src/lib/queryCache.ts` sits under five of the query functions and holds the
+**promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
+rejections evicted immediately so "다시 시도" really retries). Two things follow
+that are easy to underrate:
+
+- **The point is object identity, not the network.** `App.tsx` compares
+  identities everywhere — `graph`, `graphWords`, `partition.graph === graph`,
+  `eventCounts.of === eventGraph`. Handing back the same object skips the label
+  measurement, the Louvain partition, the 300-tick simulation, the edge routing
+  **and** the follow-up round trips, and the event list appears without its
+  one blank frame. Measured on a tab round trip A→B→A: 6 requests on return
+  became 0; on a date step there→back, 9 became 0.
+- **`fetchWordCountsFor` needs it too**, which an earlier reading of this got
+  wrong: `graphWords` keeps its identity across a date step, but `selectedDate`
+  changes, so the surge effect re-runs regardless. Before it was cached it was
+  the only request still going out on a return trip.
+
+Tests share the module-level cache, so `queries.test.ts` calls
+`clearQueryCache()` in a `beforeEach`. Without it one test's response leaks into
+the next.
+
+**`main.tsx` fires the first `keyword_graph` request before React mounts**, off
+the URL, and the cache is what makes that safe rather than wasteful: App's own
+call gets the same promise and the same object back, so it is one request and
+one layout, not two. It pairs with the `preconnect` in `index.html` — the
+handshake is finished by the time this fires. Without the cache this line would
+simply add a request. The category comes from `parseUrlState` with no slug list
+yet, which is the same "not yet known" path App uses on first paint.
+
+**The skeleton is only raised for a view that actually has to be waited for.**
+`loadGraph` starts the request, then schedules the `setLoading(true)` on a
+microtask and skips it if the promise has already settled — which is what a
+cache hit looks like. Flashing the skeleton for one frame would undo the whole
+saving; nothing would look faster. Note that `expect(skeleton).toBeHidden()`
+**cannot** test this: the auto-retrying assertion never sees a frame that is
+already gone, and it passed against the unfixed code. `appControls.spec.ts`
+installs a `MutationObserver` and asserts the element was never inserted, which
+does fail without the fix.
+
+`src/lib/supabaseClient.ts` builds a **`PostgrestClient` directly** rather than
+calling `createClient`. There is no login, no realtime, no storage and no
+function invocation here, but `createClient` instantiates auth-js and
+realtime-js eagerly, so no bundler can drop them: they were 443 kB of the built
+JS. The two headers supabase-js used to add — `apikey` and the `Bearer` token,
+both the same anon key — are set by hand, and nothing about the access model
+moves. Bundle went to 251 kB (gzip 130 → 81). The Edge Function still uses
+`npm:@supabase/supabase-js` and is unaffected.
 
 ### Design tokens
 
@@ -206,7 +298,7 @@ of all six as well, because the marker is drawn touching its word.
 
 **Nothing is shaded on the canvas any more** — see "Event clusters" below for
 why the blobs went. `--color-cluster` and `--color-top-story` survive the change:
-the top story's blue is now the dot in the caption that names it, and the
+the top story's blue is now the dot on the first row of the event list, and the
 achromatic grey is kept, unused, with its test, because the finding is about the
 palette rather than about the shape it was picked for. Two washes distinguished
 by opacity alone failed — 0.07 and 0.07 stack to exactly the 0.14 that was meant
@@ -219,6 +311,17 @@ places, the words and the dot on the tab that filters for them, and
 `src/lib/sectionColors.ts` is the one definition both read. A key that names a
 different green from the one on screen is worse than no key, so
 `e2e/keywordGraph.spec.ts` asserts the two resolve to the same rgb.
+
+**The webfont is loaded from `index.html`, never from `index.css`.** It used to
+be an `@import` at the top of the stylesheet, which looks correct and is not:
+`@import "tailwindcss"` is inlined into ~940 lines of rules, so a font import
+written below it lands after real statements and CSS drops it. The build said so
+("@import must precede all other statements") and the browser agreed silently —
+the masthead had been falling back to `ui-serif` and Noto Serif KR had never
+once loaded. A `<link>` in the markup cannot hit that ordering trap at all, and
+it starts the download while the HTML is still parsing rather than after the
+stylesheet has been fetched and scanned. `preconnect` to both font hosts sits
+beside it.
 
 `--font-display` (Noto Serif KR) is used on the masthead date and the panel
 heading and **nowhere else**. The graph measures its labels on a canvas against
@@ -280,6 +383,22 @@ Three things there were arrived at by looking at real days, not by reasoning:
   is three rings rather than one circle because a single radius is not long
   enough to hold them side by side, and they stack on it — again caught by the
   overlap test. With nothing connected at all the push is skipped entirely.
+
+- **A resize under 8px does not re-run the layout** (`nextLayoutWidth`), and the
+  width feeding it goes through `useDeferredValue` so a re-layout does not block
+  paint. One layout of 70 words and 60 edges measures **48ms**, and the cost is
+  the simulation rather than the edge routing — with the edges removed entirely
+  it is still 37.5ms, while 20 words with the same 60 edges is 5.5ms. Dragging a
+  window edge from 1280 to 358 at 6px a frame ran 154 layouts and now runs 76.
+  The 8px is invisible because the svg is drawn at its own size and then scaled
+  by `max-w-full`.
+- **`rectCollide` is not where that 48ms goes**, and it looks like it should be.
+  Hoisting the outer node's fields out of the inner loop and dropping the `?? 0`
+  guards (every node is seeded with x/y/vx/vy, so they never fired) produced a
+  bit-identical picture — coordinate sums matched to four decimals — and a time
+  inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
+  d3's own forces across 300 ticks, so anything that actually moves this number
+  changes the picture. Do not re-run this experiment.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -354,7 +473,8 @@ the members ring a gap and there is nothing at the middle to read the event
 from.
 
 **Clusters are never drawn.** They decide the cohesion force, the hub each event
-rings, and which story the caption names — and nothing on the canvas.
+rings, and — through `src/lib/events.ts` — which stories the event list names.
+Nothing on the canvas.
 
 They used to be shaded, six of them (`clusterLimit`), and both halves of that
 were wrong. Six overlapping washes were the dirtiest thing on screen: a hull is
@@ -364,14 +484,80 @@ false claim — **a blob is the convex hull of its members' label boxes, so
 anything that happens to lie between them is inside it.** On 2026-08-01 the hull
 for 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명,
 four words from other events. A hull is only honest when its members are already
-adjacent, which is exactly when it adds least. The caption names the story
-instead, and `clusterLimit` still defaults to 1 because that is all the caption
-needs; `graphLayout.test.ts` passes it explicitly where the partition itself is
-under test.
+adjacent, which is exactly when it adds least. The event list names the stories
+instead, and `clusterLimit` — which cuts `layout.clusters`, a field nothing now
+reads — still defaults to 1; `graphLayout.test.ts` passes it explicitly where the
+partition itself is under test. The list is built from `GraphLayout.communities`,
+which is the **uncut** partition, so the cap cannot reach it.
 
 The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture
 and the e2e suite can assert on it.
+
+### The event list
+
+`src/lib/events.ts` turns the day into a list of events, above the canvas. It is
+pure and does not touch d3: the canvas hands its Louvain assignment up through
+`onCommunities`, and **that same partition is what the list is built from** —
+never a second copy computed here, for the reason `keyword_signals` is not
+reimplemented either.
+
+- **Louvain communities are merged before they are listed.** Two communities
+  joined by `MERGE_MIN_EDGES` (**2**) or more edges are one event, transitively,
+  through a union-find. Not 1: 2026-08-01's 민주당–한동훈 hang on a single edge
+  and the 전당대회 and the 국민의힘 지도부 are different stories. Not 3:
+  2026-08-02's 순회경선·명청대전 hang on two and are one story, so 3 splits that
+  day's biggest event.
+- **An event's headline count is never the sum of its members' counts.** One
+  article holding two member words is counted twice; the measured inflation runs
+  1.10× to 2.22× and **grows with the member count, so the ranking is wrong and
+  not just the number** — the real top of 2026-08-01 is 폭염 (sum 69, actual 61),
+  not 트럼프 (73 / 51). Two RPCs exist for this, `event_headline_counts` and
+  `event_headlines` (migration `0010`), because `count(distinct …)` is not
+  something PostgREST can express and counting the rows of a response is the
+  thing this file forbids. `countSum` survives only as the fallback order when
+  the count RPC fails, and `topEvents` will not mix the two inside one
+  comparison — the counts are used all-or-nothing (`fullyAligned`).
+- **The counts and the partition are pinned to the graph they came from.** The
+  partition arrives from a post-paint effect, so for one frame it belongs to the
+  previous day; the counts are a separate round trip. `App.tsx` stores each with
+  the object it was computed for and compares identity before use, so a
+  transition blanks the list for one frame rather than showing yesterday's
+  events, or yesterday's numbers, or ranking on them. Length is not a check: the
+  archive's three days hold 15, 14 and 15 events.
+- **The list answers the canvas back.** Clicking a word on the canvas lights the
+  row of the event it belongs to and recedes the others at the canvas's own
+  `UNFOCUSED_OPACITY` (`src/lib/focus.ts` holds that number once, for both).
+  A bridging word lights every row it touches, matching what `focusWords` does
+  on the canvas. **Canvas and list deliberately light different sets**: the
+  canvas lights a word and its neighbours, which can cross an event boundary,
+  while the list states membership. Two different questions, not a mismatch to
+  fix. An event ranked below the list's five is **pinned onto the end** rather
+  than inserted, so a clicked word always has a name without anything
+  pretending to a rank it does not hold. With no event to light — 20 of the 70
+  words hold no edge — **nothing is dimmed at all**; a wholly grey list reads as
+  a fault.
+- **The list holds `EVENT_LIST_LIMIT` (5) rows and can be opened to the day's
+  full set.** Expanding passes `limit: Infinity` to `topEvents` rather than
+  branching anywhere else, which makes `pinned` a no-op by construction — every
+  event is already present. The toggle is the list's own last row, because it is
+  about the list's length rather than a control that happens to sit beneath it,
+  and it is not rendered at all when the day holds no more than is shown (a
+  category tab, mostly). **It collapses on a date or a category change**: a day
+  holds 14 to 17 events and a tab far fewer, so an expansion carried across a
+  change leaves the page at the previous view's height showing a different
+  view's content. `eventGraph` is the identity that moves on both.
+- **The expansion is not in the query string.** It is not a shareable claim
+  about the data, and the URL already carries a mutual-exclusion rule between
+  `?word=` and `?event=` that a third axis would only complicate.
+- **A word selection and an event selection are mutually exclusive**, in the
+  click handlers and in the query string alike (`?word=` or `?event=`, never
+  both). Two lit sets at once cannot be read off the canvas.
+- **An event lights its members and not their neighbours.** A word selection
+  expands to neighbours; an event already *is* a neighbourhood, and expanding it
+  would light the event across a bridge that the merge rule had just declined to
+  join. A bridging word is the exception by construction: it lights every event
+  it touches, whole, which is what makes the bridge visible as a bridge.
 
 ### Day-over-day surge
 
@@ -380,8 +566,8 @@ previous **collected** date — not against yesterday, since the archive has gap
 and today is empty until the 13:00 KST cron runs. Two things there were settled
 by measurement and should not be re-argued from first principles:
 
-- **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,382
-  headlines against 2026-07-31's 900, so on counts every word is up 50%.
+- **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,144
+  headlines against 2026-07-31's 899, so on counts every word is up about 27%.
   Dividing each day by its own headline total makes a uniform inflation cancel;
   the median drawn word then sits at a ratio of 0.98, which is the check that
   the normalisation works.
@@ -441,6 +627,27 @@ backfills headlines that somehow have no nouns.
   `http://epretx.etri.re.kr:8000/api/WiseNLU`, same request/response schema,
   5,000 calls/day.
 
+- **One article, one link.** The section's first page and its `SECTION_ARTICLE_LIST`
+  pagination hand back different URLs for the same article —
+  `/mnews/article/{press}/{id}` against `/article/{press}/{id}` — and the boundary
+  falls at whatever the first page held (46 of 150 in politics on 2026-08-02).
+  `canonicalLink` in `lib/headlines.ts` rebuilds both as
+  `https://n.news.naver.com/article/{press}/{id}` before `extractHeadlines`
+  dedupes, which is what makes the existing `UNIQUE (category_id, link)` the real
+  invariant. It returns anything it cannot parse **unchanged**: mangling an
+  unrecognised href would merge two different articles into one link and lose one
+  of them silently. That fail-open design means a change in Naver's URL shape
+  would produce duplicates again with no other signal, so the only thing
+  standing between this bug and its silent return is this query, which must
+  return 0:
+
+  ```sql
+  select count(*) from (
+    select category_id, substring(link from '/article/(\d+/\d+)') as k
+    from headlines group by 1, 2 having count(*) > 1
+  ) d;
+  ```
+
 Section IDs are fixed: 정치 100, 경제 101, 사회 102, 생활/문화 103, 세계 104,
 IT/과학 105.
 
@@ -472,7 +679,10 @@ already caused a false pass or a failure:
   body, so a handler keying off `p_category` must read
   `route.request().postDataJSON()`, not the query string.
 - `fetchHeadlineCount` is a **HEAD** request and reads its answer from the
-  `content-range` header, not from a body.
+  `content-range` header, not from a body. It is now only the fallback path, so
+  `COLLECTED_DATES` carries the same totals as `HEADLINE_COUNTS` — derived from
+  it rather than written out twice, since a drifted copy would make the surge
+  assertions describe a day that does not exist.
 - A default that varies by request has to be a function, and `resolve()` has to
   call it. Returning the function itself serialises to `undefined`, which reaches
   the app as an empty result and reads exactly like "no data" — the surge markers
@@ -532,7 +742,32 @@ kept whole and the run breaks only on what is not part of the word. Still open i
 the `standalone` cut, which loses more whole words to a following 조사 (유시민,
 골리앗, 앤트로픽) than it catches fragments.
 
-The archive **spans the merge's own deploy** — 1,773 of 2,282 headlines were
-analysed before it first shipped — so a word count that crosses 2026-08-01 13:00
-KST blends two analysers, and the fix above adds a third boundary at its own
-deploy. The archived days are not re-analysed.
+The archive **spans the merge's own deploy** — 1,716 of the 2,043 rows on the
+two labelled days (2026-07-31 and 2026-08-01) were analysed before it first
+shipped, measured post-migration; across the whole table it is 1,716 of 2,734 —
+so a word count that crosses 2026-08-01 13:00 KST blends two analysers, and the
+fix above adds a third boundary at its own deploy. The archived days are not
+re-analysed.
+
+Migration `0007`'s cleanup was not neutral between the two analysers, either:
+keeping the earliest sighting means the 13:00 cron's re-collection lost rows
+proportionally faster than the 08:00 manual run did (509 → 327 against
+873 → 817), so 2026-08-01 is now *more* pre-merge than it was before the
+cleanup — the sieve harness's labelled corpus did not merely shift when 0007
+ran, it shifted toward the older analyser.
+
+Migration `0007` collapsed the archive onto one row per article, which **moves
+both labelled days**. Before re-running `10_sieve_eval.sql` for any reason,
+re-run `20_unlabeled.sql` first: ranks near the cut are filled by different
+words now. Measured cost on the drawn set: nodes held at 70 on both days and
+the biggest story does not move (김민석 46→46 on 2026-08-02), but a pre-flight
+check that asked "do these 70 words' existing edges still clear
+`edge_min_cooc`" said edges were untouched, and that check was wrong — measured
+edges moved 47→36 on 2026-08-01 and 57→58 on 2026-08-02. **A check that holds
+the drawn node set fixed is not a check on the drawn graph**: edges are only
+drawn between drawn nodes, the ranking shift changes which 70 words those are,
+and the new set draws over a different pair set than the old one did. Some of
+the lost pairs were never real co-occurrence to begin with — a pair that
+appeared together in one story collected twice had been counted twice. The
+percentages recorded above were taken before any of this, on the pre-migration
+graph.

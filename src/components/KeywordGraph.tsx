@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { computeGraphLayout } from './graphLayout'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { computeGraphLayout, nextLayoutWidth } from './graphLayout'
 import type { MeasuredWord } from './graphLayout'
 import { computeFontSizes } from './wordCloudLayout'
+import { UNFOCUSED_OPACITY } from '../lib/focus'
 import { NEUTRAL_INK, sectionColor } from '../lib/sectionColors'
 import type { KeywordGraphData } from '../lib/types'
 import type { Surge } from '../lib/surge'
@@ -33,8 +35,9 @@ const FALLBACK_WIDTH = 700
 // `faded`, so this is a second copy of that number by necessity. Kept slightly
 // higher because 0.3 on a white background is barely legible.
 const FADED_OPACITY = 0.38
-// Everything outside the focused word's neighbourhood.
-const UNFOCUSED_OPACITY = 0.1
+// Everything outside the focused word's neighbourhood. Shared with EventList,
+// which recedes the same way when a word is picked, so the two cannot drift to
+// different strengths of the same gesture.
 
 // Section inks live in src/lib/sectionColors.ts because CategoryTabs draws the
 // same six as the graph's colour key, and the two have to be the same values.
@@ -53,17 +56,6 @@ const EDGE_COLOR = 'var(--color-edge)'
 // Applied to an edge that had to be routed under a label because the field was
 // too crowded for any single curve to miss everything.
 const CROWDED_EDGE_FADE = 0.5
-
-// The top story is named in the caption and marked with this dot, and no longer
-// shaded on the canvas.
-//
-// A cluster's blob was the convex hull of its members' label boxes, so anything
-// that happened to sit between them was inside it. On 2026-08-01 the hull for
-// 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명 —
-// four words from other events. With six blobs that read as noise; with one it
-// read as a claim, and the claim was false. A hull can only be honest when its
-// members are already adjacent, which is exactly when it adds least.
-const TOP_STORY_TINT = 'var(--color-top-story)'
 
 // Day-over-day movement. One glyph for both "new" and "surging": a word that
 // was not there yesterday is the limiting case of one that grew, and two
@@ -98,6 +90,29 @@ interface KeywordGraphProps {
   colorByCategory: boolean
   /** Words that grew against the previous collected day. Empty is normal. */
   surges: Map<string, Surge>
+  /**
+   * Whatever goes above the canvas — the event list, in practice. A slot
+   * rather than a component of its own so the list and the surge key share one
+   * bordered row; two stacked bordered rows read as two unrelated blocks.
+   */
+  header?: ReactNode
+  /**
+   * The words an event or a bridge selection holds lit. Null means no such
+   * selection, and the word focus below runs as it always has.
+   *
+   * An event lights its members and **not their neighbours**: a word selection
+   * expands to neighbours, but an event already is a neighbourhood, and
+   * expanding it would light the very event across a bridge that the merge
+   * rule declined to join — letting the display overturn that judgement.
+   */
+  focusWords?: Set<string> | null
+  /**
+   * The uncut Louvain partition, handed up so the event list is built from the
+   * same one the cohesion force ran on. Called on every resize; the assignment
+   * is a function of topology alone, so the value does not change and the
+   * caller compares content before acting on it.
+   */
+  onCommunities?: (communities: Map<string, number>) => void
 }
 
 export function KeywordGraph({
@@ -106,9 +121,17 @@ export function KeywordGraph({
   onWordClick,
   colorByCategory,
   surges,
+  header,
+  focusWords = null,
+  onCommunities,
 }: KeywordGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(FALLBACK_WIDTH)
+
+  // The first measurement is taken whatever the threshold says. Width starts at
+  // FALLBACK_WIDTH, so a real container landing within 8px of it would otherwise
+  // be drawn at a made-up width forever.
+  const measuredOnce = useRef(false)
 
   useEffect(() => {
     const element = containerRef.current
@@ -116,21 +139,34 @@ export function KeywordGraph({
 
     const observer = new ResizeObserver((entries) => {
       const measured = entries[0]?.contentRect.width ?? 0
-      if (measured > 0) setWidth(measured)
+      setWidth((current) => {
+        const next = nextLayoutWidth(current, measured, measuredOnce.current ? undefined : 0)
+        if (next === null) return current
+        measuredOnce.current = true
+        return next
+      })
     })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
 
+  // 레이아웃은 렌더 경로 안에서 도는 가장 비싼 계산이다. 리사이즈 중에는 뒤로
+  // 미뤄, 다시 그리는 동안에도 페인트가 막히지 않게 한다. 폭이 바뀌지 않는
+  // 보통의 상호작용(단어 클릭 등)에서는 값이 같으므로 아무 차이도 없다.
+  const layoutWidth = useDeferredValue(width)
+
   const height = useMemo(() => {
-    if (width >= NARROW_WIDTH) {
-      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_RATIO)))
+    if (layoutWidth >= NARROW_WIDTH) {
+      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(layoutWidth * HEIGHT_RATIO)))
     }
     return Math.min(
       NARROW_MAX_HEIGHT,
-      Math.max(MIN_HEIGHT, Math.round(width * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD)),
+      Math.max(
+        MIN_HEIGHT,
+        Math.round(layoutWidth * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD),
+      ),
     )
-  }, [width, graph.nodes.length])
+  }, [layoutWidth, graph.nodes.length])
 
   const measured = useMemo<MeasuredWord[]>(() => {
     // computeFontSizes is the word cloud's, reused unchanged: size stays
@@ -149,9 +185,13 @@ export function KeywordGraph({
   }, [graph.nodes])
 
   const layout = useMemo(
-    () => computeGraphLayout(measured, graph.edges, { width, height }),
-    [measured, graph.edges, width, height],
+    () => computeGraphLayout(measured, graph.edges, { width: layoutWidth, height }),
+    [measured, graph.edges, layoutWidth, height],
   )
+
+  useEffect(() => {
+    onCommunities?.(layout.communities)
+  }, [layout.communities, onCommunities])
 
   // Focus mode: the clicked word and whatever shares a headline with it stay
   // lit, everything else recedes. Empty when nothing is selected.
@@ -176,12 +216,21 @@ export function KeywordGraph({
 
   function nodeOpacity(word: string, faded: boolean): number {
     const base = faded ? FADED_OPACITY : 1
+    // 사건이나 다리가 선택되면 살아남는 집합이 밖에서 정해져 온다. 그럴 때는
+    // 이웃으로 넓히지 않는다 — 사건은 그 자체가 이미 이웃 집합이다.
+    if (focusWords) return focusWords.has(word) ? base : UNFOCUSED_OPACITY
     if (!selectedWord) return base
     if (word === selectedWord || neighbors.has(word)) return base
     return UNFOCUSED_OPACITY
   }
 
-  const topStory = layout.clusters[0]
+  // 엣지는 양끝이 다 살아 있을 때만 살아 있다. 단어 포커스일 때의 규칙은 그대로
+  // 둔다 — 이웃끼리 잇는 선까지 살리면 지금 화면이 달라진다.
+  function edgeLit(a: string, b: string): boolean {
+    if (focusWords) return focusWords.has(a) && focusWords.has(b)
+    if (!selectedWord) return true
+    return a === selectedWord || b === selectedWord
+  }
 
   // Only markers on words that were actually drawn can be clipped, so the
   // allowance is skipped entirely on a day with no movement rather than padding
@@ -202,30 +251,14 @@ export function KeywordGraph({
       {/* One rule of caption above the canvas rather than two centred lines
           floating in the gap between the toolbar and the first word — that gap
           was most of what made the top of the page read as empty.
-          The top story is named in text rather than drawn on the canvas: a
-          caption over the graph would have to dodge the labels, and the words it
-          names are already the ones inside the one shaded blob. The surge key is
-          here for the opposite reason — the mark is small and sits off the side
-          of a word, so without a key it reads as a rendering artefact. */}
-      {(topStory || marked) && (
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-2">
-          {/* Plain flowing text rather than a flex row: as flex children the
-              three parts each became their own column and wrapped inside
-              themselves on a phone, so the label broke as "오늘의 톱 스토 / 리". */}
-          {topStory && (
-            <p className="text-sm text-ink-faint">
-              <span
-                aria-hidden="true"
-                className="mr-2 inline-block size-2 rounded-full align-middle"
-                style={{ background: TOP_STORY_TINT }}
-              />
-              오늘의 톱 스토리{' '}
-              <span className="text-ink">{topStory.words.join(' · ')}</span>{' '}
-              <span className="whitespace-nowrap">{topStory.headlines}건</span>
-            </p>
-          )}
+          The header slot holds the event list. The surge key is here for its
+          own reason: the mark is small and sits off the side of a word, so
+          without a key it reads as a rendering artefact. */}
+      {(header || marked) && (
+        <div className="mb-4 border-b border-line pb-2">
+          {header}
           {marked && (
-            <p className="text-xs text-ink-faint">
+            <p className="mt-1 text-right text-xs text-ink-faint">
               <span className="mr-1" style={{ color: SURGE_COLOR }}>
                 {SURGE_MARK}
               </span>
@@ -259,8 +292,7 @@ export function KeywordGraph({
             // line, and several collinear dashes read as several relationships.
             const curve = edge.curve
             if (!curve) return null
-            const touchesSelection =
-              !selectedWord || edge.a === selectedWord || edge.b === selectedWord
+            const touchesSelection = edgeLit(edge.a, edge.b)
             return (
               <path
                 key={`${edge.a}--${edge.b}`}
