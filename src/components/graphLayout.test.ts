@@ -443,6 +443,70 @@ describe('사건 구역', () => {
     }
   })
 
+  it('선반이 넘어가도 순서상 이웃한 두 구역이 좌우 끝으로 갈라지지 않는다', () => {
+    // `orderForPacking`은 다리로 이어진 사건을 순서상 옆에 놓는다. 그런데 선반이
+    // 넘어가는 자리에서는 그 이웃 둘이 화면의 왼쪽 끝과 오른쪽 끝으로 갈라져,
+    // 순서로 붙여 놓은 것이 2차원에서 제일 멀어진다. 데스크톱 2026-08-01의
+    // 703px짜리 다리가 그것이었다.
+    //
+    // 홀수 선반을 좌우로 뒤집으면 넘김 지점이 위아래로 붙는다.
+    const pairs = ['가나다라', '마바사아', '자차카타', '파하거너', '더러머버', '서어저처']
+    const words = pairs.flatMap((p) => [word(`${p}1`), word(`${p}2`)])
+    const links = pairs.map((p) => edge(`${p}1`, `${p}2`, 0.9))
+    const { regions, bounds } = computeGraphLayout(words, links, SIZE)
+
+    expect(regions.length).toBeGreaterThan(3)
+    const rows = new Set(regions.map((r) => r.y))
+    expect(rows.size).toBeGreaterThan(1) // 실제로 선반이 넘어가야 의미가 있다
+
+    for (let i = 1; i < regions.length; i++) {
+      const before = regions[i - 1]
+      const after = regions[i]
+      if (before.y === after.y) continue
+      const gap = Math.abs(
+        before.x + before.width / 2 - (after.x + after.width / 2),
+      )
+      expect(gap).toBeLessThan(bounds.width / 2)
+    }
+  })
+
+  it('평면으로 그릴 수 있는 사건은 교차 없이 그린다', () => {
+    // 정육면체 — 8점 12선, 누구나 평면으로 그릴 줄 아는 그래프다. 힘 균형에
+    // 맡겨 두면 **교차 23개**를 냈다. 12개 간선에서 나올 수 있는 66쌍 중 23쌍이라
+    // 사실상 아무것도 안 읽히는 상태였고, `LOCAL_SLACK` 훑기로도 `untangle`로도
+    // 안 줄던 그 실패다.
+    //
+    // 여기서 세는 것은 중심-중심 직선이다. 곡선 라우팅은 이 다음에 오고, 어차피
+    // 교차하는 곡선은 교차하는 현에서 나온다.
+    const spec = [
+      ['가', '나'], ['나', '다'], ['다', '라'], ['라', '가'],
+      ['마', '바'], ['바', '사'], ['사', '아'], ['아', '마'],
+      ['가', '마'], ['나', '바'], ['다', '사'], ['라', '아'],
+    ]
+    const words = ['가', '나', '다', '라', '마', '바', '사', '아'].map((w) => word(w))
+    const links = spec.map(([a, b]) => edge(a, b, 0.9))
+    const { nodes, edges: drawn } = computeGraphLayout(words, links, SIZE)
+
+    const at = new Map(nodes.map((n) => [n.word, n]))
+    const side = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
+      (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+
+    let crossings = 0
+    for (let i = 0; i < drawn.length; i++) {
+      for (let j = i + 1; j < drawn.length; j++) {
+        const p = drawn[i]
+        const q = drawn[j]
+        if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+        const [p1, p2, p3, p4] = [at.get(p.a)!, at.get(p.b)!, at.get(q.a)!, at.get(q.b)!]
+        if (side(p3, p4, p1) > 0 !== side(p3, p4, p2) > 0 &&
+            side(p1, p2, p3) > 0 !== side(p1, p2, p4) > 0) {
+          crossings++
+        }
+      }
+    }
+    expect(crossings).toBe(0)
+  })
+
   it('다리를 든 단어를 상대 구역을 바라보는 쪽에 놓는다', () => {
     // 구역 밖으로 나가는 선이 자기 사건의 내부 선을 자르는 것이, 재어 보니
     // 다리가 낀 교차의 거의 전부였다(데스크톱 2026-08-03은 14개 중 14개).

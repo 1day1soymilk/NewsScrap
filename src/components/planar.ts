@@ -1,0 +1,699 @@
+/**
+ * 평면성 — 이 그래프를 선이 서로 안 만나게 그릴 수 있는가.
+ *
+ * 캔버스의 조밀한 사건 하나가 내는 교차가 **위상 때문인지 배치 때문인지**를
+ * 가르려고 들여왔다. 08-02의 전당대회는 13단어 27엣지인데 힘 균형으로도
+ * 자리 맞바꿈으로도 교차 16개가 안 줄었고, 그 16개가 "어떻게 그려도 생기는 것"인지
+ * "이 배치가 못 편 것"인지는 재기 전에는 알 수 없다.
+ *
+ * **간선 수로는 못 가른다.** 오일러 상한(3n−6)은 필요조건일 뿐이라, 페테르센
+ * 그래프(10점 15선, 상한 24)처럼 한참 성긴데도 평면이 아닌 것이 있다. K5나 K3,3을
+ * 부분그래프로 품었는지 보는 것도 틀린다 — 페테르센은 둘 다 **세분(subdivision)**
+ * 으로만 품는다. 그래서 진짜 판정이 필요하고, 여기 있는 것이 그것이다.
+ *
+ * 알고리즘은 좌우(left-right) 평면성 판정이다 (de Fraysseix·Ossona de Mendez·
+ * Rosenstiehl; Brandes 2009의 정식화). DFS로 방향을 주면서 각 간선의 lowpoint와
+ * 중첩 깊이를 구하고, 두 번째 DFS에서 되돌아오는 간선들을 좌/우 두 구간으로 갈라
+ * 모순 없이 배정할 수 있는지를 본다. 배정에 실패하는 순간이 평면이 아닌 순간이다.
+ *
+ * DFS가 재귀다. 이 저장소에서 부르는 대상은 사건 하나의 부분그래프라 꼭짓점이
+ * 14개를 넘지 않으므로 깊이는 문제가 아니다. 훨씬 큰 그래프에 쓸 일이 생기면
+ * 먼저 반복문으로 고쳐 쓸 것.
+ */
+
+export interface PlanarEdge {
+  a: string
+  b: string
+}
+
+/** 간선 id가 없음을 뜻한다. -1인 것은 배열 인덱스와 섞어 쓰기 때문이다. */
+const NONE = -1
+
+/** 되돌아오는 간선들의 한 구간. `low`가 가장 깊이 돌아가는 것. */
+interface Interval {
+  low: number
+  high: number
+}
+
+/** 서로 같은 쪽에 놓일 수 없는 두 구간. */
+interface Pair {
+  left: Interval
+  right: Interval
+}
+
+function emptyInterval(): Interval {
+  return { low: NONE, high: NONE }
+}
+
+function isEmpty(interval: Interval): boolean {
+  return interval.low === NONE && interval.high === NONE
+}
+
+function swapSides(pair: Pair): void {
+  const held = pair.left
+  pair.left = pair.right
+  pair.right = held
+}
+
+/**
+ * 자기 자신으로 가는 선과 중복된 선을 걷어낸 인접 목록.
+ *
+ * 둘 다 평면성을 바꾸지 않지만 판정을 틀리게 만들 수는 있다. `keyword_graph`가
+ * 그런 것을 주지는 않으나, 준다면 원인을 찾기 어려운 종류의 오류가 된다.
+ */
+function adjacency(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+): { adj: Map<string, string[]>; edgeCount: number } {
+  const adj = new Map<string, string[]>()
+  for (const node of nodes) adj.set(node, [])
+
+  const seen = new Set<string>()
+  for (const edge of edges) {
+    if (edge.a === edge.b) continue
+    const key = edge.a < edge.b ? `${edge.a}\u0000${edge.b}` : `${edge.b}\u0000${edge.a}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (!adj.has(edge.a)) adj.set(edge.a, [])
+    if (!adj.has(edge.b)) adj.set(edge.b, [])
+    adj.get(edge.a)!.push(edge.b)
+    adj.get(edge.b)!.push(edge.a)
+  }
+
+  return { adj, edgeCount: seen.size }
+}
+
+export interface PlanarPoint {
+  x: number
+  y: number
+}
+
+/** 후보 바깥 테두리를 몇 개까지 시험할지. 넘으면 포기하고 `null`을 준다. */
+const MAX_OUTER_TRIES = 64
+/** 테두리로 쓸 순환의 최대 길이. 면은 대개 짧다. */
+const MAX_CYCLE = 10
+/** 두 점이 같은 자리인지 보는 눈금. 좌표는 단위원 안이라 이 정도면 넉넉하다. */
+const COINCIDENT = 1e-6
+
+/**
+ * 교차 없는 **직선** 그림. 못 그리면 `null`.
+ *
+ * Tutte의 무게중심 방법이다. 바깥 테두리 하나를 볼록 다각형으로 못박고, 나머지
+ * 점을 각자 이웃의 평균 자리에 두는 선형계를 푼다. 그 그래프가 3-연결이고 못박은
+ * 테두리가 진짜 면이면 결과는 교차 없는 볼록 그림이라는 것이 Tutte의 정리다.
+ *
+ * **평면 임베딩을 계산하지 않는다.** 대신 짧은 순환들을 후보 테두리로 삼아 하나씩
+ * 풀어 보고, 나온 그림이 **정말로 교차가 0이고 점이 다 떨어져 있는지 직접 확인해서**
+ * 통과한 것만 돌려준다. 임베딩을 제대로 구하는 쪽이 정공법이지만, 여기서는 그럴
+ * 이유가 약하다 — 위상 계산이 틀렸을 때 임베딩 방식은 조용히 나쁜 그림을 내보내는
+ * 반면 이 방식은 `null`을 내고, 부르는 쪽에는 이미 폴백이 있다. 틀리는 방향이
+ * 안전한 쪽이다.
+ *
+ * 그래서 이 함수의 계약은 짧다: **돌려주는 그림은 교차가 0임이 확인된 것이고,
+ * 확인 못 한 것은 안 돌려준다.** 그릴 수 있는데도 `null`을 줄 수는 있다(후보를
+ * 다 뒤지지 않으므로). 그건 폴백이 받으면 되는 손해다.
+ *
+ * 좌표는 단위원 안의 상대값이다. 실제 크기로 키우는 것은 부르는 쪽 일이다 —
+ * **교차는 닮음변환에 불변이므로 라벨이 떨어질 때까지 키워도 0은 0으로 남는다.**
+ */
+export function planarPositions(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+): Map<string, PlanarPoint> | null {
+  return nearPlanarPositions(nodes, edges, 0)?.places ?? null
+}
+
+export interface NearPlanarDrawing {
+  places: Map<string, PlanarPoint>
+  /** 평면으로 만드느라 뺀 간선. 그리기는 그리되, 이것들만 교차한다. */
+  dropped: PlanarEdge[]
+}
+
+/**
+ * 평면이 아닌 그래프도 그린다 — 최소한만 빼고 나머지를 교차 없이.
+ *
+ * 하루의 제일 큰 사건이 비평면인 경우가 실제로 있다. 2026-08-02의 전당대회는
+ * 13단어 27간선인데 왜곡도가 **2**다: 간선 둘만 빼면 평면이라는 뜻이고, 동시에
+ * 그 사건을 **어떻게 그려도 교차 둘은 남는다**는 뜻이다. 그런데 지금 그 사건은
+ * 15개를 낸다. 남는 둘은 그래프 탓이고 나머지 열셋은 배치 탓이다.
+ *
+ * 그래서 뺄 수 있는 제일 작은 집합을 찾아 나머지를 평면으로 그리고, 뺀 것은 그냥
+ * 직선으로 얹는다. 결과의 교차는 뺀 개수 근처가 된다.
+ *
+ * `maxDrop`을 넘겨야 하면 `null`이다. 덜 빼고 "성공"이라 하면 나머지가 교차하는
+ * 그림을 교차 없는 그림이라고 부르는 것이 된다.
+ */
+export function nearPlanarPositions(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+  maxDrop: number,
+): NearPlanarDrawing | null {
+  const clean = dedupe(edges)
+  const drop = minimumDropSet(nodes, clean, maxDrop)
+  if (drop === null) return null
+
+  const dropped = drop.map((i) => clean[i])
+  const kept = clean.filter((_, i) => !drop.includes(i))
+  const places = flatPositions(nodes, kept)
+  return places ? { places, dropped } : null
+}
+
+/** 뺄 간선의 최소 집합(인덱스). 평면이면 빈 배열, `max`까지 못 찾으면 `null`. */
+function minimumDropSet(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+  max: number,
+): number[] | null {
+  if (isPlanar(nodes, edges)) return []
+
+  for (let size = 1; size <= max; size++) {
+    const chosen: number[] = []
+    const search = (start: number): number[] | null => {
+      if (chosen.length === size) {
+        const dropped = new Set(chosen)
+        return isPlanar(
+          nodes,
+          edges.filter((_, i) => !dropped.has(i)),
+        )
+          ? [...chosen]
+          : null
+      }
+      for (let i = start; i < edges.length; i++) {
+        chosen.push(i)
+        const found = search(i + 1)
+        if (found) return found
+        chosen.pop()
+      }
+      return null
+    }
+    const found = search(0)
+    if (found) return found
+  }
+  return null
+}
+
+function flatPositions(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+): Map<string, PlanarPoint> | null {
+  const { adj } = adjacency(nodes, edges)
+  const words = [...adj.keys()]
+  if (words.length < 3) return null
+  if (!isConnected(adj)) return null
+
+  const clean = dedupe(edges)
+  const dense = triangulate(words, adj, clean)
+
+  let best: Map<string, PlanarPoint> | null = null
+  let bestSpread = -1
+
+  for (const cycle of candidateCycles(dense)) {
+    const places = tutte(dense, cycle)
+    if (!places) continue
+
+    const spread = minimumDistance(places)
+    if (spread <= COINCIDENT) continue
+    if (straightCrossings(places, clean) > 0) continue
+
+    // 통과한 것 중 제일 넓게 퍼진 것. 점이 서로 멀수록 라벨을 떼어 놓느라 키워야
+    // 하는 배율이 작고, 그 배율이 그대로 이 구역이 먹는 자리다.
+    if (spread > bestSpread) {
+      bestSpread = spread
+      best = places
+    }
+  }
+
+  return best
+}
+
+/**
+ * 평면을 유지하면서 더 넣을 수 없을 때까지 간선을 넣는다 — 삼각분할.
+ *
+ * **없으면 Tutte가 실제 사건에서 거의 항상 무너진다.** Tutte의 보장은 3-연결에서
+ * 나오는데 하루의 사건은 성기다(9점 13선, 11점 17선). 고리에 나뭇가지가 매달린
+ * 모양이라, 무게중심을 풀면 가지 끝의 점들이 붙어 있는 점 위로 무너져 겹친다.
+ * 처음 붙였을 때 08-03의 두 사건이 통째로 `null`로 떨어진 것이 그것이었다.
+ *
+ * 간선을 **더** 넣는 것이 왜 안전한가: 더 많은 선을 서로 안 만나게 그렸으면 그중
+ * 일부만 골라도 당연히 안 만난다. 넣은 간선은 그리지 않고, 검증도 원래 간선에
+ * 대해서만 한다. n이 14를 넘지 않으므로 넣어 볼 후보가 100개 아래고 하나마다
+ * 평면성 판정 한 번이면 된다.
+ *
+ * 넣는 순서를 사전순으로 못박아 결과가 결정적이다.
+ */
+function triangulate(
+  words: string[],
+  adj: Map<string, string[]>,
+  edges: PlanarEdge[],
+): Map<string, string[]> {
+  const dense = new Map(words.map((w) => [w, [...adj.get(w)!]]))
+  const growing = [...edges]
+  const linked = new Set(edges.map((e) => (e.a < e.b ? `${e.a} ${e.b}` : `${e.b} ${e.a}`)))
+
+  const sorted = [...words].sort()
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i]
+      const b = sorted[j]
+      const key = a < b ? `${a} ${b}` : `${b} ${a}`
+      if (linked.has(key)) continue
+
+      const candidate = [...growing, { a, b }]
+      if (!isPlanar(words, candidate)) continue
+
+      linked.add(key)
+      growing.push({ a, b })
+      dense.get(a)!.push(b)
+      dense.get(b)!.push(a)
+    }
+  }
+
+  return dense
+}
+
+function dedupe(edges: readonly PlanarEdge[]): PlanarEdge[] {
+  const seen = new Set<string>()
+  const out: PlanarEdge[] = []
+  for (const edge of edges) {
+    if (edge.a === edge.b) continue
+    const key = edge.a < edge.b ? `${edge.a} ${edge.b}` : `${edge.b} ${edge.a}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(edge)
+  }
+  return out
+}
+
+function isConnected(adj: Map<string, string[]>): boolean {
+  const start = adj.keys().next().value
+  if (start === undefined) return false
+  const seen = new Set<string>([start])
+  const queue = [start]
+  while (queue.length > 0) {
+    for (const next of adj.get(queue.pop()!)!) {
+      if (seen.has(next)) continue
+      seen.add(next)
+      queue.push(next)
+    }
+  }
+  return seen.size === adj.size
+}
+
+/**
+ * 바깥 테두리 후보. 짧은 순환부터 — 면은 대개 짧고, 짧은 것부터 보면 진짜 면을
+ * 일찍 만난다. 같은 순환을 한 번만 내도록 정규형으로 걸러 결정적이다.
+ */
+function candidateCycles(adj: Map<string, string[]>): string[][] {
+  const words = [...adj.keys()]
+  const rank = new Map(words.map((w, i) => [w, i]))
+  const found = new Map<string, string[]>()
+
+  const walk = (start: string, path: string[], visited: Set<string>): void => {
+    if (found.size >= MAX_OUTER_TRIES * 4) return
+    const here = path[path.length - 1]
+    for (const next of adj.get(here)!) {
+      if (next === start && path.length >= 3) {
+        // 정규형: 제일 이른 점에서 시작해, 두 방향 중 사전순으로 앞선 쪽.
+        const lowest = path.reduce((a, b) => (rank.get(a)! <= rank.get(b)! ? a : b))
+        const at = path.indexOf(lowest)
+        const forward = [...path.slice(at), ...path.slice(0, at)]
+        const backward = [forward[0], ...forward.slice(1).reverse()]
+        const pick = forward.join(' ') <= backward.join(' ') ? forward : backward
+        found.set(pick.join(' '), pick)
+        continue
+      }
+      if (visited.has(next)) continue
+      if (rank.get(next)! < rank.get(start)!) continue
+      if (path.length >= MAX_CYCLE) continue
+      visited.add(next)
+      path.push(next)
+      walk(start, path, visited)
+      path.pop()
+      visited.delete(next)
+    }
+  }
+
+  for (const start of words) walk(start, [start], new Set([start]))
+
+  // **짧은 것부터.** 삼각분할을 거치면 면이 전부 삼각형이므로 긴 순환은 면이
+  // 아니고, 면이 아닌 테두리는 검증에서 떨어진다. 긴 것부터 보게 했더니 후보
+  // 예순네 자리를 면 아닌 것들이 다 먹어 정육면체까지 못 그렸다.
+  return [...found.values()]
+    .sort((a, b) => a.length - b.length || a.join(' ').localeCompare(b.join(' ')))
+    .slice(0, MAX_OUTER_TRIES)
+}
+
+/**
+ * 테두리를 볼록 다각형에 못박고 나머지를 이웃의 평균 자리에 둔다.
+ *
+ * 안쪽 점마다 x = (이웃들의 x 평균)이라는 식 하나씩, 미지수도 그만큼. 사건 하나가
+ * 14점을 넘지 않으므로 가우스 소거로 충분하다. 특이행렬이면 `null` — 그래프가
+ * 그 테두리에 대해 제대로 매달리지 않는다는 뜻이다.
+ */
+function tutte(adj: Map<string, string[]>, outer: string[]): Map<string, PlanarPoint> | null {
+  const fixed = new Map<string, PlanarPoint>()
+  outer.forEach((word, i) => {
+    const angle = (-Math.PI / 2) + (i * 2 * Math.PI) / outer.length
+    fixed.set(word, { x: Math.cos(angle), y: Math.sin(angle) })
+  })
+
+  const inner = [...adj.keys()].filter((w) => !fixed.has(w))
+  if (inner.length === 0) return new Map(fixed)
+
+  const index = new Map(inner.map((w, i) => [w, i]))
+  const n = inner.length
+  // [계수 | x 상수 | y 상수]
+  const rows = inner.map((word, i) => {
+    const row = new Array<number>(n + 2).fill(0)
+    const neighbours = adj.get(word)!
+    row[i] = neighbours.length
+    for (const neighbour of neighbours) {
+      const at = index.get(neighbour)
+      if (at === undefined) {
+        const point = fixed.get(neighbour)!
+        row[n] += point.x
+        row[n + 1] += point.y
+      } else {
+        row[at] -= 1
+      }
+    }
+    return row
+  })
+
+  for (let col = 0; col < n; col++) {
+    let pivot = col
+    for (let r = col + 1; r < n; r++) {
+      if (Math.abs(rows[r][col]) > Math.abs(rows[pivot][col])) pivot = r
+    }
+    if (Math.abs(rows[pivot][col]) < 1e-12) return null
+    if (pivot !== col) {
+      const held = rows[col]
+      rows[col] = rows[pivot]
+      rows[pivot] = held
+    }
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue
+      const factor = rows[r][col] / rows[col][col]
+      if (factor === 0) continue
+      for (let c = col; c <= n + 1; c++) rows[r][c] -= factor * rows[col][c]
+    }
+  }
+
+  const places = new Map(fixed)
+  for (let i = 0; i < n; i++) {
+    const scale = rows[i][i]
+    const x = rows[i][n] / scale
+    const y = rows[i][n + 1] / scale
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    places.set(inner[i], { x, y })
+  }
+  return places
+}
+
+function minimumDistance(places: Map<string, PlanarPoint>): number {
+  const points = [...places.values()]
+  let smallest = Infinity
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      smallest = Math.min(smallest, Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y))
+    }
+  }
+  return smallest
+}
+
+/** 직선으로 이었을 때 서로 만나는 간선 쌍. 끝점을 공유하는 쌍은 뺀다. */
+function straightCrossings(places: Map<string, PlanarPoint>, edges: readonly PlanarEdge[]): number {
+  const side = (o: PlanarPoint, a: PlanarPoint, b: PlanarPoint) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+
+  let count = 0
+  for (let i = 0; i < edges.length; i++) {
+    for (let j = i + 1; j < edges.length; j++) {
+      const p = edges[i]
+      const q = edges[j]
+      if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+      const p1 = places.get(p.a)!
+      const p2 = places.get(p.b)!
+      const p3 = places.get(q.a)!
+      const p4 = places.get(q.b)!
+      const d1 = side(p3, p4, p1)
+      const d2 = side(p3, p4, p2)
+      const d3 = side(p1, p2, p3)
+      const d4 = side(p1, p2, p4)
+      if (d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0) count++
+    }
+  }
+  return count
+}
+
+/**
+ * 평면으로 만들려면 간선을 최소 몇 개 빼야 하는가. `max`까지 못 찾으면 `null`.
+ *
+ * 두 가지를 말해 준다. 하나는 3단계의 방법 — 그만큼 빼고 임베딩한 뒤 뺀 것을 도로
+ * 그리면 교차가 그 근처로 떨어진다. 다른 하나는 더 중요한데, 이 수가 그 사건에서
+ * **어떻게 그려도 피할 수 없는 교차의 하한**이다. 지금 나오는 교차가 이 수와 비슷하면
+ * 배치는 이미 할 만큼 한 것이고, 한참 크면 배치가 못 편 것이다.
+ *
+ * 크기 순으로 늘려 가며 부분집합을 전수 탐색한다. 사건 하나가 27간선을 넘지
+ * 않으므로 셋까지는 3천 가지도 안 되고, 근사로 답할 이유가 없다. `null`을 0과
+ * 섞으면 "뺄 게 없다"와 "얼마나 뺄지 모른다"가 같아지므로 반드시 갈라 준다.
+ */
+export function skewness(
+  nodes: readonly string[],
+  edges: readonly PlanarEdge[],
+  max: number,
+): number | null {
+  return minimumDropSet(nodes, dedupe(edges), max)?.length ?? null
+}
+
+export function isPlanar(nodes: readonly string[], edges: readonly PlanarEdge[]): boolean {
+  const { adj, edgeCount } = adjacency(nodes, edges)
+  const order = adj.size
+
+  // 오일러 상한. 필요조건일 뿐이라 통과해도 아무것도 증명하지 못하지만, 걸리면
+  // 확실하므로 K5 같은 것을 여기서 싸게 떨군다.
+  if (order > 2 && edgeCount > 3 * order - 6) return false
+  if (edgeCount === 0) return true
+
+  // --- 방향 주기 -----------------------------------------------------------
+  //
+  // 간선을 id로 다룬다. from/to와 나란한 배열들이 그 간선의 상태다.
+  const from: string[] = []
+  const to: string[] = []
+  const lowpt: number[] = []
+  const lowpt2: number[] = []
+  const nesting: number[] = []
+  const ref: number[] = []
+  const side: number[] = []
+
+  const height = new Map<string, number>()
+  const parentEdge = new Map<string, number>()
+  const outgoing = new Map<string, number[]>()
+  for (const node of adj.keys()) outgoing.set(node, [])
+
+  const oriented = new Set<string>()
+  const pairKey = (u: string, v: string) => (u < v ? `${u}\u0000${v}` : `${v}\u0000${u}`)
+
+  const addEdge = (u: string, v: string): number => {
+    const id = from.length
+    from.push(u)
+    to.push(v)
+    lowpt.push(0)
+    lowpt2.push(0)
+    nesting.push(0)
+    ref.push(NONE)
+    side.push(1)
+    outgoing.get(u)!.push(id)
+    return id
+  }
+
+  const orient = (v: string): void => {
+    const parent = parentEdge.get(v) ?? NONE
+    for (const w of adj.get(v)!) {
+      const key = pairKey(v, w)
+      if (oriented.has(key)) continue
+      oriented.add(key)
+
+      const vw = addEdge(v, w)
+      lowpt[vw] = height.get(v)!
+      lowpt2[vw] = height.get(v)!
+
+      if (!height.has(w)) {
+        // 나무 간선. 자식을 먼저 다 돌고 와야 lowpoint가 채워진다.
+        parentEdge.set(w, vw)
+        height.set(w, height.get(v)! + 1)
+        orient(w)
+      } else {
+        // 되돌아가는 간선. 돌아가는 깊이가 곧 lowpoint다.
+        lowpt[vw] = height.get(w)!
+      }
+
+      // 중첩 깊이. 홀수를 더해 현(chord)을 나무 간선보다 바깥에 놓는다 — 이
+      // 순서가 두 번째 DFS에서 구간이 겹치지 않게 만드는 근거다.
+      nesting[vw] = 2 * lowpt[vw]
+      if (lowpt2[vw] < height.get(v)!) nesting[vw] += 1
+
+      if (parent !== NONE) {
+        if (lowpt[vw] < lowpt[parent]) {
+          lowpt2[parent] = Math.min(lowpt[parent], lowpt2[vw])
+          lowpt[parent] = lowpt[vw]
+        } else if (lowpt[vw] > lowpt[parent]) {
+          lowpt2[parent] = Math.min(lowpt2[parent], lowpt[vw])
+        } else {
+          lowpt2[parent] = Math.min(lowpt2[parent], lowpt2[vw])
+        }
+      }
+    }
+  }
+
+  // 뿌리 순서를 입력 순서로 못박아 결과가 결정적이게 한다.
+  const roots: string[] = []
+  for (const node of adj.keys()) {
+    if (height.has(node)) continue
+    height.set(node, 0)
+    roots.push(node)
+    orient(node)
+  }
+
+  // --- 판정 ----------------------------------------------------------------
+  const ordered = new Map<string, number[]>()
+  for (const [node, ids] of outgoing) {
+    ordered.set(node, [...ids].sort((x, y) => nesting[x] - nesting[y] || x - y))
+  }
+
+  const stack: Pair[] = []
+  const stackBottom = new Map<number, Pair | null>()
+  const lowptEdge: number[] = new Array(from.length).fill(NONE)
+  const top = (): Pair | null => (stack.length === 0 ? null : stack[stack.length - 1])
+
+  const conflicts = (interval: Interval, b: number): boolean =>
+    !isEmpty(interval) && lowpt[interval.high] > lowpt[b]
+
+  const lowestOf = (pair: Pair): number => {
+    if (isEmpty(pair.left)) return lowpt[pair.right.low]
+    if (isEmpty(pair.right)) return lowpt[pair.left.low]
+    return Math.min(lowpt[pair.left.low], lowpt[pair.right.low])
+  }
+
+  /** e_i가 데려온 되돌아오는 간선들을 지금까지의 제약과 합친다. */
+  const addConstraints = (ei: number, parent: number): boolean => {
+    const merged: Pair = { left: emptyInterval(), right: emptyInterval() }
+
+    // e_i의 되돌아오는 간선들을 한쪽(오른쪽)으로 모은다.
+    for (;;) {
+      const popped = stack.pop()!
+      if (!isEmpty(popped.left)) swapSides(popped)
+      if (!isEmpty(popped.left)) return false
+      if (lowpt[popped.right.low] > lowpt[parent]) {
+        if (isEmpty(merged.right)) {
+          merged.right = { low: popped.right.low, high: popped.right.high }
+        } else {
+          ref[merged.right.low] = popped.right.high
+        }
+        merged.right.low = popped.right.low
+      } else {
+        ref[popped.right.low] = lowptEdge[parent]
+      }
+      if (top() === (stackBottom.get(ei) ?? null)) break
+    }
+
+    // e_1..e_{i−1} 쪽에서 e_i와 부딪히는 것들을 반대쪽으로 모은다. 양쪽 다
+    // 부딪히면 놓을 자리가 없다 — 그 순간이 평면이 아닌 순간이다.
+    while (
+      stack.length > 0 &&
+      (conflicts(top()!.left, ei) || conflicts(top()!.right, ei))
+    ) {
+      const popped = stack.pop()!
+      if (conflicts(popped.right, ei)) swapSides(popped)
+      if (conflicts(popped.right, ei)) return false
+
+      ref[merged.right.low] = popped.right.high
+      if (popped.right.low !== NONE) merged.right.low = popped.right.low
+
+      if (isEmpty(merged.left)) {
+        merged.left = { low: popped.left.low, high: popped.left.high }
+      } else {
+        ref[merged.left.low] = popped.left.high
+      }
+      merged.left.low = popped.left.low
+    }
+
+    if (!(isEmpty(merged.left) && isEmpty(merged.right))) stack.push(merged)
+    return true
+  }
+
+  /** v의 부모 간선을 다 쓴 뒤, v에서 끝나는 되돌아오는 간선들을 걷어낸다. */
+  const removeBackEdges = (parent: number): void => {
+    const u = from[parent]
+
+    while (stack.length > 0 && lowestOf(top()!) === height.get(u)!) {
+      const popped = stack.pop()!
+      if (popped.left.low !== NONE) side[popped.left.low] = -1
+    }
+
+    if (stack.length > 0) {
+      const popped = stack.pop()!
+
+      while (popped.left.high !== NONE && to[popped.left.high] === u) {
+        popped.left.high = ref[popped.left.high]
+      }
+      if (popped.left.high === NONE && popped.left.low !== NONE) {
+        ref[popped.left.low] = popped.right.low
+        side[popped.left.low] = -1
+        popped.left.low = NONE
+      }
+
+      while (popped.right.high !== NONE && to[popped.right.high] === u) {
+        popped.right.high = ref[popped.right.high]
+      }
+      if (popped.right.high === NONE && popped.right.low !== NONE) {
+        ref[popped.right.low] = popped.left.low
+        side[popped.right.low] = -1
+        popped.right.low = NONE
+      }
+
+      stack.push(popped)
+    }
+
+    if (lowpt[parent] < height.get(u)! && stack.length > 0) {
+      const highest = top()!
+      const hl = highest.left.high
+      const hr = highest.right.high
+      ref[parent] = hl !== NONE && (hr === NONE || lowpt[hl] > lowpt[hr]) ? hl : hr
+    }
+  }
+
+  const test = (v: string): boolean => {
+    const parent = parentEdge.get(v) ?? NONE
+    const adjacent = ordered.get(v)!
+
+    for (const ei of adjacent) {
+      const w = to[ei]
+      stackBottom.set(ei, top())
+
+      if (ei === (parentEdge.get(w) ?? NONE)) {
+        if (!test(w)) return false
+      } else {
+        lowptEdge[ei] = ei
+        stack.push({ left: emptyInterval(), right: { low: ei, high: ei } })
+      }
+
+      if (lowpt[ei] < height.get(v)!) {
+        if (ei === adjacent[0]) {
+          // 첫 간선이 데려온 것은 부모가 그대로 물려받는다.
+          lowptEdge[parent] = lowptEdge[ei]
+        } else if (!addConstraints(ei, parent)) {
+          return false
+        }
+      }
+    }
+
+    if (parent !== NONE) removeBackEdges(parent)
+    return true
+  }
+
+  for (const root of roots) {
+    if (!test(root)) return false
+  }
+  return true
+}
