@@ -266,6 +266,28 @@ time and should not be rediscovered:
   valid under the circumstance it was taken in, and adding a clause that admits
   a *new kind* of word invalidates every threshold that was tuned when that kind
   could not appear.
+- **`demote_head_pos` moved 0.70 → 0.60 for the same reason** (migration
+  `0020`), which is the third threshold the rescue invalidated and the point at
+  which the pattern became the finding rather than any one number. Re-swept:
+  53.30 / 54.12 / 54.10 / **54.18** / 53.02 / 51.40 at .50 / .55 / .60 / .65 /
+  .70 / off. 0.55–0.65 are one plateau, flat to within 0.08 and all about a
+  point of F1 and two of precision above 0.70.
+
+  **0.50 scores well and is rejected outright**, because it sinks 폭염 off
+  2026-07-31's screen — the cliff round six had already recorded, still exactly
+  where it was. What moved was the plateau, down onto the edge of it. 0.60 is
+  taken over 0.65's marginally better F1 because it is mid-plateau and a full
+  0.10 clear of that cliff: rule 5 is not a tie-break to be spent, and a
+  threshold one step from dropping the day's biggest story is not worth 0.08.
+
+  No category measurement accompanies it and that is correct rather than
+  missing. A demotion reorders and removes nothing, so it can only act where the
+  render cap binds, and a tab draws at most 46 against a cap of 70.
+
+**Where the three changes leave the sieve, measured in one run**: day-wide mean
+F1 **49.48 → 54.10** and mean precision **71.07 → 77.85**; the 24 category cells
+**55.07 → 67.02**. All of it from the analyser being in-process — one new
+signal and two thresholds it invalidated.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
