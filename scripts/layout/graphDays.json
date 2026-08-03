@@ -38,10 +38,28 @@
         "category_slug": "economy"
       },
       {
+        "word": "경남",
+        "count": 19,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "이란",
+        "count": 19,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "무인기",
         "count": 16,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "애플",
+        "count": 16,
+        "faded": false,
+        "category_slug": "it"
       },
       {
         "word": "알뜰폰",
@@ -56,10 +74,10 @@
         "category_slug": "economy"
       },
       {
-        "word": "영업익",
-        "count": 14,
+        "word": "미국",
+        "count": 12,
         "faded": false,
-        "category_slug": "economy"
+        "category_slug": "world"
       },
       {
         "word": "메모리",
@@ -74,16 +92,16 @@
         "category_slug": "politics"
       },
       {
-        "word": "성과급",
-        "count": 10,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "특별감찰관",
         "count": 10,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "삼성",
+        "count": 9,
+        "faded": false,
+        "category_slug": "it"
       },
       {
         "word": "아마존",
@@ -92,10 +110,22 @@
         "category_slug": "it"
       },
       {
+        "word": "중국",
+        "count": 9,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "하마스",
         "count": 9,
         "faded": false,
         "category_slug": "world"
+      },
+      {
+        "word": "구글",
+        "count": 8,
+        "faded": false,
+        "category_slug": "it"
       },
       {
         "word": "김의겸",
@@ -110,16 +140,16 @@
         "category_slug": "politics"
       },
       {
-        "word": "레버리지",
-        "count": 8,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "보완수사권",
         "count": 8,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "서울",
+        "count": 8,
+        "faded": false,
+        "category_slug": "culture"
       },
       {
         "word": "정몽규",
@@ -129,12 +159,6 @@
       },
       {
         "word": "정청래",
-        "count": 8,
-        "faded": false,
-        "category_slug": "politics"
-      },
-      {
-        "word": "최길수",
         "count": 8,
         "faded": false,
         "category_slug": "politics"
@@ -162,12 +186,6 @@
         "count": 7,
         "faded": false,
         "category_slug": "world"
-      },
-      {
-        "word": "상반기",
-        "count": 7,
-        "faded": false,
-        "category_slug": "economy"
       },
       {
         "word": "스페인",
@@ -224,12 +242,6 @@
         "category_slug": "economy"
       },
       {
-        "word": "역대급",
-        "count": 6,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "오픈AI",
         "count": 6,
         "faded": false,
@@ -260,16 +272,10 @@
         "category_slug": "politics"
       },
       {
-        "word": "6인방",
+        "word": "돌핀",
         "count": 5,
         "faded": false,
-        "category_slug": "politics"
-      },
-      {
-        "word": "경제라인",
-        "count": 5,
-        "faded": false,
-        "category_slug": "politics"
+        "category_slug": "culture"
       },
       {
         "word": "미사일",
@@ -278,10 +284,10 @@
         "category_slug": "world"
       },
       {
-        "word": "본계약",
+        "word": "북한",
         "count": 5,
         "faded": false,
-        "category_slug": "economy"
+        "category_slug": "politics"
       },
       {
         "word": "셀트리온",
@@ -314,22 +320,10 @@
         "category_slug": "economy"
       },
       {
-        "word": "춘천시의원",
-        "count": 5,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "패트리엇",
         "count": 5,
         "faded": false,
         "category_slug": "world"
-      },
-      {
-        "word": "하이닉스",
-        "count": 5,
-        "faded": false,
-        "category_slug": "economy"
       },
       {
         "word": "한화에어로",
@@ -344,10 +338,10 @@
         "category_slug": "culture"
       },
       {
-        "word": "회삿돈",
+        "word": "홍해",
         "count": 5,
         "faded": false,
-        "category_slug": "society"
+        "category_slug": "world"
       },
       {
         "word": "李대통령",
@@ -356,28 +350,22 @@
         "category_slug": "politics"
       },
       {
-        "word": "3분기",
-        "count": 4,
-        "faded": false,
-        "category_slug": "it"
-      },
-      {
         "word": "LG화학",
         "count": 4,
         "faded": false,
         "category_slug": "economy"
       },
       {
+        "word": "강진",
+        "count": 4,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "갤럭시",
         "count": 4,
         "faded": false,
         "category_slug": "it"
-      },
-      {
-        "word": "모로코",
-        "count": 4,
-        "faded": false,
-        "category_slug": "world"
       },
       {
         "word": "박지원",
@@ -392,22 +380,10 @@
         "category_slug": "economy"
       },
       {
-        "word": "사망자",
-        "count": 4,
-        "faded": false,
-        "category_slug": "world"
-      },
-      {
         "word": "세우타",
         "count": 4,
         "faded": false,
         "category_slug": "world"
-      },
-      {
-        "word": "안심옵션",
-        "count": 4,
-        "faded": false,
-        "category_slug": "it"
       },
       {
         "word": "에어컨",
@@ -420,15 +396,33 @@
         "count": 4,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "유시민",
+        "count": 4,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "윤용근",
+        "count": 4,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "이재명",
+        "count": 4,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "장윤기",
+        "count": 4,
+        "faded": false,
+        "category_slug": "society"
       }
     ],
     "edges": [
-      {
-        "a": "본계약",
-        "b": "한화오션",
-        "cooc": 5,
-        "npmi": 0.965
-      },
       {
         "a": "인터넷은행",
         "b": "카카오뱅크",
@@ -442,10 +436,10 @@
         "npmi": 0.919
       },
       {
-        "a": "6인방",
-        "b": "경제라인",
+        "a": "윤용근",
+        "b": "정몽규",
         "cooc": 4,
-        "npmi": 0.918
+        "npmi": 0.872
       },
       {
         "a": "우크라",
@@ -454,32 +448,20 @@
         "npmi": 0.855
       },
       {
-        "a": "최길수",
-        "b": "특별감찰관",
-        "cooc": 6,
-        "npmi": 0.841
-      },
-      {
         "a": "이스라엘",
         "b": "하마스",
         "cooc": 4,
         "npmi": 0.809
       },
       {
-        "a": "박지원",
-        "b": "한동훈",
-        "cooc": 3,
-        "npmi": 0.801
-      },
-      {
-        "a": "모로코",
-        "b": "스페인",
-        "cooc": 3,
-        "npmi": 0.801
-      },
-      {
         "a": "세우타",
         "b": "스페인",
+        "cooc": 3,
+        "npmi": 0.801
+      },
+      {
+        "a": "박지원",
+        "b": "한동훈",
         "cooc": 3,
         "npmi": 0.801
       },
@@ -490,16 +472,28 @@
         "npmi": 0.789
       },
       {
-        "a": "모로코",
-        "b": "세우타",
-        "cooc": 2,
-        "npmi": 0.773
+        "a": "사우디",
+        "b": "홍해",
+        "cooc": 3,
+        "npmi": 0.762
+      },
+      {
+        "a": "메모리",
+        "b": "애플",
+        "cooc": 7,
+        "npmi": 0.756
       },
       {
         "a": "김의겸",
         "b": "노무현",
         "cooc": 4,
         "npmi": 0.744
+      },
+      {
+        "a": "돌핀",
+        "b": "한반도",
+        "cooc": 3,
+        "npmi": 0.738
       },
       {
         "a": "김민석",
@@ -526,6 +520,12 @@
         "npmi": 0.702
       },
       {
+        "a": "경남",
+        "b": "양산",
+        "cooc": 12,
+        "npmi": 0.689
+      },
+      {
         "a": "트럼프",
         "b": "패트리엇",
         "cooc": 5,
@@ -536,12 +536,6 @@
         "b": "李대통령",
         "cooc": 2,
         "npmi": 0.67
-      },
-      {
-        "a": "안심옵션",
-        "b": "알뜰폰",
-        "cooc": 3,
-        "npmi": 0.667
       },
       {
         "a": "민주당",
@@ -568,18 +562,6 @@
         "npmi": 0.645
       },
       {
-        "a": "영업익",
-        "b": "한화에어로",
-        "cooc": 3,
-        "npmi": 0.64
-      },
-      {
-        "a": "민주당",
-        "b": "최길수",
-        "cooc": 3,
-        "npmi": 0.617
-      },
-      {
         "a": "불기둥",
         "b": "코스피",
         "cooc": 3,
@@ -598,12 +580,6 @@
         "npmi": 0.569
       },
       {
-        "a": "LG화학",
-        "b": "영업익",
-        "cooc": 2,
-        "npmi": 0.568
-      },
-      {
         "a": "양산",
         "b": "폭염",
         "cooc": 13,
@@ -616,15 +592,21 @@
         "npmi": 0.557
       },
       {
+        "a": "미국",
+        "b": "한화에어로",
+        "cooc": 2,
+        "npmi": 0.557
+      },
+      {
         "a": "우크라",
         "b": "트럼프",
         "cooc": 4,
         "npmi": 0.551
       },
       {
-        "a": "SK하이닉스",
-        "b": "성과급",
-        "cooc": 5,
+        "a": "중국",
+        "b": "테슬라",
+        "cooc": 2,
         "npmi": 0.549
       },
       {
@@ -646,6 +628,12 @@
         "npmi": 0.504
       },
       {
+        "a": "이란",
+        "b": "홍해",
+        "cooc": 2,
+        "npmi": 0.481
+      },
+      {
         "a": "김민석",
         "b": "정청래",
         "cooc": 3,
@@ -658,9 +646,9 @@
         "npmi": 0.467
       },
       {
-        "a": "코스피",
-        "b": "하이닉스",
-        "cooc": 2,
+        "a": "돌핀",
+        "b": "폭염",
+        "cooc": 3,
         "npmi": 0.465
       },
       {
@@ -670,22 +658,34 @@
         "npmi": 0.436
       },
       {
-        "a": "역대급",
-        "b": "코스피",
+        "a": "사우디",
+        "b": "이란",
         "cooc": 2,
-        "npmi": 0.435
+        "npmi": 0.426
       },
       {
-        "a": "사망자",
-        "b": "폭염",
+        "a": "아마존",
+        "b": "애플",
         "cooc": 2,
-        "npmi": 0.404
+        "npmi": 0.413
       },
       {
         "a": "사우디",
         "b": "트럼프",
         "cooc": 2,
         "npmi": 0.375
+      },
+      {
+        "a": "경남",
+        "b": "폭염",
+        "cooc": 5,
+        "npmi": 0.352
+      },
+      {
+        "a": "미국",
+        "b": "이란",
+        "cooc": 2,
+        "npmi": 0.338
       }
     ]
   },
@@ -696,6 +696,12 @@
         "count": 42,
         "faded": false,
         "category_slug": "culture"
+      },
+      {
+        "word": "이란",
+        "count": 40,
+        "faded": false,
+        "category_slug": "world"
       },
       {
         "word": "코스피",
@@ -726,6 +732,12 @@
         "count": 21,
         "faded": false,
         "category_slug": "economy"
+      },
+      {
+        "word": "애플",
+        "count": 20,
+        "faded": false,
+        "category_slug": "it"
       },
       {
         "word": "형소법",
@@ -764,10 +776,10 @@
         "category_slug": "world"
       },
       {
-        "word": "레버리지",
+        "word": "서울",
         "count": 14,
         "faded": false,
-        "category_slug": "economy"
+        "category_slug": "culture"
       },
       {
         "word": "아파트",
@@ -786,6 +798,12 @@
         "count": 12,
         "faded": false,
         "category_slug": "economy"
+      },
+      {
+        "word": "미국",
+        "count": 12,
+        "faded": false,
+        "category_slug": "world"
       },
       {
         "word": "보완수사권",
@@ -812,6 +830,12 @@
         "category_slug": "politics"
       },
       {
+        "word": "일본",
+        "count": 11,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
         "word": "최태원",
         "count": 11,
         "faded": false,
@@ -820,6 +844,12 @@
       {
         "word": "하마스",
         "count": 11,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
+        "word": "중국",
+        "count": 10,
         "faded": false,
         "category_slug": "world"
       },
@@ -842,16 +872,28 @@
         "category_slug": "politics"
       },
       {
+        "word": "삼성",
+        "count": 9,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
         "word": "에너지시설",
         "count": 9,
         "faded": false,
         "category_slug": "world"
       },
       {
-        "word": "역대급",
-        "count": 9,
+        "word": "강남",
+        "count": 8,
         "faded": false,
-        "category_slug": "economy"
+        "category_slug": "society"
+      },
+      {
+        "word": "경남",
+        "count": 8,
+        "faded": false,
+        "category_slug": "culture"
       },
       {
         "word": "까마귀",
@@ -870,12 +912,6 @@
         "count": 8,
         "faded": false,
         "category_slug": "world"
-      },
-      {
-        "word": "사망자",
-        "count": 8,
-        "faded": false,
-        "category_slug": "society"
       },
       {
         "word": "삼성전자",
@@ -902,6 +938,12 @@
         "category_slug": "politics"
       },
       {
+        "word": "두산",
+        "count": 7,
+        "faded": false,
+        "category_slug": "economy"
+      },
+      {
         "word": "메모리",
         "count": 7,
         "faded": false,
@@ -914,34 +956,16 @@
         "category_slug": "politics"
       },
       {
-        "word": "수사권",
-        "count": 7,
+        "word": "강진",
+        "count": 6,
         "faded": false,
-        "category_slug": "politics"
+        "category_slug": "world"
       },
       {
-        "word": "열대야",
-        "count": 7,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
-        "word": "유튜버",
-        "count": 7,
+        "word": "경산",
+        "count": 6,
         "faded": false,
         "category_slug": "society"
-      },
-      {
-        "word": "SK하닉",
-        "count": 6,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
-        "word": "반대표",
-        "count": 6,
-        "faded": false,
-        "category_slug": "politics"
       },
       {
         "word": "아르헨",
@@ -956,12 +980,6 @@
         "category_slug": "world"
       },
       {
-        "word": "외국인",
-        "count": 6,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "윤한홍",
         "count": 6,
         "faded": false,
@@ -974,12 +992,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "중국인",
-        "count": 6,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "SK실트론",
         "count": 5,
         "faded": false,
@@ -990,12 +1002,6 @@
         "count": 5,
         "faded": false,
         "category_slug": "politics"
-      },
-      {
-        "word": "경남권",
-        "count": 5,
-        "faded": false,
-        "category_slug": "culture"
       },
       {
         "word": "공소기각",
@@ -1016,19 +1022,7 @@
         "category_slug": "politics"
       },
       {
-        "word": "나스닥",
-        "count": 5,
-        "faded": false,
-        "category_slug": "world"
-      },
-      {
-        "word": "놀이터",
-        "count": 5,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
-        "word": "뉴노멀",
+        "word": "돌핀",
         "count": 5,
         "faded": false,
         "category_slug": "culture"
@@ -1046,28 +1040,16 @@
         "category_slug": "politics"
       },
       {
-        "word": "승부수",
-        "count": 5,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "엔비디아",
         "count": 5,
         "faded": false,
         "category_slug": "world"
       },
       {
-        "word": "영업익",
+        "word": "충청",
         "count": 5,
         "faded": false,
-        "category_slug": "it"
-      },
-      {
-        "word": "최고기온",
-        "count": 5,
-        "faded": false,
-        "category_slug": "culture"
+        "category_slug": "politics"
       },
       {
         "word": "휴가철",
@@ -1094,12 +1076,6 @@
         "category_slug": "world"
       },
       {
-        "word": "관광객",
-        "count": 4,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "구자현",
         "count": 4,
         "faded": false,
@@ -1110,9 +1086,39 @@
         "count": 4,
         "faded": false,
         "category_slug": "society"
+      },
+      {
+        "word": "내일날씨",
+        "count": 4,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "노태문",
+        "count": 4,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "뉴욕증시",
+        "count": 4,
+        "faded": false,
+        "category_slug": "economy"
+      },
+      {
+        "word": "메가특구",
+        "count": 4,
+        "faded": false,
+        "category_slug": "politics"
       }
     ],
     "edges": [
+      {
+        "a": "SK실트론",
+        "b": "두산",
+        "cooc": 5,
+        "npmi": 0.938
+      },
       {
         "a": "무장해제",
         "b": "하마스",
@@ -1126,10 +1132,16 @@
         "npmi": 0.904
       },
       {
-        "a": "곽상언",
-        "b": "반대표",
-        "cooc": 5,
-        "npmi": 0.858
+        "a": "강진",
+        "b": "구마모토",
+        "cooc": 4,
+        "npmi": 0.889
+      },
+      {
+        "a": "노태문",
+        "b": "삼성전자",
+        "cooc": 4,
+        "npmi": 0.877
       },
       {
         "a": "김민석",
@@ -1138,22 +1150,16 @@
         "npmi": 0.84
       },
       {
-        "a": "나스닥",
-        "b": "아마존",
-        "cooc": 5,
-        "npmi": 0.839
-      },
-      {
         "a": "유조선",
         "b": "호르무즈",
         "cooc": 13,
         "npmi": 0.826
       },
       {
-        "a": "37구",
-        "b": "유튜버",
-        "cooc": 3,
-        "npmi": 0.809
+        "a": "유조선",
+        "b": "이란",
+        "cooc": 21,
+        "npmi": 0.816
       },
       {
         "a": "개정안",
@@ -1162,10 +1168,40 @@
         "npmi": 0.802
       },
       {
+        "a": "경산",
+        "b": "아파트",
+        "cooc": 5,
+        "npmi": 0.777
+      },
+      {
         "a": "공중호위",
         "b": "호르무즈",
         "cooc": 4,
         "npmi": 0.755
+      },
+      {
+        "a": "경남",
+        "b": "양산",
+        "cooc": 6,
+        "npmi": 0.747
+      },
+      {
+        "a": "37구",
+        "b": "일본",
+        "cooc": 3,
+        "npmi": 0.733
+      },
+      {
+        "a": "두산",
+        "b": "반도체",
+        "cooc": 6,
+        "npmi": 0.732
+      },
+      {
+        "a": "뉴욕증시",
+        "b": "아마존",
+        "cooc": 3,
+        "npmi": 0.718
       },
       {
         "a": "김건희",
@@ -1186,6 +1222,12 @@
         "npmi": 0.698
       },
       {
+        "a": "김민석",
+        "b": "충청",
+        "cooc": 3,
+        "npmi": 0.695
+      },
+      {
         "a": "공중호위",
         "b": "유조선",
         "cooc": 4,
@@ -1196,6 +1238,18 @@
         "b": "이재명",
         "cooc": 2,
         "npmi": 0.683
+      },
+      {
+        "a": "애플",
+        "b": "엔비디아",
+        "cooc": 4,
+        "npmi": 0.676
+      },
+      {
+        "a": "이란",
+        "b": "호르무즈",
+        "cooc": 12,
+        "npmi": 0.673
       },
       {
         "a": "곽상언",
@@ -1228,16 +1282,16 @@
         "npmi": 0.659
       },
       {
-        "a": "박지원",
-        "b": "수사권",
-        "cooc": 2,
-        "npmi": 0.658
+        "a": "강남",
+        "b": "아파트",
+        "cooc": 4,
+        "npmi": 0.656
       },
       {
-        "a": "놀이터",
-        "b": "아파트",
+        "a": "미국",
+        "b": "에너지",
         "cooc": 3,
-        "npmi": 0.655
+        "npmi": 0.65
       },
       {
         "a": "구자현",
@@ -1252,21 +1306,15 @@
         "npmi": 0.639
       },
       {
-        "a": "구마모토",
-        "b": "사망자",
-        "cooc": 2,
-        "npmi": 0.637
+        "a": "정청래",
+        "b": "충청",
+        "cooc": 3,
+        "npmi": 0.632
       },
       {
         "a": "개정안",
         "b": "곽상언",
         "cooc": 3,
-        "npmi": 0.63
-      },
-      {
-        "a": "노무현",
-        "b": "반대표",
-        "cooc": 2,
         "npmi": 0.63
       },
       {
@@ -1276,10 +1324,16 @@
         "npmi": 0.609
       },
       {
-        "a": "개정안",
-        "b": "반대표",
-        "cooc": 2,
-        "npmi": 0.59
+        "a": "중국",
+        "b": "테슬라",
+        "cooc": 3,
+        "npmi": 0.595
+      },
+      {
+        "a": "공중호위",
+        "b": "이란",
+        "cooc": 4,
+        "npmi": 0.593
       },
       {
         "a": "김민석",
@@ -1294,10 +1348,10 @@
         "npmi": 0.584
       },
       {
-        "a": "SK하이닉스",
-        "b": "역대급",
-        "cooc": 3,
-        "npmi": 0.582
+        "a": "내일날씨",
+        "b": "폭염",
+        "cooc": 4,
+        "npmi": 0.584
       },
       {
         "a": "곽상언",
@@ -1306,16 +1360,22 @@
         "npmi": 0.581
       },
       {
-        "a": "사망자",
-        "b": "아파트",
-        "cooc": 3,
-        "npmi": 0.576
+        "a": "미국",
+        "b": "이스라엘",
+        "cooc": 4,
+        "npmi": 0.561
       },
       {
         "a": "무장해제",
         "b": "이스라엘",
         "cooc": 3,
         "npmi": 0.553
+      },
+      {
+        "a": "메모리",
+        "b": "애플",
+        "cooc": 3,
+        "npmi": 0.538
       },
       {
         "a": "에너지시설",
@@ -1330,28 +1390,34 @@
         "npmi": 0.53
       },
       {
+        "a": "머스크",
+        "b": "중국",
+        "cooc": 2,
+        "npmi": 0.528
+      },
+      {
         "a": "곽상언",
         "b": "민주당",
         "cooc": 3,
         "npmi": 0.523
       },
       {
-        "a": "양산",
-        "b": "최고기온",
+        "a": "민주당",
+        "b": "충청",
         "cooc": 2,
         "npmi": 0.519
+      },
+      {
+        "a": "에너지시설",
+        "b": "이란",
+        "cooc": 5,
+        "npmi": 0.509
       },
       {
         "a": "에너지",
         "b": "이스라엘",
         "cooc": 2,
         "npmi": 0.499
-      },
-      {
-        "a": "민주당",
-        "b": "반대표",
-        "cooc": 2,
-        "npmi": 0.49
       },
       {
         "a": "곽상언",
@@ -1366,38 +1432,32 @@
         "npmi": 0.481
       },
       {
-        "a": "반대표",
-        "b": "형소법",
+        "a": "미국",
+        "b": "에너지시설",
         "cooc": 2,
-        "npmi": 0.472
+        "npmi": 0.481
       },
       {
-        "a": "사망자",
-        "b": "폭염",
-        "cooc": 4,
-        "npmi": 0.462
+        "a": "미국",
+        "b": "이란",
+        "cooc": 5,
+        "npmi": 0.456
       },
       {
-        "a": "역대급",
-        "b": "코스피",
+        "a": "아마존",
+        "b": "애플",
         "cooc": 3,
-        "npmi": 0.428
+        "npmi": 0.448
       },
       {
-        "a": "양산",
-        "b": "역대급",
-        "cooc": 2,
-        "npmi": 0.426
+        "a": "이란",
+        "b": "이스라엘",
+        "cooc": 5,
+        "npmi": 0.403
       },
       {
-        "a": "수사권",
-        "b": "한동훈",
-        "cooc": 2,
-        "npmi": 0.425
-      },
-      {
-        "a": "외국인",
-        "b": "코스피",
+        "a": "삼성",
+        "b": "애플",
         "cooc": 2,
         "npmi": 0.4
       },
@@ -1406,6 +1466,18 @@
         "b": "형소법",
         "cooc": 3,
         "npmi": 0.398
+      },
+      {
+        "a": "경남",
+        "b": "폭염",
+        "cooc": 3,
+        "npmi": 0.391
+      },
+      {
+        "a": "서울",
+        "b": "아파트",
+        "cooc": 2,
+        "npmi": 0.387
       },
       {
         "a": "양산",
@@ -1432,13 +1504,7 @@
         "npmi": 0.376
       },
       {
-        "a": "경남권",
-        "b": "폭염",
-        "cooc": 2,
-        "npmi": 0.376
-      },
-      {
-        "a": "뉴노멀",
+        "a": "돌핀",
         "b": "폭염",
         "cooc": 2,
         "npmi": 0.376
@@ -1450,22 +1516,46 @@
         "npmi": 0.373
       },
       {
+        "a": "서울",
+        "b": "폭염",
+        "cooc": 4,
+        "npmi": 0.363
+      },
+      {
+        "a": "서울",
+        "b": "양산",
+        "cooc": 2,
+        "npmi": 0.356
+      },
+      {
+        "a": "에너지",
+        "b": "이란",
+        "cooc": 2,
+        "npmi": 0.355
+      },
+      {
+        "a": "강진",
+        "b": "폭염",
+        "cooc": 2,
+        "npmi": 0.347
+      },
+      {
         "a": "에너지시설",
         "b": "트럼프",
         "cooc": 2,
         "npmi": 0.337
       },
       {
+        "a": "이란",
+        "b": "트럼프",
+        "cooc": 6,
+        "npmi": 0.332
+      },
+      {
         "a": "이스라엘",
         "b": "트럼프",
         "cooc": 3,
         "npmi": 0.331
-      },
-      {
-        "a": "열대야",
-        "b": "폭염",
-        "cooc": 2,
-        "npmi": 0.323
       }
     ]
   },
@@ -1500,6 +1590,12 @@
         "count": 16,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "이란",
+        "count": 15,
+        "faded": false,
+        "category_slug": "world"
       },
       {
         "word": "민주당",
@@ -1550,12 +1646,6 @@
         "category_slug": "economy"
       },
       {
-        "word": "레버리지",
-        "count": 9,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "송영길",
         "count": 9,
         "faded": false,
@@ -1568,16 +1658,40 @@
         "category_slug": "politics"
       },
       {
+        "word": "서울",
+        "count": 8,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
         "word": "아파트",
         "count": 8,
         "faded": false,
         "category_slug": "economy"
       },
       {
+        "word": "일베",
+        "count": 8,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "경남",
+        "count": 7,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
         "word": "순회경선",
         "count": 7,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "애플",
+        "count": 7,
+        "faded": false,
+        "category_slug": "it"
       },
       {
         "word": "열대야",
@@ -1640,12 +1754,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "최고위원",
-        "count": 6,
-        "faded": false,
-        "category_slug": "politics"
-      },
-      {
         "word": "충청권",
         "count": 6,
         "faded": false,
@@ -1658,13 +1766,19 @@
         "category_slug": "world"
       },
       {
-        "word": "국민의힘",
+        "word": "경산",
         "count": 5,
         "faded": false,
-        "category_slug": "politics"
+        "category_slug": "society"
       },
       {
-        "word": "당대표",
+        "word": "구글",
+        "count": 5,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "국민의힘",
         "count": 5,
         "faded": false,
         "category_slug": "politics"
@@ -1676,6 +1790,12 @@
         "category_slug": "it"
       },
       {
+        "word": "미국",
+        "count": 5,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "선관위",
         "count": 5,
         "faded": false,
@@ -1683,12 +1803,6 @@
       },
       {
         "word": "스페이스X",
-        "count": 5,
-        "faded": false,
-        "category_slug": "world"
-      },
-      {
-        "word": "우크라",
         "count": 5,
         "faded": false,
         "category_slug": "world"
@@ -1724,20 +1838,20 @@
         "category_slug": "world"
       },
       {
-        "word": "투표자",
-        "count": 5,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "한동훈",
         "count": 5,
         "faded": false,
         "category_slug": "politics"
       },
       {
-        "word": "美대사",
-        "count": 5,
+        "word": "강릉",
+        "count": 4,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "대전",
+        "count": 4,
         "faded": false,
         "category_slug": "politics"
       },
@@ -1748,34 +1862,10 @@
         "category_slug": "politics"
       },
       {
-        "word": "보완수사",
-        "count": 4,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
-        "word": "수도권",
-        "count": 4,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
-        "word": "수사권",
-        "count": 4,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "스마트폰",
         "count": 4,
         "faded": false,
         "category_slug": "it"
-      },
-      {
-        "word": "외국인",
-        "count": 4,
-        "faded": false,
-        "category_slug": "economy"
       },
       {
         "word": "이언주",
@@ -1784,38 +1874,20 @@
         "category_slug": "politics"
       },
       {
+        "word": "일본",
+        "count": 4,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "초열대야",
         "count": 4,
         "faded": false,
         "category_slug": "culture"
       },
       {
-        "word": "출하량",
-        "count": 4,
-        "faded": false,
-        "category_slug": "it"
-      },
-      {
         "word": "쿠웨이트",
         "count": 4,
-        "faded": false,
-        "category_slug": "world"
-      },
-      {
-        "word": "10조",
-        "count": 3,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
-        "word": "SK하닉",
-        "count": 3,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
-        "word": "가짜뉴스",
-        "count": 3,
         "faded": false,
         "category_slug": "world"
       },
@@ -1856,16 +1928,16 @@
         "category_slug": "world"
       },
       {
-        "word": "반대표",
+        "word": "부산",
         "count": 3,
         "faded": false,
-        "category_slug": "politics"
+        "category_slug": "culture"
       },
       {
-        "word": "사망자",
+        "word": "삼성",
         "count": 3,
         "faded": false,
-        "category_slug": "society"
+        "category_slug": "economy"
       },
       {
         "word": "손하트",
@@ -1890,6 +1962,24 @@
         "count": 3,
         "faded": false,
         "category_slug": "world"
+      },
+      {
+        "word": "에이전트",
+        "count": 3,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "연이틀",
+        "count": 3,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "온열질환자",
+        "count": 3,
+        "faded": false,
+        "category_slug": "society"
       }
     ],
     "edges": [
@@ -1912,22 +2002,10 @@
         "npmi": 0.906
       },
       {
-        "a": "손하트",
-        "b": "美대사",
-        "cooc": 3,
-        "npmi": 0.906
-      },
-      {
-        "a": "스마트폰",
-        "b": "출하량",
+        "a": "강릉",
+        "b": "초열대야",
         "cooc": 3,
         "npmi": 0.894
-      },
-      {
-        "a": "가짜뉴스",
-        "b": "머스크",
-        "cooc": 2,
-        "npmi": 0.861
       },
       {
         "a": "세우타",
@@ -1936,21 +2014,9 @@
         "npmi": 0.843
       },
       {
-        "a": "우크라",
-        "b": "키이우",
-        "cooc": 3,
-        "npmi": 0.812
-      },
-      {
         "a": "장동혁",
         "b": "한동훈",
         "cooc": 3,
-        "npmi": 0.812
-      },
-      {
-        "a": "반대표",
-        "b": "이언주",
-        "cooc": 2,
         "npmi": 0.812
       },
       {
@@ -1966,15 +2032,33 @@
         "npmi": 0.787
       },
       {
+        "a": "경남",
+        "b": "양산",
+        "cooc": 7,
+        "npmi": 0.783
+      },
+      {
+        "a": "문진석",
+        "b": "일베",
+        "cooc": 3,
+        "npmi": 0.767
+      },
+      {
+        "a": "에이전트",
+        "b": "오픈AI",
+        "cooc": 2,
+        "npmi": 0.743
+      },
+      {
+        "a": "일베",
+        "b": "최민희",
+        "cooc": 5,
+        "npmi": 0.727
+      },
+      {
         "a": "양산",
         "b": "최고기온",
         "cooc": 6,
-        "npmi": 0.725
-      },
-      {
-        "a": "메모리",
-        "b": "출하량",
-        "cooc": 2,
         "npmi": 0.725
       },
       {
@@ -1984,10 +2068,28 @@
         "npmi": 0.725
       },
       {
-        "a": "선관위",
-        "b": "투표자",
+        "a": "아이폰",
+        "b": "애플",
         "cooc": 2,
-        "npmi": 0.686
+        "npmi": 0.716
+      },
+      {
+        "a": "서울",
+        "b": "손하트",
+        "cooc": 2,
+        "npmi": 0.693
+      },
+      {
+        "a": "일베",
+        "b": "전당대회",
+        "cooc": 3,
+        "npmi": 0.692
+      },
+      {
+        "a": "경남",
+        "b": "최고기온",
+        "cooc": 3,
+        "npmi": 0.688
       },
       {
         "a": "유시민",
@@ -1996,16 +2098,16 @@
         "npmi": 0.678
       },
       {
-        "a": "반대표",
-        "b": "형소법",
-        "cooc": 2,
-        "npmi": 0.673
-      },
-      {
         "a": "송영길",
         "b": "정청래",
         "cooc": 9,
         "npmi": 0.668
+      },
+      {
+        "a": "이란",
+        "b": "쿠웨이트",
+        "cooc": 3,
+        "npmi": 0.651
       },
       {
         "a": "김민석",
@@ -2026,10 +2128,16 @@
         "npmi": 0.624
       },
       {
-        "a": "최고위원",
-        "b": "최민희",
-        "cooc": 3,
-        "npmi": 0.618
+        "a": "민주당",
+        "b": "일베",
+        "cooc": 4,
+        "npmi": 0.622
+      },
+      {
+        "a": "경산",
+        "b": "아파트",
+        "cooc": 2,
+        "npmi": 0.606
       },
       {
         "a": "순회경선",
@@ -2044,12 +2152,6 @@
         "npmi": 0.589
       },
       {
-        "a": "국민의힘",
-        "b": "레버리지",
-        "cooc": 2,
-        "npmi": 0.586
-      },
-      {
         "a": "민주당",
         "b": "이재명",
         "cooc": 3,
@@ -2062,10 +2164,10 @@
         "npmi": 0.555
       },
       {
-        "a": "당대표",
-        "b": "정청래",
-        "cooc": 4,
-        "npmi": 0.52
+        "a": "양산",
+        "b": "연이틀",
+        "cooc": 2,
+        "npmi": 0.545
       },
       {
         "a": "김민석",
@@ -2080,16 +2182,10 @@
         "npmi": 0.515
       },
       {
-        "a": "당대표",
-        "b": "민주당",
+        "a": "강릉",
+        "b": "양산",
         "cooc": 2,
-        "npmi": 0.51
-      },
-      {
-        "a": "김민석",
-        "b": "당대표",
-        "cooc": 4,
-        "npmi": 0.487
+        "npmi": 0.496
       },
       {
         "a": "열대야",
@@ -2098,16 +2194,28 @@
         "npmi": 0.486
       },
       {
+        "a": "민주당",
+        "b": "전당대회",
+        "cooc": 2,
+        "npmi": 0.479
+      },
+      {
         "a": "초열대야",
         "b": "폭염",
         "cooc": 2,
         "npmi": 0.479
       },
       {
-        "a": "민주당",
-        "b": "전당대회",
+        "a": "강릉",
+        "b": "폭염",
         "cooc": 2,
         "npmi": 0.479
+      },
+      {
+        "a": "이란",
+        "b": "트럼프",
+        "cooc": 2,
+        "npmi": 0.467
       },
       {
         "a": "민주당",
@@ -2134,10 +2242,22 @@
         "npmi": 0.397
       },
       {
-        "a": "김민석",
-        "b": "최고위원",
-        "cooc": 3,
-        "npmi": 0.375
+        "a": "경남",
+        "b": "폭염",
+        "cooc": 2,
+        "npmi": 0.383
+      },
+      {
+        "a": "대전",
+        "b": "정청래",
+        "cooc": 2,
+        "npmi": 0.378
+      },
+      {
+        "a": "서울",
+        "b": "폭염",
+        "cooc": 2,
+        "npmi": 0.361
       },
       {
         "a": "정청래",
@@ -2147,15 +2267,33 @@
       },
       {
         "a": "김민석",
-        "b": "순회경선",
-        "cooc": 3,
-        "npmi": 0.346
+        "b": "대전",
+        "cooc": 2,
+        "npmi": 0.349
+      },
+      {
+        "a": "유조선",
+        "b": "이란",
+        "cooc": 2,
+        "npmi": 0.349
       },
       {
         "a": "김민석",
         "b": "이재명",
         "cooc": 3,
         "npmi": 0.346
+      },
+      {
+        "a": "김민석",
+        "b": "순회경선",
+        "cooc": 3,
+        "npmi": 0.346
+      },
+      {
+        "a": "이란",
+        "b": "호르무즈",
+        "cooc": 2,
+        "npmi": 0.335
       },
       {
         "a": "민주당",
@@ -2168,12 +2306,6 @@
         "b": "최민희",
         "cooc": 4,
         "npmi": 0.317
-      },
-      {
-        "a": "정청래",
-        "b": "최고위원",
-        "cooc": 2,
-        "npmi": 0.308
       }
     ]
   },
@@ -2204,6 +2336,18 @@
         "category_slug": "politics"
       },
       {
+        "word": "서울",
+        "count": 61,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "이란",
+        "count": 54,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
         "word": "코스피",
         "count": 52,
         "faded": false,
@@ -2214,12 +2358,6 @@
         "count": 42,
         "faded": false,
         "category_slug": "culture"
-      },
-      {
-        "word": "레버리지",
-        "count": 33,
-        "faded": false,
-        "category_slug": "economy"
       },
       {
         "word": "반도체",
@@ -2246,12 +2384,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "수도권",
-        "count": 25,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
         "word": "아파트",
         "count": 25,
         "faded": false,
@@ -2270,6 +2402,12 @@
         "category_slug": "world"
       },
       {
+        "word": "대구",
+        "count": 21,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
         "word": "스페인",
         "count": 21,
         "faded": false,
@@ -2282,16 +2420,16 @@
         "category_slug": "politics"
       },
       {
-        "word": "거짓말",
+        "word": "부동산",
         "count": 20,
         "faded": false,
         "category_slug": "politics"
       },
       {
-        "word": "부동산",
+        "word": "삼성",
         "count": 20,
         "faded": false,
-        "category_slug": "politics"
+        "category_slug": "it"
       },
       {
         "word": "장동혁",
@@ -2300,8 +2438,14 @@
         "category_slug": "politics"
       },
       {
-        "word": "거부권",
-        "count": 19,
+        "word": "미국",
+        "count": 18,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
+        "word": "부산",
+        "count": 18,
         "faded": false,
         "category_slug": "politics"
       },
@@ -2312,16 +2456,22 @@
         "category_slug": "politics"
       },
       {
-        "word": "역대급",
+        "word": "오픈AI",
+        "count": 17,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "중국",
         "count": 17,
         "faded": false,
         "category_slug": "economy"
       },
       {
-        "word": "오픈AI",
+        "word": "충청",
         "count": 17,
         "faded": false,
-        "category_slug": "it"
+        "category_slug": "politics"
       },
       {
         "word": "부울경",
@@ -2334,6 +2484,12 @@
         "count": 16,
         "faded": false,
         "category_slug": "economy"
+      },
+      {
+        "word": "경산",
+        "count": 15,
+        "faded": false,
+        "category_slug": "society"
       },
       {
         "word": "메모리",
@@ -2384,34 +2540,10 @@
         "category_slug": "politics"
       },
       {
-        "word": "폭염중대경보",
-        "count": 13,
+        "word": "기아",
+        "count": 12,
         "faded": false,
         "category_slug": "culture"
-      },
-      {
-        "word": "경찰관",
-        "count": 12,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
-        "word": "마무리",
-        "count": 12,
-        "faded": false,
-        "category_slug": "politics"
-      },
-      {
-        "word": "외국인",
-        "count": 12,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
-        "word": "차세대",
-        "count": 12,
-        "faded": false,
-        "category_slug": "it"
       },
       {
         "word": "최민희",
@@ -2420,16 +2552,10 @@
         "category_slug": "politics"
       },
       {
-        "word": "컴퓨팅센터",
-        "count": 12,
-        "faded": false,
-        "category_slug": "it"
-      },
-      {
-        "word": "사망자",
+        "word": "경남",
         "count": 11,
         "faded": false,
-        "category_slug": "world"
+        "category_slug": "society"
       },
       {
         "word": "엔비디아",
@@ -2438,10 +2564,16 @@
         "category_slug": "it"
       },
       {
-        "word": "최고위원",
+        "word": "인천",
         "count": 11,
         "faded": false,
-        "category_slug": "politics"
+        "category_slug": "society"
+      },
+      {
+        "word": "일본",
+        "count": 11,
+        "faded": false,
+        "category_slug": "world"
       },
       {
         "word": "강선우",
@@ -2456,16 +2588,16 @@
         "category_slug": "it"
       },
       {
+        "word": "돌핀",
+        "count": 10,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
         "word": "송영길",
         "count": 10,
         "faded": false,
         "category_slug": "politics"
-      },
-      {
-        "word": "수사팀장",
-        "count": 10,
-        "faded": false,
-        "category_slug": "society"
       },
       {
         "word": "순환인사",
@@ -2480,12 +2612,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "영업익",
-        "count": 10,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
         "word": "우크라",
         "count": 10,
         "faded": false,
@@ -2498,25 +2624,31 @@
         "category_slug": "politics"
       },
       {
+        "word": "포항",
+        "count": 10,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
+        "word": "경북",
+        "count": 9,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
+        "word": "두산",
+        "count": 9,
+        "faded": false,
+        "category_slug": "economy"
+      },
+      {
         "word": "모건스탠리",
         "count": 9,
         "faded": false,
         "category_slug": "economy"
       },
       {
-        "word": "범죄자",
-        "count": 9,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "삼성전자",
-        "count": 9,
-        "faded": false,
-        "category_slug": "economy"
-      },
-      {
-        "word": "상반기",
         "count": 9,
         "faded": false,
         "category_slug": "economy"
@@ -2526,12 +2658,6 @@
         "count": 9,
         "faded": false,
         "category_slug": "it"
-      },
-      {
-        "word": "요양병원",
-        "count": 9,
-        "faded": false,
-        "category_slug": "society"
       },
       {
         "word": "이주민",
@@ -2588,16 +2714,22 @@
         "category_slug": "world"
       },
       {
+        "word": "애플",
+        "count": 8,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "울산",
+        "count": 8,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
         "word": "지지율",
         "count": 8,
         "faded": false,
         "category_slug": "politics"
-      },
-      {
-        "word": "최고기온",
-        "count": 8,
-        "faded": false,
-        "category_slug": "culture"
       }
     ],
     "edges": [
@@ -2632,8 +2764,14 @@
         "npmi": 0.82
       },
       {
-        "a": "아스트라",
-        "b": "차세대",
+        "a": "경산",
+        "b": "아파트",
+        "cooc": 12,
+        "npmi": 0.816
+      },
+      {
+        "a": "기아",
+        "b": "현대차",
         "cooc": 6,
         "npmi": 0.814
       },
@@ -2644,10 +2782,10 @@
         "npmi": 0.814
       },
       {
-        "a": "수사팀장",
-        "b": "아파트",
+        "a": "돌려차기",
+        "b": "부산",
         "cooc": 9,
-        "npmi": 0.795
+        "npmi": 0.794
       },
       {
         "a": "세우타",
@@ -2662,31 +2800,25 @@
         "npmi": 0.765
       },
       {
-        "a": "사망자",
-        "b": "스페인",
-        "cooc": 7,
-        "npmi": 0.73
-      },
-      {
         "a": "세우타",
         "b": "스페인",
         "cooc": 8,
         "npmi": 0.728
       },
       {
-        "a": "쌍방울",
+        "a": "김용민",
+        "b": "부산",
+        "cooc": 7,
+        "npmi": 0.728
+      },
+      {
+        "a": "강선우",
         "b": "한동훈",
         "cooc": 4,
         "npmi": 0.726
       },
       {
-        "a": "범죄자",
-        "b": "순환인사",
-        "cooc": 4,
-        "npmi": 0.726
-      },
-      {
-        "a": "강선우",
+        "a": "쌍방울",
         "b": "한동훈",
         "cooc": 4,
         "npmi": 0.726
@@ -2698,16 +2830,16 @@
         "npmi": 0.716
       },
       {
-        "a": "사망자",
-        "b": "이주민",
-        "cooc": 4,
-        "npmi": 0.711
+        "a": "이란",
+        "b": "호르무즈",
+        "cooc": 20,
+        "npmi": 0.71
       },
       {
-        "a": "오픈AI",
-        "b": "차세대",
-        "cooc": 6,
-        "npmi": 0.706
+        "a": "기아",
+        "b": "전기차",
+        "cooc": 4,
+        "npmi": 0.697
       },
       {
         "a": "네이버",
@@ -2716,40 +2848,16 @@
         "npmi": 0.694
       },
       {
-        "a": "경찰관",
-        "b": "순환인사",
-        "cooc": 4,
-        "npmi": 0.681
-      },
-      {
         "a": "정성호",
         "b": "형소법",
         "cooc": 6,
         "npmi": 0.67
       },
       {
-        "a": "김용범",
-        "b": "레버리지",
-        "cooc": 6,
-        "npmi": 0.662
-      },
-      {
-        "a": "사망자",
-        "b": "세우타",
-        "cooc": 4,
-        "npmi": 0.641
-      },
-      {
-        "a": "경찰관",
-        "b": "범죄자",
-        "cooc": 3,
-        "npmi": 0.623
-      },
-      {
-        "a": "거부권",
-        "b": "보완수사권",
-        "cooc": 5,
-        "npmi": 0.611
+        "a": "이란",
+        "b": "트럼프",
+        "cooc": 32,
+        "npmi": 0.66
       },
       {
         "a": "부울경",
@@ -2758,16 +2866,34 @@
         "npmi": 0.61
       },
       {
-        "a": "최고위원",
-        "b": "최민희",
+        "a": "경북",
+        "b": "대구",
+        "cooc": 4,
+        "npmi": 0.609
+      },
+      {
+        "a": "부울경",
+        "b": "충청",
+        "cooc": 5,
+        "npmi": 0.608
+      },
+      {
+        "a": "메모리",
+        "b": "애플",
         "cooc": 3,
-        "npmi": 0.593
+        "npmi": 0.607
       },
       {
         "a": "김민석",
         "b": "부울경",
         "cooc": 11,
         "npmi": 0.591
+      },
+      {
+        "a": "경북",
+        "b": "경산",
+        "cooc": 3,
+        "npmi": 0.589
       },
       {
         "a": "김민석",
@@ -2794,6 +2920,12 @@
         "npmi": 0.57
       },
       {
+        "a": "경남",
+        "b": "울산",
+        "cooc": 2,
+        "npmi": 0.559
+      },
+      {
         "a": "민주당",
         "b": "쌍방울",
         "cooc": 4,
@@ -2806,15 +2938,21 @@
         "npmi": 0.558
       },
       {
+        "a": "김민석",
+        "b": "충청",
+        "cooc": 10,
+        "npmi": 0.552
+      },
+      {
         "a": "코스닥",
         "b": "코스피",
         "cooc": 8,
         "npmi": 0.543
       },
       {
-        "a": "최고기온",
-        "b": "폭염중대경보",
-        "cooc": 2,
+        "a": "메모리",
+        "b": "삼성",
+        "cooc": 4,
         "npmi": 0.535
       },
       {
@@ -2830,16 +2968,22 @@
         "npmi": 0.529
       },
       {
+        "a": "정청래",
+        "b": "충청",
+        "cooc": 11,
+        "npmi": 0.525
+      },
+      {
         "a": "모건스탠리",
         "b": "코스피",
         "cooc": 5,
         "npmi": 0.519
       },
       {
-        "a": "양산",
-        "b": "최고기온",
-        "cooc": 4,
-        "npmi": 0.517
+        "a": "경북",
+        "b": "아파트",
+        "cooc": 3,
+        "npmi": 0.512
       },
       {
         "a": "민주당",
@@ -2848,22 +2992,16 @@
         "npmi": 0.506
       },
       {
-        "a": "수도권",
-        "b": "폭염",
-        "cooc": 16,
-        "npmi": 0.498
+        "a": "정의선",
+        "b": "중국",
+        "cooc": 2,
+        "npmi": 0.48
       },
       {
-        "a": "마무리",
-        "b": "李대통령",
+        "a": "두산",
+        "b": "반도체",
         "cooc": 3,
-        "npmi": 0.495
-      },
-      {
-        "a": "거부권",
-        "b": "李대통령",
-        "cooc": 4,
-        "npmi": 0.49
+        "npmi": 0.475
       },
       {
         "a": "장동혁",
@@ -2872,10 +3010,28 @@
         "npmi": 0.473
       },
       {
+        "a": "삼성",
+        "b": "애플",
+        "cooc": 2,
+        "npmi": 0.473
+      },
+      {
         "a": "보완수사권",
         "b": "李대통령",
         "cooc": 3,
         "npmi": 0.471
+      },
+      {
+        "a": "미국",
+        "b": "현대차",
+        "cooc": 2,
+        "npmi": 0.471
+      },
+      {
+        "a": "경남",
+        "b": "양산",
+        "cooc": 4,
+        "npmi": 0.467
       },
       {
         "a": "지지율",
@@ -2896,28 +3052,10 @@
         "npmi": 0.46
       },
       {
-        "a": "역대급",
-        "b": "코스피",
-        "cooc": 6,
-        "npmi": 0.458
-      },
-      {
         "a": "곽상언",
         "b": "돌려차기",
         "cooc": 2,
         "npmi": 0.455
-      },
-      {
-        "a": "범죄자",
-        "b": "李대통령",
-        "cooc": 2,
-        "npmi": 0.449
-      },
-      {
-        "a": "거부권",
-        "b": "형소법",
-        "cooc": 4,
-        "npmi": 0.445
       },
       {
         "a": "트럼프",
@@ -2926,10 +3064,10 @@
         "npmi": 0.442
       },
       {
-        "a": "거짓말",
-        "b": "정청래",
-        "cooc": 9,
-        "npmi": 0.44
+        "a": "돌핀",
+        "b": "폭염",
+        "cooc": 7,
+        "npmi": 0.442
       },
       {
         "a": "이스라엘",
@@ -2938,10 +3076,10 @@
         "npmi": 0.432
       },
       {
-        "a": "외국인",
-        "b": "코스피",
-        "cooc": 4,
-        "npmi": 0.419
+        "a": "기아",
+        "b": "미국",
+        "cooc": 2,
+        "npmi": 0.43
       },
       {
         "a": "사우디",
@@ -2974,6 +3112,12 @@
         "npmi": 0.393
       },
       {
+        "a": "무인기",
+        "b": "미국",
+        "cooc": 2,
+        "npmi": 0.381
+      },
+      {
         "a": "노무현",
         "b": "돌려차기",
         "cooc": 2,
@@ -2984,18 +3128,6 @@
         "b": "정의선",
         "cooc": 2,
         "npmi": 0.35
-      },
-      {
-        "a": "거부권",
-        "b": "장동혁",
-        "cooc": 2,
-        "npmi": 0.35
-      },
-      {
-        "a": "거짓말",
-        "b": "김민석",
-        "cooc": 5,
-        "npmi": 0.348
       },
       {
         "a": "민주당",
@@ -3010,6 +3142,18 @@
         "npmi": 0.335
       },
       {
+        "a": "노무현",
+        "b": "부산",
+        "cooc": 2,
+        "npmi": 0.331
+      },
+      {
+        "a": "사우디",
+        "b": "이란",
+        "cooc": 2,
+        "npmi": 0.331
+      },
+      {
         "a": "김민석",
         "b": "최민희",
         "cooc": 3,
@@ -3022,16 +3166,10 @@
         "npmi": 0.316
       },
       {
-        "a": "거부권",
-        "b": "민주당",
-        "cooc": 2,
-        "npmi": 0.312
-      },
-      {
-        "a": "양산",
-        "b": "차세대",
-        "cooc": 2,
-        "npmi": 0.309
+        "a": "이란",
+        "b": "이스라엘",
+        "cooc": 4,
+        "npmi": 0.31
       },
       {
         "a": "윤리위",
