@@ -9,7 +9,7 @@ const mockSupabase = {
 vi.mock('./supabaseClient', () => ({ supabase: mockSupabase }))
 
 const {
-  fetchAvailableDates,
+  fetchCollectedDates,
   fetchEventHeadlineCounts,
   fetchHeadlineCount,
   fetchHeadlinesForEvent,
@@ -85,21 +85,54 @@ describe('fetchWordCounts', () => {
   })
 })
 
-describe('fetchAvailableDates', () => {
-  it('returns distinct dates newest first', async () => {
-    const rows = [
-      { collected_date: '2026-07-31' },
-      { collected_date: '2026-07-31' },
-      { collected_date: '2026-07-30' },
-    ]
-    const chain = makeQueryChain({ data: rows, error: null })
+describe('fetchCollectedDates', () => {
+  it('returns each collected day with its headline total, newest first', async () => {
+    const chain = makeQueryChain({
+      data: [
+        { collected_date: '2026-08-02', headline_count: 691 },
+        { collected_date: '2026-08-01', headline_count: 1144 },
+      ],
+      error: null,
+    })
     mockSupabase.from.mockReturnValue(chain)
 
-    const result = await fetchAvailableDates()
+    const result = await fetchCollectedDates()
 
     expect(mockSupabase.from).toHaveBeenCalledWith('collected_dates')
     expect(chain.order).toHaveBeenCalledWith('collected_date', { ascending: false })
-    expect(result).toEqual(['2026-07-31', '2026-07-30'])
+    expect(result).toEqual([
+      { date: '2026-08-02', headlines: 691 },
+      { date: '2026-08-01', headlines: 1144 },
+    ])
+  })
+
+  it('coerces a bigint arriving as a string', async () => {
+    // Postgres renders bigint as a JSON string in some drivers, and this column
+    // is `count(*)::bigint`. Passing the string through would make every surge
+    // ratio a division by a string.
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({
+        data: [{ collected_date: '2026-08-01', headline_count: '1144' }],
+        error: null,
+      }),
+    )
+
+    const result = await fetchCollectedDates()
+
+    expect(result[0].headlines).toBe(1144)
+  })
+
+  it('throws a real Error carrying the PostgREST message', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({
+        data: null,
+        error: { message: 'permission denied for view collected_dates', code: '42501' },
+      }),
+    )
+
+    await expect(fetchCollectedDates()).rejects.toThrow(
+      'permission denied for view collected_dates (42501)',
+    )
   })
 })
 

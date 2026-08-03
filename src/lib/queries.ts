@@ -32,14 +32,29 @@ export async function fetchCategories(): Promise<Category[]> {
   return (data ?? []) as Category[]
 }
 
-export async function fetchAvailableDates(): Promise<string[]> {
+export interface CollectedDate {
+  date: string
+  /** Every headline of that day, all six sections. The denominator the surge comparison divides by. */
+  headlines: number
+}
+
+// One row per collected day, newest first. The count rides along because the
+// surge comparison needs it for two days at once and this query is issued on
+// every load anyway; before this it cost two `HEAD ... count=exact` requests.
+//
+// Not cached: this is read once at mount, and the cache exists for views that
+// get revisited.
+export async function fetchCollectedDates(): Promise<CollectedDate[]> {
   const { data, error } = await supabase
     .from('collected_dates')
-    .select('collected_date')
+    .select('collected_date, headline_count')
     .order('collected_date', { ascending: false })
   if (error) throw queryError(error)
-  const rows = (data ?? []) as { collected_date: string }[]
-  return Array.from(new Set(rows.map((row) => row.collected_date)))
+
+  // The view groups by collected_date, so unlike the `select distinct` it
+  // replaced it cannot hand back a repeat and there is nothing to dedupe.
+  const rows = (data ?? []) as { collected_date: string; headline_count: number | string }[]
+  return rows.map((row) => ({ date: row.collected_date, headlines: Number(row.headline_count) }))
 }
 
 export async function fetchWordCounts(
