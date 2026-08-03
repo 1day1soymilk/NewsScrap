@@ -105,9 +105,50 @@ The two words promoted into the freed slots are 탄도미사일 (69) and 합수�
 every row. That last part is luck rather than design: `0005` excluded 26 and
 promoted 7, all bad. Re-run `20_unlabeled.sql` after every dictionary edit.
 
+## Round eight — the analyser changed underneath everything
+
+ETRI's WiseNLU was replaced by `garu-ko` running inside the Edge Function and
+the whole archive was re-derived from its titles (`scripts/reanalyze/`). **The
+sieve was not touched, the sweep was not widened and no day was added**, and
+rule 4 still fired harder than it ever has: `20_unlabeled.sql` returned 38 words
+and `21_unlabeled_category.sql` returned 232. Both had been empty.
+
+Labelled in `14_labels_after_reanalysis.sql` (38: 14 good, 24 bad) and
+`15_labels_category_after_reanalysis.sql` (234: 75 good, 159 bad, the two extra
+caught by re-running the worklist after the first pass — which is why the
+worklist is a query and not a list anyone keeps).
+
+**The shipped configuration still wins, and that is the whole verdict of the
+round.** Day-wide it beats length-only on all four days (F1 57.3 / 51.6 / 65.8 /
+47.1 against 55.1 / 48.4 / 61.7 / 45.1) and beats every `min_headlines` floor;
+on the 24 category cells it means 57.20 against 48.52 for the pre-`0004` scoped
+count, so migration `0004` survives the analyser change intact. No threshold was
+moved, deliberately: changing the analyser and a threshold in one step would
+leave no way to attribute the difference.
+
+**The absolute numbers fell and mostly not for the reason they look like.**
+Precision went 85.7 / 84.3 / 70.0 / 67.1 to 75.7 / 70.0 / 70.0 / 68.6. But
+2026-08-03 drew none of the newly labelled words and *rose*, while 07-31 and
+08-01 drew 8 and 7 of them and fell hardest — a newly labelled bad word lowers
+precision the instant it is labelled, whatever the analyser did. Rule 4's own
+warning, arriving as data.
+
+Two tells worth carrying forward:
+
+- **A section tag is not a subject.** 뉴시스Pic, 배틀라인, 이슈톺, 손바닥, 종합2,
+  주末머니 and Y녹취록 all reached the screen; every headline carrying one *ends*
+  in it, bracketed. `spec` 1.00 plus a shared bracketed suffix is the signature.
+  Y녹취록 was labelled good first, on the reading that it named one recording in
+  one case; it is a standing column at YTN.
+- **The line, in operational form, is a question**: would this word appear in a
+  randomly chosen other week's news? 압수수색 and 유상증자 and 본회의 would, so
+  they are bad however particular the story behind them; 문자통보 and 미장착 and
+  보릿돌교 would not. That question decided the ~50 cases the prose definition
+  left genuinely open.
+
 ## Labels
 
-606 words, covering everything drawn by every **active** configuration in
+891 words, covering everything drawn by every **active** configuration in
 `02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across the
 four days in `analysis.eval_days` — 2026-07-31, 08-01, 08-02 and 08-03.
 `20_unlabeled.sql` and `21_unlabeled_category.sql` both return nothing, so rule 4

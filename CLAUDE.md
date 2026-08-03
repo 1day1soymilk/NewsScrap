@@ -261,15 +261,34 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words, four days, as of 2026-08-03 night:
-**85.7 / 84.3 / 70.0 / 67.1**, mean F1 63.2. The drawn set is 215 good and 65
-bad.
+Measured precision of the top 70 words, four days, as of 2026-08-04 — **the
+first run on an archive analysed end to end by one analyser**:
+**75.7 / 70.0 / 70.0 / 68.6**, mean F1 55.45. The drawn set is 199 good and 81
+bad. On the 24 category cells the shipped configuration means **57.20**.
 
-**Do not read the 2026-08-03 column against the one this file used to carry**
-(71.4, mean F1 67.3). Only that day moved, and it moved because the collector
-went to six runs and the day went from 900 headlines to 2,197 — not because
-anything about the sieve changed. The other three days reproduce to the decimal,
-which is what identifies the cause.
+**Every one of those numbers is lower than the ones this file used to carry
+(85.7 / 84.3 / 70.0 / 67.1, mean F1 63.2, 215 good and 65 bad), and the drop is
+mostly not a quality drop.** The archive was re-analysed when ETRI was replaced
+by garu-ko (`scripts/reanalyze/`), which put words on screen that had never been
+near it, so `20_unlabeled.sql` returned 38 and `21_unlabeled_category.sql`
+returned 232 — the sixth and largest firing of rule 4. Twenty-four of the 38 were
+labelled bad, and a newly labelled bad word lowers precision the moment it is
+labelled, whatever the analyser did.
+
+**The per-day split is what shows this rather than argues it.** 2026-08-03 drew
+no newly labelled word at all and its precision *rose*, 67.1 to 68.6, while
+07-31 and 08-01 drew 8 and 7 of them and fell hardest. The days that moved are
+the days whose screens changed.
+
+What the run does establish, because it is internal to itself: **the shipped
+configuration still wins.** It beats length-only on all four days day-wide
+(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
+floor, and on the tabs it leads at 57.20 against 48.52 for the pre-`0004` scoped
+count — so migration `0004`'s finding survives the analyser change intact.
+
+**Do not read the 2026-08-03 column against the one this file carried before
+that** (71.4, mean F1 67.3). That move was the collector going to six runs and
+the day going from 900 headlines to 2,197 — not the sieve, and not the analyser.
 
 **F1 is not comparable across days of different thickness, and this is the
 mechanism.** Recall is the drawn good words over every good word with `df >= 3`,
@@ -282,10 +301,27 @@ sets applies to collection depth too, and this is the first time it has bitten.
 Those figures come from
 `analysis.word_labels` and are **not comparable to any percentage quoted
 elsewhere, or to any earlier figure in this file's history** — the label set has
-been extended six times and each extension moves them, most recently by
-`09_labels_four_days.sql` (139 words, and five of those reversed on review).
+been extended eight times and each extension moves them, most recently by
+`14_labels_after_reanalysis.sql` (38 words) and
+`15_labels_category_after_reanalysis.sql` (234, the largest pass there has been).
 Compare configurations against each other inside one run, never against a number
 someone wrote down.
+
+Two tells came out of that pass and both are reusable, because both name a kind
+of word rather than a word:
+
+- **A section tag is not a subject.** 북리뷰, 주末머니, Y녹취록, 뉴시스Pic,
+  배틀라인, 이슈톺, 손바닥, 종합2 all reached the screen and all are the
+  newspaper's own furniture — every headline carrying one *ends* in it, in
+  brackets. The signature is `spec` 1.00 together with a shared bracketed
+  suffix, and it is worth checking before labelling a confident-looking 1.00.
+  Y녹취록 was written down as good first, on the reading that it named one
+  recording in one case; it names a standing column at YTN.
+- **The operational form of the good/bad line is a question**, and it settled
+  the hard cases where the prose definition did not: *would this word appear in
+  a randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would,
+  every week, so they are bad however particular the story that produced them.
+  문자통보, 미장착 and 보릿돌교 would not.
 
 That claim has now been measured three times. Reversing 윤리위, 반도체 and
 李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
