@@ -50,6 +50,9 @@ w as (
     coalesce(max(value) filter (where key = 'min_word_len'), 3)            as min_word_len,
     coalesce(max(value) filter (where key = 'min_spec'), 0.80)             as min_spec,
     coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_npd,
+    -- Sieve 5. The key is absent from scoring_weights until the clause ships, so
+    -- the default disables it and this file measures exactly what it did before.
+    coalesce(max(value) filter (where key = 'max_head_pos'), 9.90)         as max_head_pos,
     coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit
   from scoring_weights
 ),
@@ -87,6 +90,7 @@ day_pass as (
   cross join w
   left join word_overrides ov on ov.word = s.word
   where ov.mode is distinct from 'exclude'
+    and s.head_pos <= w.max_head_pos
     and (
       char_length(s.word) >= w.min_word_len
       or s.spec >= w.min_spec

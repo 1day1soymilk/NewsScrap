@@ -43,6 +43,7 @@ w as (
     coalesce(max(value) filter (where key = 'min_word_len'), 3)            as min_word_len,
     coalesce(max(value) filter (where key = 'min_spec'), 0.80)             as min_spec,
     coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_neighbors_per_doc,
+    coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90)      as demote_head_pos,
     coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit,
     coalesce(max(value) filter (where key = 'render_cap'), 130)            as render_cap
   from scoring_weights
@@ -74,6 +75,9 @@ annotated as (
     s.*,
     ov.mode as override_mode,
     n.rank, n.passed_by, n.faded,
+    -- Carried out of `w` explicitly: `s.*` is the signals and the cross join
+    -- does not put w's columns into `a.*`.
+    w.demote_head_pos,
     (s.df >= w.min_headlines)                                as ok_headlines,
     (s.standalone >= w.min_standalone)                       as ok_standalone,
     (ov.mode is distinct from 'exclude')                     as ok_dictionary,
@@ -106,6 +110,11 @@ verdicts as (
       when not a.ok_standalone                then 'cut: fragment'
       when not a.ok_dictionary                then 'cut: dictionary'
       when not a.ok_sieve4                    then 'cut: generic'
+      -- A word that cleared every clause and still lost its place. Splitting the
+      -- two reasons matters: 'cut: rank' means plain frequency, while 'demoted'
+      -- means the word trails its headlines and was sorted below everything that
+      -- leads one, so it lost to words it outranks on count (migration 0015).
+      when a.head_pos > a.demote_head_pos     then 'demoted: trails'
       else                                         'cut: rank'
     end as verdict
   from annotated a
@@ -134,6 +143,7 @@ select
   round(l.standalone, 2)        as sa,
   round(l.neighbors_per_doc, 2) as npd,
   round(l.assoc, 2)             as assoc,
+  round(l.head_pos, 2)          as hpos,
   l.category_slug               as cat,
   coalesce(l.override_mode, '') as ov,
   l.verdict,
