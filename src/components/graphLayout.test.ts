@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { computeGraphLayout, convexHull, nextLayoutWidth, routeEdge, seededRandom } from './graphLayout'
+import { computeGraphLayout, nextLayoutWidth, routeEdge, seededRandom } from './graphLayout'
 import type { EdgeCurve, MeasuredWord, PlacedNode } from './graphLayout'
 import type { GraphEdge } from '../lib/types'
 
-const SIZE = { width: 800, height: 500 }
+// 높이가 없다. 배치는 주어진 폭에 채우고 필요한 만큼 높아지므로 높이는 결과다.
+const SIZE = { width: 800 }
 
 function word(text: string, fontSize = 20): MeasuredWord {
   return {
@@ -82,39 +83,6 @@ function node(text: string, x: number, y: number, halfWidth = 20, halfHeight = 1
   }
 }
 
-// Winding-agnostic point-in-polygon, so it cannot pass merely because it shares
-// the hull's orientation convention.
-function insideHull(p: { x: number; y: number }, hull: { x: number; y: number }[]): boolean {
-  let inside = false
-  for (let i = 0, j = hull.length - 1; i < hull.length; j = i++) {
-    const a = hull[i]
-    const b = hull[j]
-    const straddles = a.y > p.y !== b.y > p.y
-    if (straddles && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
-describe('convexHull', () => {
-  it('keeps only the corners of a filled square', () => {
-    const points = []
-    for (let x = 0; x <= 2; x++) for (let y = 0; y <= 2; y++) points.push({ x, y })
-
-    const hull = convexHull(points)
-
-    expect(hull).toHaveLength(4)
-    // The midpoints of each side are collinear and must not survive, or the
-    // rendered polygon carries zero-length edges.
-    expect(hull.some((p) => p.x === 1 && p.y === 0)).toBe(false)
-  })
-
-  it('returns the input for fewer than three points', () => {
-    expect(convexHull([{ x: 1, y: 2 }])).toEqual([{ x: 1, y: 2 }])
-  })
-})
-
 describe('seededRandom', () => {
   it('replays the same sequence for the same seed', () => {
     const draw = (seed: number) => {
@@ -186,7 +154,7 @@ describe('computeGraphLayout', () => {
     expect(computeGraphLayout([], [edge('가', '나')], SIZE)).toEqual({
       nodes: [],
       edges: [],
-      clusters: [],
+      regions: [],
       communities: new Map(),
       bounds: { x: 0, y: 0, width: 0, height: 0 },
     })
@@ -199,7 +167,6 @@ describe('computeGraphLayout', () => {
     const { nodes, bounds } = computeGraphLayout(words, [], SIZE)
 
     expect(bounds.width).toBeLessThan(SIZE.width)
-    expect(bounds.height).toBeLessThan(SIZE.height)
 
     for (const node of nodes) {
       expect(node.x - node.halfWidth).toBeGreaterThanOrEqual(bounds.x)
@@ -233,24 +200,28 @@ describe('computeGraphLayout', () => {
     expect(a.nodes).toEqual(b.nodes)
   })
 
-  it('keeps every label inside the canvas', () => {
+  it('keeps every label inside the reported bounds', () => {
+    // 캔버스가 아니라 bounds다. 폭은 주어지지만 높이는 배치가 정하므로, 라벨이
+    // 어떤 상자 안에 있는지 물을 수 있는 유일한 상대가 스스로 보고한 그 상자다.
     const words = Array.from({ length: 40 }, (_, i) => word(`단어${i}`, 14 + (i % 5) * 10))
-    const { nodes } = computeGraphLayout(words, [], SIZE)
+    const { nodes, bounds } = computeGraphLayout(words, [], SIZE)
 
     for (const node of nodes) {
-      expect(node.x - node.halfWidth).toBeGreaterThanOrEqual(0)
-      expect(node.x + node.halfWidth).toBeLessThanOrEqual(SIZE.width)
-      expect(node.y - node.halfHeight).toBeGreaterThanOrEqual(0)
-      expect(node.y + node.halfHeight).toBeLessThanOrEqual(SIZE.height)
+      expect(node.x - node.halfWidth).toBeGreaterThanOrEqual(bounds.x)
+      expect(node.x + node.halfWidth).toBeLessThanOrEqual(bounds.x + bounds.width)
+      expect(node.y - node.halfHeight).toBeGreaterThanOrEqual(bounds.y)
+      expect(node.y + node.halfHeight).toBeLessThanOrEqual(bounds.y + bounds.height)
     }
   })
 
-  it('centres a label too wide for the canvas instead of inverting the clamp', () => {
-    const { nodes } = computeGraphLayout([word('아주긴단어입니다', 60)], [], {
-      width: 200,
-      height: 200,
-    })
-    expect(nodes[0].x).toBe(100)
+  it('폭보다 넓은 라벨은 넘치게 두고 bounds가 그만큼 넓어진다', () => {
+    // 억지로 폭 안에 밀어 넣는 쪽이 더 나쁘다. svg는 자기 크기로 그려진 뒤
+    // max-w-full로 축소되므로, 넘친 만큼 전체가 조금 작게 그려질 뿐이다.
+    const wide = word('아주긴단어입니다', 60)
+    const { nodes, bounds } = computeGraphLayout([wide], [], { width: 200 })
+
+    expect(bounds.width).toBeGreaterThan(200)
+    expect(nodes[0].x - nodes[0].halfWidth).toBeGreaterThanOrEqual(bounds.x)
   })
 
   it('separates labels that would otherwise overlap', () => {
@@ -267,14 +238,18 @@ describe('computeGraphLayout', () => {
     }
   })
 
-  it('pulls a linked pair closer than an unlinked one', () => {
+  it('이어진 짝은 서로에게, 이어지지 않은 단어보다 가깝다', () => {
+    // 예전에는 링크 힘이 당겨서 그렇게 됐다. 지금은 배치가 그렇게 만든다 —
+    // 이어진 둘은 자기 구역 안에 나란히 놓이고, 이어지지 않은 단어는 구역
+    // 바깥의 띠로 간다. 결과는 같지만 보장의 출처가 다르다.
     const words = ['가가', '나나', '다다', '라라'].map((w) => word(w))
     const { nodes } = computeGraphLayout(words, [edge('가가', '나나', 0.9)], SIZE)
 
     const linked = distance(find(nodes, '가가'), find(nodes, '나나'))
-    const unlinked = distance(find(nodes, '다다'), find(nodes, '라라'))
-
-    expect(linked).toBeLessThan(unlinked)
+    for (const loner of ['다다', '라라']) {
+      expect(distance(find(nodes, '가가'), find(nodes, loner))).toBeGreaterThan(linked)
+      expect(distance(find(nodes, '나나'), find(nodes, loner))).toBeGreaterThan(linked)
+    }
   })
 
   it('gives edge endpoints the coordinates of the nodes they join', () => {
@@ -355,10 +330,7 @@ describe('computeGraphLayout', () => {
     // Two words close enough that nothing survives between them: better to draw
     // no line than a two-pixel speck.
     const words = [word('가가', 60), word('나나', 60)]
-    const { edges } = computeGraphLayout(words, [edge('가가', '나나')], {
-      width: 120,
-      height: 90,
-    })
+    const { edges } = computeGraphLayout(words, [edge('가가', '나나')], { width: 120, padding: 1 })
     expect(edges[0].curve).toBeNull()
   })
 
@@ -367,116 +339,6 @@ describe('computeGraphLayout', () => {
     // the edge list would otherwise take the whole graph down.
     const { edges } = computeGraphLayout([word('폭염')], [edge('폭염', '없는단어')], SIZE)
     expect(edges).toEqual([])
-  })
-
-  it('groups connected words into one cluster and leaves loners out', () => {
-    const words = ['트럼프', '공습', '이스라엘', '코스피', '폭염'].map((w) => word(w))
-    const { clusters } = computeGraphLayout(
-      words,
-      [edge('트럼프', '공습'), edge('공습', '이스라엘')],
-      SIZE,
-    )
-
-    expect(clusters).toHaveLength(1)
-    expect([...clusters[0].words].sort()).toEqual(['공습', '이스라엘', '트럼프'])
-  })
-
-  it('joins two words linked only through a third', () => {
-    // Union-find, not adjacency: 트럼프 and 이스라엘 share no edge of their own.
-    const words = ['트럼프', '공습', '이스라엘'].map((w) => word(w))
-    const { clusters } = computeGraphLayout(
-      words,
-      [edge('트럼프', '공습'), edge('공습', '이스라엘')],
-      SIZE,
-    )
-    expect(clusters[0].words).toHaveLength(3)
-  })
-
-  it('splits two dense groups joined by a single bridge', () => {
-    // The case connected components get wrong, and the reason clustering is
-    // modularity-based. On the all-categories view a chain of shared words ran
-    // four unrelated stories together into one nine-word "cluster".
-    const words = ['가1', '가2', '가3', '나1', '나2', '나3'].map((w) => word(w))
-    const { clusters } = computeGraphLayout(
-      words,
-      [
-        edge('가1', '가2', 0.9),
-        edge('가2', '가3', 0.9),
-        edge('가3', '가1', 0.9),
-        edge('나1', '나2', 0.9),
-        edge('나2', '나3', 0.9),
-        edge('나3', '나1', 0.9),
-        // The bridge. Everything is one connected component because of it.
-        edge('가1', '나1', 0.35),
-      ],
-      // Only the top story is shaded by default, and what is under test here is
-      // the partition rather than how many of its parts get a blob.
-      { ...SIZE, clusterLimit: 2 },
-    )
-
-    expect(clusters).toHaveLength(2)
-    for (const cluster of clusters) {
-      const prefixes = new Set(cluster.words.map((w) => w[0]))
-      expect(prefixes.size).toBe(1)
-    }
-  })
-
-  it('ranks the day’s biggest story first by headline count', () => {
-    const words: MeasuredWord[] = [
-      { ...word('트럼프'), count: 40 },
-      { ...word('공습'), count: 53 },
-      { ...word('최태원'), count: 12 },
-      { ...word('노소영'), count: 7 },
-    ]
-    const { clusters } = computeGraphLayout(
-      words,
-      [edge('트럼프', '공습'), edge('최태원', '노소영')],
-      // Both events, so the order between them is observable. Only the first
-      // reaches the canvas under the default cap.
-      { ...SIZE, clusterLimit: 2 },
-    )
-
-    expect(clusters.map((c) => c.headlines)).toEqual([93, 19])
-    expect([...clusters[0].words].sort()).toEqual(['공습', '트럼프'])
-  })
-
-  it('wraps its members in a hull that contains their label boxes', () => {
-    const words = ['트럼프', '공습'].map((w) => word(w))
-    const { nodes, clusters } = computeGraphLayout(words, [edge('트럼프', '공습')], SIZE)
-
-    const hull = clusters[0].hull
-    expect(hull.length).toBeGreaterThanOrEqual(3)
-
-    for (const node of nodes) {
-      for (const corner of [
-        { x: node.x - node.halfWidth, y: node.y - node.halfHeight },
-        { x: node.x + node.halfWidth, y: node.y + node.halfHeight },
-      ]) {
-        expect(insideHull(corner, hull)).toBe(true)
-      }
-    }
-  })
-
-  it('reports no clusters when nothing is connected', () => {
-    const words = ['폭염', '코스피'].map((w) => word(w))
-    expect(computeGraphLayout(words, [], SIZE).clusters).toEqual([])
-  })
-
-  it('shades only the biggest clusters', () => {
-    // Shading all 26 communities of an all-categories day tints most of the
-    // canvas, and the shading stops carrying information.
-    const words: MeasuredWord[] = []
-    const edges: GraphEdge[] = []
-    for (let i = 0; i < 8; i++) {
-      words.push({ ...word(`가${i}`), count: 10 - i }, { ...word(`나${i}`), count: 10 - i })
-      edges.push(edge(`가${i}`, `나${i}`, 0.9))
-    }
-
-    const { clusters } = computeGraphLayout(words, edges, { ...SIZE, clusterLimit: 3 })
-
-    expect(clusters).toHaveLength(3)
-    // Kept the biggest three, not the first three encountered.
-    expect(clusters.map((c) => c.headlines)).toEqual([20, 18, 16])
   })
 
   it('carries font size and the faded flag through untouched', () => {
@@ -500,21 +362,17 @@ describe('communities', () => {
     expect(layout.communities.has('까마귀')).toBe(true)
   })
 
-  it('한 클러스터의 단어들은 정확히 하나의 커뮤니티에 속한다', () => {
-    // 노출된 배정과 findClusters의 분할이 갈리면 목록이 캔버스와 다른 하루를
-    // 말하게 된다. clusterLimit을 올려 잘리지 않은 분할 전체를 본다.
+  it('한 구역의 단어들은 정확히 하나의 커뮤니티에 속한다', () => {
+    // 노출된 배정과 캔버스가 실제로 쓴 분할이 갈리면 목록이 캔버스와 다른 하루를
+    // 말하게 된다.
     const words = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'].map((w) => word(w))
-    const layout = computeGraphLayout(
-      words,
-      [edge('a1', 'a2'), edge('b1', 'b2'), edge('c1', 'c2')],
-      { ...SIZE, clusterLimit: 99 },
-    )
+    const layout = computeGraphLayout(words, [edge('a1', 'a2'), edge('b1', 'b2'), edge('c1', 'c2')], SIZE)
 
-    expect(layout.clusters.length).toBeGreaterThan(1)
+    expect(layout.regions.length).toBeGreaterThan(1)
 
     const seen = new Set<number>()
-    for (const cluster of layout.clusters) {
-      const ids = new Set(cluster.words.map((w) => layout.communities.get(w)))
+    for (const region of layout.regions) {
+      const ids = new Set(region.words.map((w) => layout.communities.get(w)))
       expect(ids.size).toBe(1)
       const [id] = [...ids]
       expect(id).toBeDefined()
@@ -525,6 +383,94 @@ describe('communities', () => {
 
   it('단어가 없으면 빈 맵이다', () => {
     expect(computeGraphLayout([], [], SIZE).communities.size).toBe(0)
+  })
+})
+
+describe('사건 구역', () => {
+  // 다리 하나로 붙은 두 삼각형. 연결 요소로는 하나지만 모듈러리티로는 둘이고,
+  // MERGE_MIN_EDGES가 2이므로 다리 하나로는 합쳐지지 않는다.
+  const bridged = {
+    words: ['가1', '가2', '가3', '나1', '나2', '나3'].map((w) => word(w)),
+    edges: [
+      edge('가1', '가2', 0.9),
+      edge('가2', '가3', 0.9),
+      edge('가3', '가1', 0.9),
+      edge('나1', '나2', 0.9),
+      edge('나2', '나3', 0.9),
+      edge('나3', '나1', 0.9),
+      edge('가1', '나1', 0.35),
+    ],
+  }
+
+  it('다리 하나로 붙은 두 이야기를 다른 구역에 놓는다', () => {
+    // 연결 요소가 틀리는 바로 그 경우다. 전체 보기에서는 공유 단어를 타고
+    // 서로 무관한 네 이야기가 아홉 단어짜리 한 덩어리로 이어졌었다.
+    const { regions } = computeGraphLayout(bridged.words, bridged.edges, SIZE)
+
+    expect(regions).toHaveLength(2)
+    for (const region of regions) {
+      expect(new Set(region.words.map((w) => w[0])).size).toBe(1)
+    }
+  })
+
+  it('구역끼리 겹치지 않는다', () => {
+    // 이 배치의 핵심 불변식. 분리가 힘의 균형이 아니라 패킹에서 나오므로
+    // 보장되어야 한다.
+    const { regions } = computeGraphLayout(bridged.words, bridged.edges, SIZE)
+
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const a = regions[i]
+        const b = regions[j]
+        const apart =
+          a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y
+        expect(apart).toBe(true)
+      }
+    }
+  })
+
+  it('구역은 자기 멤버의 라벨을 담는다', () => {
+    const { nodes, regions } = computeGraphLayout(bridged.words, bridged.edges, SIZE)
+
+    for (const region of regions) {
+      for (const text of region.words) {
+        const node = find(nodes, text)
+        expect(node.x - node.halfWidth).toBeGreaterThanOrEqual(region.x - 1)
+        expect(node.x + node.halfWidth).toBeLessThanOrEqual(region.x + region.width + 1)
+        expect(node.y - node.halfHeight).toBeGreaterThanOrEqual(region.y - 1)
+        expect(node.y + node.halfHeight).toBeLessThanOrEqual(region.y + region.height + 1)
+      }
+    }
+  })
+
+  it('엣지가 없는 단어는 어느 구역에도 들어가지 않는다', () => {
+    // 70개 중 23~28개가 그렇다. 예전에는 캔버스 안쪽 고리로 보내져 사건들
+    // 사이사이에 끼었고, 그것이 가운데를 붐비게 만든 주범이었다.
+    const words = ['트럼프', '공습', '까마귀', '폭염'].map((w) => word(w))
+    const { regions } = computeGraphLayout(words, [edge('트럼프', '공습')], SIZE)
+
+    const inRegions = new Set(regions.flatMap((r) => r.words))
+    expect(inRegions).toEqual(new Set(['트럼프', '공습']))
+  })
+
+  it('아무것도 이어지지 않은 날에는 구역이 없다', () => {
+    const words = ['폭염', '코스피'].map((w) => word(w))
+    expect(computeGraphLayout(words, [], SIZE).regions).toEqual([])
+  })
+
+  it('별 모양 사건은 허브를 가운데 두고 두른다', () => {
+    // 최대 차수가 멤버−1이면 진짜 별이고, 바큇살로 놓으면 교차가 원천적으로 없다.
+    const words = ['허브', '가', '나', '다', '라'].map((w) => word(w))
+    const { nodes } = computeGraphLayout(
+      words,
+      ['가', '나', '다', '라'].map((leaf) => edge('허브', leaf)),
+      SIZE,
+    )
+
+    const hub = find(nodes, '허브')
+    const spokes = ['가', '나', '다', '라'].map((w) => distance(hub, find(nodes, w)))
+    // 한 반지름 위에 있다.
+    expect(Math.max(...spokes) - Math.min(...spokes)).toBeLessThan(1)
   })
 })
 

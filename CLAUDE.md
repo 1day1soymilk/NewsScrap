@@ -349,47 +349,86 @@ split is what makes the layout testable: jsdom has no canvas, so anything callin
 `computeFontSizes` the graph still reuses unchanged — the sieve decides who is
 drawn, never how big.
 
-Three things there were arrived at by looking at real days, not by reasoning:
+**The layout is two stages, and there is no global simulation.** This was one
+`forceSimulation` over all 70 words, and the trouble with it was structural
+rather than a matter of tuning. A day is not a hairball: it is eight to a dozen
+constellations of three to eight words plus 23–28 words holding no edge at all
+(`scripts/layout/README.md` has the counts for four days). The global sim knew
+none of that, and `isolatedRings` sent the edgeless words to rings at 0.36–0.52
+of the *short side* — inside the canvas — so unrelated words sat between the
+events and every edge had to cross somebody else's story.
+
+- **Stage A lays each event out in its own box** (`layoutEvent`), and **stage B
+  packs those boxes into the given width** (`shelfPack`). Separation now comes
+  from placement rather than from a balance of forces, so it is guaranteed
+  instead of tuned.
+- **The unit of a region is a *merged event*, never a raw Louvain community.**
+  `src/lib/events.ts` joins two communities linked by `MERGE_MIN_EDGES` into one
+  event, and the canvas calls that same `mergeCommunities` — dividing by
+  community would split a story the list calls one. Before this, the cohesion
+  force pulled raw communities while the list counted merged ones, and the two
+  had been quietly disagreeing.
+- **Arrangement inside a region is chosen by topology, not taste.** A true star
+  (`maxdeg === members − 1`) is placed radially around its hub, which has no
+  crossings by construction. Everything else gets a small local simulation.
+  Uniform radial was measured and rejected: **the day's biggest event is dense
+  on all four days** — 13 words/27 edges on 08-02 where a tree would be 12 — so
+  radial would leave ~15 chords crossing the wheel on the story that matters
+  most.
+- **`LOCAL_SLACK` must not approach 1.** The local box is sized from the members'
+  label areas times 3.5. At 1.0 the collision pass cannot resolve — 12 to 19
+  overlapping label pairs on every day, against an invariant of 0 — and two
+  labels that end up touching leave no room for a stroke, so edges vanish
+  silently: 22 of 37 drawn. That is CLAUDE.md's cohesion-at-0.35 failure
+  returning by a different door. Slack is cheap because `crop` sizes the region,
+  not the box.
+- **Edgeless words go to a band *below* the packed regions**, not to a ring
+  inside them. That is what actually empties the middle. They flow at
+  `DEFAULT_PADDING`, not at the region gutter — they are unrelated to each
+  other, but they are all unrelated in the same way, and gutter-sized gaps would
+  assert a grouping that is not there.
+- **Bridged events are packed next to each other** (`orderForPacking`). Ordering
+  by area alone sent one bridge diagonally across the frame: edge length maxed
+  at 719px against 208 before the rewrite. Ordering greedily by ties to what is
+  already placed brought it back to 228–337.
+- **Height is an output, not an input.** `LayoutOptions` has no `height`;
+  `bounds.height` is the answer. `MIN_HEIGHT`/`MAX_HEIGHT`/`HEIGHT_RATIO` and
+  the whole `NARROW_WIDTH`/`NARROW_HEIGHT_PER_WORD` branch are gone. That branch
+  existed because inventing a height from the width gives a phone a box far too
+  small — 358×279, which the collision pass cannot resolve, and 2026-07-31
+  really did draw one overlapping pair there. Not inventing a height removes the
+  problem rather than compensating for it.
+- **`crowded` fell on all eight measured cells; `crossings` did not.** It fell on
+  five, rose on three, and the rises are worth knowing: desktop 08-01 went 0 → 1
+  because 34 edges are sparse enough that the old global sim happened to find a
+  crossing-free arrangement, and 08-03 rose because **the remaining crossings are
+  now almost entirely inside one dense event** (`xIn` 18, `xBr` 0). Crossings
+  between unrelated stories are gone. Do not read the flat total as "no change";
+  read the `xIn`/`xBr` split, which is why the harness prints it.
+
+Still true, and still arrived at by looking at real days:
 
 - **Initial positions are seeded explicitly.** d3-force places any node without an
-  x/y on a phyllotaxis spiral centred on the origin — the canvas's top-left — and
+  x/y on a phyllotaxis spiral centred on the origin — the box's top-left — and
   relies on the centring forces to carry it in. At these force strengths 300 ticks
-  does not cover half a canvas, so a category with eight words settled up and to
-  the left with the rest of the frame empty.
-- **`forceManyBody`'s `distanceMax` must stay capped** at half the canvas. Letting
+  does not cover half a box, so nodes settled up and to the left with the rest
+  of the frame empty.
+- **`forceManyBody`'s `distanceMax` must stay capped** at half the box. Letting
   repulsion act across the whole frame pushes the outermost words into the bounds
   clamp, where they pile up into a column stuck to the wall.
-- **The viewport is cropped to the labels**, not to the canvas the simulation ran
-  in. Few words cannot generate enough mutual repulsion to resist the centring
-  forces, so they clump; cropping beats tuning the forces per node count.
-- **Crowding is `DEFAULT_PADDING`, not canvas size.** Raising `MAX_HEIGHT` from
-  640 to 820 spread the events apart and moved the mean nearest-neighbour gap by
-  half a pixel, because what two adjacent labels rest at is the collision
-  padding. Padding is the lever; the taller canvas is what stops the events
-  landing on top of each other once they have room. Do not raise padding past
-  ~16 either: at 22 a 40-word canvas can no longer resolve its collisions and
-  labels overlap, which `graphLayout.test.ts` catches.
+- **The viewport is cropped to the labels.** A category with eight words gets a
+  small frame instead of a clump adrift in a large one.
+- **Crowding is `DEFAULT_PADDING`, not box size.** What two adjacent labels rest
+  at is the collision padding. Do not raise it past ~16: at 22 a 40-word canvas
+  can no longer resolve its collisions and labels overlap, which
+  `graphLayout.test.ts` catches.
 - **Widening buys nothing.** The svg is drawn at its own cropped size and then
   `max-w-full` scales it down to the container, so spreading sideways shrinks
-  everything by the same factor. Height is the only free axis — on a desktop.
+  everything by the same factor.
 - **`h-auto` on the svg, not `max-w-full` alone.** The element carries `width`
   and `height` attributes, so capping the width leaves the height at the box the
-  simulation ran in and the drawing is letterboxed inside it. That put a 141px
+  layout ran in and the drawing is letterboxed inside it. That put a 141px
   band of empty canvas above and below the graph on a phone.
-- **Width is the constrained axis on a phone, and the fix is height.** A 14px
-  label is 14px whatever the viewport, so the area 70 of them need does not
-  shrink with the screen: at 358px the desktop ratio gives a 358×279 canvas, the
-  collision pass cannot resolve that, and the words land on top of each other.
-  Below `NARROW_WIDTH` the canvas grows with the word count instead
-  (`NARROW_HEIGHT_PER_WORD`), and the page scrolls, which a phone does anyway.
-- **The 20 words with no edges are what makes the middle look crowded.** Of the
-  70 drawn on 2026-08-01, 20 hold no edge at all and the best-connected word
-  holds six — there is no hub, and a single-centre mind map would assert a
-  structure the data does not have. Those 20 are pushed out to a band of three
-  concentric rings (`isolatedRings`), leaving the middle to the events. The band
-  is three rings rather than one circle because a single radius is not long
-  enough to hold them side by side, and they stack on it — again caught by the
-  overlap test. With nothing connected at all the push is skipped entirely.
 
 - **A resize under 8px does not re-run the layout** (`nextLayoutWidth`), and the
   width feeding it goes through `useDeferredValue` so a re-layout does not block
@@ -406,6 +445,12 @@ Three things there were arrived at by looking at real days, not by reasoning:
   inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
   d3's own forces across 300 ticks, so anything that actually moves this number
   changes the picture. Do not re-run this experiment.
+- **Both figures above predate the region rewrite and have not been re-measured.**
+  They should now be lower rather than higher — the simulation runs per event
+  instead of over the whole day, so the biggest collision pass is 14 nodes and
+  91 pairs a tick rather than 70 and 2,415 — but `untangle` adds a cost that did
+  not exist before, and nobody has put a number on the pair. If the layout ever
+  feels slow, measure before assuming which half it is.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -415,7 +460,15 @@ collision height left neighbouring rows grazing by a pixel.
 
 **One relationship, one stroke.** Each edge is a single quadratic Bézier that
 bows around whatever labels sit in its way. Strength is carried by width and
-opacity (`0.9 + 1.3·npmi`), never by the number of strokes.
+opacity, never by the number of strokes.
+
+**The strong/weak contrast is normalised from 0.3, not from 0.** Observed NPMI
+runs 0.31 to 1.00, so scaling from zero packed every real value into the top
+two-thirds of the range and nothing could be told from anything: width lived
+inside a 1.1px band and opacity inside 0.26–0.48. Individually invisible,
+collectively noise. `EDGE_NPMI_FLOOR` cuts the unused bottom off, and width
+(0.8–3.0) and opacity (0.15–0.85) then spend their whole range on the values
+that actually occur.
 
 **Every edge is the same neutral grey, in both views.** They used to be stroked
 with a gradient between their two endpoints' section colours, which did make a
@@ -467,35 +520,38 @@ biggest event, which is the wanted behaviour for ranking events rather than a
 fault, but headline count measures it directly with nothing extra shipped from
 the database.
 
-Communities are found from the edge list **before** the simulation runs, since
-they depend only on topology. That ordering matters: it lets a cohesion force
-hold each event's words together, without which a cluster's members scatter and
-the hull drawn around them swallows unrelated words.
+Communities are found from the edge list **before** anything is positioned, since
+they depend only on topology. That ordering is what lets each event be laid out
+in a box of its own rather than discovering the grouping after the fact.
 
-**Each event is arranged around its hub** — the member holding the most edges,
-ties broken on headline count then on the word so the pick is reproducible.
-Cohesion pulls members toward that word rather than toward the centroid. Both
-hold a cluster together, but a centroid is an empty point no word occupies, so
-the members ring a gap and there is nothing at the middle to read the event
-from.
+**A star event is arranged around its hub** — the member holding the most edges,
+ties broken on headline count then on the word so the pick is reproducible. Not
+around the centroid: both hold a cluster together, but a centroid is an empty
+point no word occupies, so the members ring a gap and there is nothing at the
+middle to read the event from.
 
-**Clusters are never drawn.** They decide the cohesion force, the hub each event
-rings, and — through `src/lib/events.ts` — which stories the event list names.
-Nothing on the canvas.
+**Clusters are never drawn, and now they are not shaded, outlined or named
+either.** A region is read from the whitespace around it. What the partition
+decides is which box a word is laid out in, which event the hub belongs to, and —
+through `src/lib/events.ts` — which stories the event list names.
 
-They used to be shaded, six of them (`clusterLimit`), and both halves of that
-were wrong. Six overlapping washes were the dirtiest thing on screen: a hull is
-angular, and where two met the page read as a smudge rather than as two events.
-Cutting to one made it worse rather than better, because it turned noise into a
-false claim — **a blob is the convex hull of its members' label boxes, so
-anything that happens to lie between them is inside it.** On 2026-08-01 the hull
-for 트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명,
-four words from other events. A hull is only honest when its members are already
-adjacent, which is exactly when it adds least. The event list names the stories
-instead, and `clusterLimit` — which cuts `layout.clusters`, a field nothing now
-reads — still defaults to 1; `graphLayout.test.ts` passes it explicitly where the
-partition itself is under test. The list is built from `GraphLayout.communities`,
-which is the **uncut** partition, so the cap cannot reach it.
+They used to be shaded, six of them, and both halves of that were wrong. Six
+overlapping washes were the dirtiest thing on screen: a hull is angular, and
+where two met the page read as a smudge rather than as two events. Cutting to one
+made it worse rather than better, because it turned noise into a false claim —
+**a blob is the convex hull of its members' label boxes, so anything that happens
+to lie between them is inside it.** On 2026-08-01 the hull for
+트럼프·이스라엘·하마스·압박 also enclosed 폭염, 정청래, 김민석 and 이재명, four
+words from other events. A hull is only honest when its members are already
+adjacent, which is exactly when it adds least.
+
+`PlacedCluster`, `findClusters`, `convexHull`, `clusterLimit` and
+`clusterCohesion` are all gone with the region rewrite — cohesion is what
+placement does now, and the hull had no remaining reader. `GraphLayout.regions`
+replaces `layout.clusters` and is **also not drawn**; it exists so
+`graphLayout.test.ts` can assert that two regions never overlap, which is this
+layout's central invariant. That is the one difference from `clusters`, which
+nothing read at all.
 
 The layout is deterministic — seeded positions, a fixed tick count, and ties
 broken on the word server side — so the same day always renders the same picture

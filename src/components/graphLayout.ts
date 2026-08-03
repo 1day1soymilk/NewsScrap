@@ -1,18 +1,21 @@
-import {
-  forceLink,
-  forceManyBody,
-  forceRadial,
-  forceSimulation,
-  forceX,
-  forceY,
-} from 'd3-force'
+import { forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force'
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
+import { mergeCommunities } from '../lib/events'
 import type { GraphEdge } from '../lib/types'
 
 // Everything in this file is arithmetic, deliberately separated from
 // KeywordGraph.tsx so it can be tested under jsdom. The one thing jsdom cannot
 // do is measure text — canvas is unimplemented — so measured widths arrive as
 // arguments. Same split as wordCloudLayout.ts.
+//
+// 이 파일은 하나의 전역 시뮬레이션이었다. 그 배치의 문제는 튜닝이 아니라 구조에
+// 있었다: 하루는 헤어볼이 아니라 3~8단어짜리 별자리 여남은 개 + 아무와도 이어지지
+// 않은 23~28개인데(scripts/layout/README.md의 baseline), 전역 시뮬레이션은 그
+// 구조를 모른 채 전부를 한 통에 넣고 흔들었고 무연결 단어를 캔버스 *안쪽* 고리로
+// 보내 사건들 사이사이에 끼워 넣었다. 그래서 모든 선이 남의 사건을 관통해야 했다.
+//
+// 지금은 두 단계다. **A단계**는 사건마다 자기 상자 안에서 배치하고, **B단계**는 그
+// 상자들을 폭에 채운다. 분리가 힘의 균형이 아니라 배치에서 나오므로 보장된다.
 
 export interface MeasuredWord {
   word: string
@@ -42,10 +45,10 @@ export interface EdgeCurve {
   /**
    * Whether this route keeps off every other label.
    *
-   * False happens: at 110 words a long edge crosses something whichever way it
-   * bows, and no single quadratic threads that field. Dropping those lost 18 of
-   * the day's 68 relationships, so they are drawn anyway and the caller fades
-   * them instead — a faint line under a word beats a missing connection.
+   * False happens: a long edge can cross something whichever way it bows, and
+   * no single quadratic threads that field. Dropping those loses relationships,
+   * so they are drawn anyway and the caller fades them instead — a faint line
+   * under a word beats a missing connection.
    */
   clear: boolean
 }
@@ -69,28 +72,41 @@ export interface PlacedEdge extends GraphEdge {
   curve: EdgeCurve | null
 }
 
-/** A connected component of the drawn graph: one event, in practice. */
-export interface PlacedCluster {
+/**
+ * 한 사건이 차지한 구역.
+ *
+ * **그려지지 않는다.** 구역은 여백으로만 읽힌다 — 테두리도 이름도 없다. hull을
+ * 걷어낸 이유와 같고(hull은 멤버들 사이에 우연히 놓인 남의 단어까지 삼킨다),
+ * 사건 이름은 캔버스 위의 사건 목록이 이미 말한다.
+ *
+ * 그럼에도 내보내는 이유는 하나뿐이다: **구역끼리 겹치지 않는다**는 것이 이
+ * 배치의 핵심 불변식이고, 그걸 테스트가 확인할 수 있어야 한다. 화면이 읽지 않는
+ * 필드를 두는 것은 clusters가 그랬듯 위험하지만, 저건 아무도 읽지 않았고 이건
+ * graphLayout.test.ts가 읽는다.
+ */
+export interface EventRegion {
+  /** mergeCommunities가 준 사건 id. */
+  id: number
   words: string[]
-  /** Total headlines across the member words, which is how clusters rank. */
-  headlines: number
-  /** Convex hull of the member label boxes, for a background blob. */
-  hull: { x: number; y: number }[]
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface GraphLayout {
   nodes: PlacedNode[]
   edges: PlacedEdge[]
-  /** Biggest first, so the day's top story is clusters[0]. Singletons omitted. */
-  clusters: PlacedCluster[]
+  /** 사건 구역. 넓은 것부터. 그려지지 않는다 — EventRegion의 주석을 볼 것. */
+  regions: EventRegion[]
   /**
-   * Every drawn word's Louvain community, uncut — including the singletons
-   * findClusters drops and the words past clusterLimit.
+   * Every drawn word's Louvain community, uncut — including the singletons and
+   * the edgeless words, which each keep an id of their own.
    *
-   * The canvas does not use this; src/lib/events.ts does, to build the event
-   * list out of the same partition the cohesion force ran on. Exposing it
-   * rather than recomputing it is the point: a second copy of the partition is
-   * the hazard CLAUDE.md records against keyword_signals.
+   * The canvas hands this up so src/lib/events.ts can build the event list out
+   * of the same partition the layout ran on. Exposing it rather than
+   * recomputing it is the point: a second copy of the partition is the hazard
+   * CLAUDE.md records against keyword_signals.
    */
   communities: Map<string, number>
   /** Tight box around the drawn labels, for cropping the viewport to them. */
@@ -98,15 +114,13 @@ export interface GraphLayout {
 }
 
 export interface LayoutOptions {
+  /** 채워 넣을 폭. **높이는 입력이 아니라 결과다** — bounds.height가 답이다. */
   width: number
-  height: number
   /** Simulation steps run synchronously before the first paint. */
   ticks?: number
   seed?: number
   /** Gap kept between two label boxes. */
   padding?: number
-  /** How many of the biggest clusters get a shaded blob. */
-  clusterLimit?: number
 }
 
 const DEFAULT_TICKS = 300
@@ -115,28 +129,40 @@ const DEFAULT_SEED = 0x5eed
 // consumes — a clearance either side plus a minimum drawable length — or two
 // clustered words end up close enough that the whole line between them is cut
 // away and the edge silently disappears.
-// Raising this is the only thing that actually puts air between neighbouring
-// labels: a taller canvas spreads the events apart but leaves local density
-// alone, because what two adjacent words rest at is this number and not the
-// room around them. Measured on 2026-08-01 — 12 gave a mean nearest-neighbour
-// gap of 46px on screen and a taller canvas did not move it.
 const DEFAULT_PADDING = 16
 
-// Where the edgeless words are sent, as fractions of the shorter canvas side.
-// A band of concentric rings rather than one circle: a single radius is not
-// long enough to hold them side by side, so they stack on it and overlap.
-const ISOLATED_RING_INNER = 0.36
-const ISOLATED_RING_OUTER = 0.52
-const ISOLATED_RINGS = 3
-// Hard enough to clear the middle, soft enough that collision can still slide
-// them along their ring rather than pile them up on it.
-const ISOLATED_PULL = 0.3
+// 사건 구역 사이의 간격. 단어 사이 간격의 세 배여야 "저건 다른 이야기"가 여백만으로
+// 읽힌다 — 같은 크기로 두면 구역의 경계가 그냥 또 하나의 단어 간격이 되어 아무것도
+// 나누지 못한다.
+const GUTTER_RATIO = 3
 
 // A rendered label is taller than its font size: getBBox on the drawn <text>
 // reports about 1.2em for Hangul in a sans-serif, since the box spans ascender
 // to descender. Treating the em box as the collision height left neighbouring
 // rows grazing each other by a pixel — measured at 1px on the 정치 and IT tabs.
 const LINE_HEIGHT = 1.2
+
+// 별 배치에서 반지름을 키우는 비율과 시도 횟수. 라벨 폭이 제각각이라 각도를 고르게
+// 나누면 넓은 라벨끼리 부딪히는데, 반지름을 통째로 키우면 원둘레가 늘어 반드시
+// 해소된다 — 라벨 크기는 고정이므로 수렴이 보장된다.
+const RADIAL_GROWTH = 1.12
+const RADIAL_TRIES = 40
+
+// 로컬 시뮬레이션이 받을 상자의 가로세로비. 캔버스가 가로로 길고 구역도 가로로
+// 눕는 편이 선반 패킹에서 덜 버려진다.
+const LOCAL_ASPECT = 1.5
+
+// 로컬 상자를 라벨 넓이 합의 몇 배로 잡을지.
+//
+// **1이면 안 된다.** 라벨 크기가 제각각이라 빈틈 없이 채울 수 없고, 넓이 합과
+// 똑같은 상자에서는 충돌이 끝내 해소되지 않는다 — 측정하면 라벨 겹침이 네 날
+// 모두에서 12~19쌍 나왔다(불변식은 0이다). 게다가 붙어 버린 두 라벨 사이에는
+// 선을 그릴 자리가 없어져 엣지가 조용히 사라진다: 37개 중 22개만 그려졌다.
+// CLAUDE.md가 응집력 0.35에 대해 기록한 바로 그 고장이다.
+//
+// 넉넉해도 비용이 없다는 것이 이 값을 고르기 쉽게 만든다. 구역의 크기는 상자가
+// 아니라 crop이 정하므로, 남는 여백은 그냥 잘려 나간다.
+const LOCAL_SLACK = 3.5
 
 interface LayoutNode extends SimulationNodeDatum, MeasuredWord {
   halfWidth: number
@@ -145,14 +171,14 @@ interface LayoutNode extends SimulationNodeDatum, MeasuredWord {
 
 type LayoutLink = SimulationLinkDatum<LayoutNode> & GraphEdge
 
-// mulberry32, wired into the simulation below.
+// mulberry32, wired into the simulations below.
 //
 // This does not make the layout deterministic — it already is. Initial
-// positions are seeded below, and d3's random source is reached only to jiggle
-// two nodes that occupy the exact same point, by
-// +/-5e-7. Passing a source of our own pins that behaviour to this file rather
-// than to a d3 internal, so a change there cannot quietly start moving the
-// graph between reloads and flaking the e2e suite.
+// positions are seeded, and d3's random source is reached only to jiggle two
+// nodes that occupy the exact same point, by +/-5e-7. Passing a source of our
+// own pins that behaviour to this file rather than to a d3 internal, so a
+// change there cannot quietly start moving the graph between reloads and
+// flaking the e2e suite.
 export function seededRandom(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -172,8 +198,8 @@ export function seededRandom(seed: number): () => number {
 function rectCollide(padding: number, strength: number) {
   let nodes: LayoutNode[] = []
 
-  // Quadratic, but render_cap holds the node count at 130, so this is ~8k pairs
-  // per tick and finishes well inside a frame budget for a one-off layout.
+  // Quadratic, but it now runs per event rather than over the whole day, so the
+  // biggest case measured is 14 nodes — 91 pairs a tick instead of 2,415.
   function force() {
     for (let i = 0; i < nodes.length; i++) {
       const a = nodes[i]
@@ -212,12 +238,11 @@ function rectCollide(padding: number, strength: number) {
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
 
 // d3-force lays out any node without an x/y on a phyllotaxis spiral centred on
-// the origin — the top-left corner of the canvas — and expects the centring
-// forces to carry it in from there. At the force strengths this layout needs,
-// 300 ticks is not enough to travel half a canvas, so a graph of eight words
-// settled in a clump up and to the left of centre with the rest of the frame
-// empty. Seeding the same spiral, centred and scaled to the frame, fixes the
-// drift and starts the simulation somewhere already plausible.
+// the origin — the top-left corner — and expects the centring forces to carry
+// it in from there. At the force strengths this layout needs, 300 ticks is not
+// enough to travel half a box, so nodes settled in a clump up and to the left
+// with the rest of the frame empty. Seeding the same spiral, centred and scaled
+// to the box, fixes the drift and starts the simulation somewhere plausible.
 //
 // sqrt of the index is what makes the points evenly dense rather than bunched
 // in the middle, and the count normalises it so eight words spread as widely as
@@ -240,10 +265,6 @@ function initialPosition(
 }
 
 // 리사이즈가 폭을 이만큼 움직이기 전에는 레이아웃을 다시 돌리지 않는다.
-//
-// 한 번 도는 값이 크다 — 루뱅 분할, 300틱 시뮬레이션, 그리고 엣지마다 라벨
-// 박스를 훑는 곡선 탐색이 전부 렌더 경로 안에서 동기로 돈다. 창 가장자리를
-// 끄는 동안은 프레임마다 한 번이다.
 //
 // 8px이 보이지 않는 이유: svg는 자기 크기로 그려진 뒤 max-w-full로 축소되므로,
 // 8px 어긋난 폭으로 돈 레이아웃은 1% 다른 배율로 같은 그림을 낸다.
@@ -270,26 +291,23 @@ export function computeGraphLayout(
     return {
       nodes: [],
       edges: [],
-      clusters: [],
+      regions: [],
       communities: new Map(),
       bounds: { x: 0, y: 0, width: 0, height: 0 },
     }
   }
 
-  const {
-    width,
-    height,
-    ticks = DEFAULT_TICKS,
-    seed = DEFAULT_SEED,
-    padding = DEFAULT_PADDING,
-    clusterLimit = DEFAULT_CLUSTER_LIMIT,
-  } = options
+  const { width, ticks = DEFAULT_TICKS, seed = DEFAULT_SEED, padding = DEFAULT_PADDING } = options
+  const gutter = padding * GUTTER_RATIO
 
-  const nodes: LayoutNode[] = words.map((w, i) => ({
+  const nodes: LayoutNode[] = words.map((w) => ({
     ...w,
     halfWidth: w.textWidth / 2,
     halfHeight: (w.fontSize * LINE_HEIGHT) / 2,
-    ...initialPosition(i, words.length, width, height, padding),
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
   }))
 
   const byWord = new Map(nodes.map((n) => [n.word, n]))
@@ -302,80 +320,90 @@ export function computeGraphLayout(
     .map((e) => ({ ...e, source: e.a, target: e.b }))
 
   // Communities come from the edge topology alone, so they can be found before
-  // anything is positioned — which is what lets the layout hold each event
-  // together rather than discovering the grouping after the fact.
+  // anything is positioned — which is what lets each event be laid out in its
+  // own box rather than discovering the grouping after the fact.
   const communities = detectCommunities(words, links)
+
+  // **구역의 단위는 합쳐진 사건이다.** 날것의 루뱅 커뮤니티가 아니다: 목록은
+  // 커뮤니티 둘이 MERGE_MIN_EDGES 이상으로 이어지면 한 사건으로 부르므로,
+  // 커뮤니티로 나누면 목록이 하나라고 부르는 이야기를 캔버스가 두 상자로 쪼갠다.
+  // src/lib/events.ts가 그 병합의 유일한 사본을 들고 있고 여기서 그걸 부른다.
+  const eventOf = new Map(mergeCommunities(words, links, communities))
 
   const degrees = new Map<string, number>()
   for (const l of links) {
     degrees.set(l.a, (degrees.get(l.a) ?? 0) + 1)
     degrees.set(l.b, (degrees.get(l.b) ?? 0) + 1)
   }
-  const hubs = chooseHubs(words, communities, degrees)
-  const ringRadius = isolatedRings(words, degrees, width, height)
 
-  const simulation = forceSimulation(nodes)
-    .randomSource(seededRandom(seed))
-    .force(
-      'link',
-      forceLink<LayoutNode, LayoutLink>(links)
-        .id((n) => n.word)
-        // Strongly associated words sit closer, which is the whole point of
-        // drawing edges at all; the size term keeps big labels from being
-        // pulled on top of each other.
-        .distance((l) => {
-          const a = l.source as LayoutNode
-          const b = l.target as LayoutNode
-          return (a.halfWidth + b.halfWidth + 24) * (1.3 - 0.5 * clamp01(l.npmi))
-        })
-        .strength((l) => 0.15 + 0.55 * clamp01(l.npmi)),
-    )
-    // Bigger words claim more room. distanceMax keeps repulsion local so the
-    // isolated majority spreads out instead of being blown to the margins.
-    .force(
-      'charge',
-      forceManyBody<LayoutNode>()
-        .strength((n) => -35 - n.halfWidth * 2.0)
-        // Capping the range matters more than the strength does. Let repulsion
-        // act across the whole canvas and the outermost words are pushed into
-        // the bounds clamp, where they pile up into a column stuck to the wall.
-        .distanceMax(Math.max(width, height) / 2),
-    )
-    // Bounded on purpose, and the bound is the edges rather than the eye. Too
-    // strong and a cluster's words are dragged into contact, the label clearance
-    // consumes the whole line between them, and the graph silently loses the
-    // edges that justify the grouping — 0.35 against a padding of 6 removed half
-    // the lines on screen. Too weak and the members scatter, so the hull drawn
-    // round them swallows unrelated words.
-    .force('cluster', clusterCohesion(communities, hubs, 0.25))
-    .force('collide', rectCollide(padding, 0.8))
-    // 42 of the day's 110 words hold no edge at all, and the most connected word
-    // holds six. Left to the centring forces those 42 settle in among the events
-    // and are most of what makes the middle look crowded, so they are pushed out
-    // to a ring: events in the middle, unattached words around them.
-    .force(
-      'unattached',
-      forceRadial<LayoutNode>(
-        (n) => ringRadius.get(n.word) ?? 0,
-        width / 2,
-        height / 2,
-      ).strength((n) => (ringRadius.has(n.word) ? ISOLATED_PULL : 0)),
-    )
-    // Weaker across the long axis, or the graph settles into a circular blob in
-    // the middle of a wide canvas and leaves the sides empty.
-    .force('x', forceX<LayoutNode>(width / 2).strength(0.03))
-    .force('y', forceY<LayoutNode>(height / 2).strength(0.065))
-
-  // Run the whole thing synchronously and paint once. An animated settle looks
-  // busy on a page whose point is to be read, and a fixed tick count is what
-  // makes the same day render the same picture twice.
-  simulation.stop()
-  simulation.alpha(1).alphaDecay(1 - Math.pow(0.001, 1 / ticks))
-
-  for (let i = 0; i < ticks; i++) {
-    simulation.tick()
-    clampToBounds(nodes, width, height, padding)
+  // 엣지를 가졌는데 병합이 사건을 주지 않은 단어 — 루뱅이 혼자 남긴 경우 — 는
+  // 자기 혼자짜리 구역을 받는다. 무연결 단어 띠로 보내면 그 단어의 선이 띠에서
+  // 구역까지 화면을 가로지르게 된다.
+  let solo = -1
+  for (const node of nodes) {
+    if (eventOf.has(node.word) || (degrees.get(node.word) ?? 0) === 0) continue
+    eventOf.set(node.word, solo--)
   }
+
+  const members = new Map<number, LayoutNode[]>()
+  for (const node of nodes) {
+    const id = eventOf.get(node.word)
+    if (id === undefined) continue
+    const group = members.get(id)
+    if (group) group.push(node)
+    else members.set(id, [node])
+  }
+
+  const linksByEvent = new Map<number, LayoutLink[]>()
+  for (const l of links) {
+    const a = eventOf.get(l.a)
+    if (a === undefined || a !== eventOf.get(l.b)) continue
+    const held = linksByEvent.get(a)
+    if (held) held.push(l)
+    else linksByEvent.set(a, [l])
+  }
+
+  // --- A단계: 사건마다 자기 상자 안에서 --------------------------------------
+  const boxes: LaidOutEvent[] = []
+  for (const [id, group] of members) {
+    boxes.push(layoutEvent(id, group, linksByEvent.get(id) ?? [], padding, ticks, seed))
+  }
+  // 넓은 사건부터. 하루의 제일 큰 이야기가 읽기가 시작되는 왼쪽 위에 놓인다.
+  // 동수는 첫 단어로 깨서 같은 날이 같은 그림을 낸다.
+  boxes.sort((a, b) => b.width * b.height - a.width * a.height || a.first.localeCompare(b.first))
+  const packOrder = orderForPacking(boxes, links, eventOf)
+
+  const packed = shelfPack(
+    packOrder.map((b) => ({ width: b.width, height: b.height })),
+    width,
+    gutter,
+  )
+
+  const regions: EventRegion[] = packOrder.map((box, i) => ({
+    id: box.id,
+    words: box.words,
+    x: round(packed.spots[i].x),
+    y: round(packed.spots[i].y),
+    width: round(box.width),
+    height: round(box.height),
+  }))
+
+  for (let i = 0; i < packOrder.length; i++) {
+    const spot = packed.spots[i]
+    for (const node of packOrder[i].members) {
+      node.x = (node.x ?? 0) + spot.x
+      node.y = (node.y ?? 0) + spot.y
+    }
+  }
+
+  // --- 무연결 단어는 구역 **바깥**으로 ---------------------------------------
+  //
+  // 이 단어들이 가운데를 붐비게 만드는 주범이었다: 70개 중 23~28개가 아무 선도
+  // 갖지 않는데, 예전에는 캔버스 안쪽 고리(반지름 0.36~0.52)로 보내져 사건들
+  // 사이사이에 끼었다. 안쪽 고리가 아니라 아래 띠라서 가운데가 완전히 빈다.
+  const loose = nodes.filter((n) => !eventOf.has(n.word))
+  const looseTop = packed.height > 0 && loose.length > 0 ? packed.height + gutter : packed.height
+  const looseSize = flowRows(loose, width, padding, looseTop)
 
   const placed: PlacedNode[] = nodes.map((n) => ({
     word: n.word,
@@ -388,6 +416,12 @@ export function computeGraphLayout(
     x: round(n.x ?? 0),
     y: round(n.y ?? 0),
   }))
+
+  // 사건 구역들과 무연결 띠의 폭이 서로 다르므로, 둘 다 실제로 쓰인 폭 안에서
+  // 가운데로 민다. 왼쪽에 맞추면 아래위가 어긋난 채로 남아 배치가 의도된 것이
+  // 아니라 흘러넘친 것처럼 보인다.
+  const content = Math.max(packed.width, looseSize.width)
+  centerRows(placed, regions, packed, packOrder, looseSize, content)
 
   const placedByWord = new Map(placed.map((n) => [n.word, n]))
 
@@ -407,129 +441,600 @@ export function computeGraphLayout(
     }
   })
 
-  const clusters = findClusters(placed, communities).slice(0, clusterLimit)
-
   return {
     nodes: placed,
     edges: placedEdges,
-    clusters,
+    regions,
     communities,
-    bounds: boundingBox(placed, clusters, padding),
+    bounds: boundingBox(placed, padding),
   }
 }
 
-// Which words get pushed out of the middle, and how far. Only the ones holding
-// no edge at all — 42 of the day's 110 on 2026-08-01, and most of what makes the
-// centre look crowded.
-//
-// Empty when nothing is connected: with no events there is no middle to clear,
-// and pressing every word outward would only ring an empty canvas.
-function isolatedRings(
-  words: MeasuredWord[],
-  degrees: Map<string, number>,
-  width: number,
-  height: number,
-): Map<string, number> {
-  const radii = new Map<string, number>()
-  if (degrees.size === 0) return radii
+// --- A단계 -----------------------------------------------------------------
 
-  const short = Math.min(width, height)
-  const inner = short * ISOLATED_RING_INNER
-  const span = short * (ISOLATED_RING_OUTER - ISOLATED_RING_INNER)
-
-  // Consecutive words land on different rings, so neighbours in the list are not
-  // competing for the same circumference.
-  let index = 0
-  for (const word of words) {
-    if (degrees.has(word.word)) continue
-    radii.set(word.word, inner + span * ((index % ISOLATED_RINGS) / (ISOLATED_RINGS - 1)))
-    index += 1
-  }
-
-  return radii
+interface LaidOutEvent {
+  id: number
+  words: string[]
+  members: LayoutNode[]
+  /** 좌상단이 (0,0)이 되도록 이미 옮겨진 상자의 크기. */
+  width: number
+  height: number
+  /** 정렬 tie-break용, 결정성을 위해. */
+  first: string
 }
 
-// The word each event is arranged around: the member holding the most edges,
+/**
+ * 한 사건을 자기 상자 안에 배치한다. 멤버의 x/y는 상자 좌표(좌상단 0,0)로 들어간다.
+ *
+ * 배열 방식은 취향이 아니라 **위상으로** 고른다. 진짜 별 — 최대 차수가 멤버−1 —
+ * 이면 바큇살로 놓는다: 선이 전부 짧고 방사형이라 교차가 원천적으로 없다. 그
+ * 밖은 로컬 시뮬레이션이다.
+ *
+ * 전부 방사형으로 통일하지 않는 이유는 측정된 것이다: 3단어 이상 사건 25개 중
+ * 별·나무가 11, 덩어리가 14인데 **하루의 제일 큰 사건은 네 날 내내 예외 없이
+ * 덩어리다** — 08-02 전당대회 13단어/27엣지(나무라면 12), 08-03 전당대회
+ * 12단어/23엣지, 08-03 트럼프·우크라 14단어/15엣지. 방사형으로 밀어붙이면 바큇살
+ * 사이를 가로지르는 현이 15개 남고, 그게 지금 벗어나려는 그 난잡함이다.
+ */
+function layoutEvent(
+  id: number,
+  members: LayoutNode[],
+  links: LayoutLink[],
+  padding: number,
+  ticks: number,
+  seed: number,
+): LaidOutEvent {
+  // 멤버 순서를 여기서 못박는다. 호출자가 준 순서는 빈도순이지만, 배치가 그
+  // 순서에 기대는 곳이 여럿이라 한 번에 정해 두는 편이 낫다.
+  const ordered = [...members].sort((a, b) => b.count - a.count || a.word.localeCompare(b.word))
+
+  if (ordered.length === 1) {
+    const only = ordered[0]
+    only.x = only.halfWidth
+    only.y = only.halfHeight
+  } else if (ordered.length === 2) {
+    // 둘뿐이면 나란히. 시뮬레이션을 돌릴 것이 없다 — 링크는 당기고 충돌은 밀어
+    // 결국 옆에 서는데, 그 결과를 300틱 들여 알아낼 이유가 없다.
+    const [a, b] = ordered
+    a.x = a.halfWidth
+    a.y = Math.max(a.halfHeight, b.halfHeight)
+    b.x = a.halfWidth * 2 + padding + b.halfWidth
+    b.y = a.y
+  } else if (isStar(ordered, links)) {
+    placeRadially(ordered, links, padding)
+  } else {
+    simulateLocally(ordered, links, padding, ticks, seed)
+    untangle(ordered, links, padding)
+  }
+
+  const box = crop(ordered)
+  for (const n of ordered) {
+    n.x = (n.x ?? 0) - box.x
+    n.y = (n.y ?? 0) - box.y
+  }
+
+  return {
+    id,
+    words: ordered.map((n) => n.word),
+    members: ordered,
+    width: box.width,
+    height: box.height,
+    first: ordered[0].word,
+  }
+}
+
+function degreesWithin(members: LayoutNode[], links: LayoutLink[]): Map<string, number> {
+  const degrees = new Map<string, number>()
+  for (const n of members) degrees.set(n.word, 0)
+  for (const l of links) {
+    degrees.set(l.a, (degrees.get(l.a) ?? 0) + 1)
+    degrees.set(l.b, (degrees.get(l.b) ?? 0) + 1)
+  }
+  return degrees
+}
+
+/** 한 멤버가 나머지 전부와 이어져 있고 그 밖의 선은 없는가. */
+function isStar(members: LayoutNode[], links: LayoutLink[]): boolean {
+  if (links.length !== members.length - 1) return false
+  const degrees = degreesWithin(members, links)
+  return Math.max(...degrees.values()) === members.length - 1
+}
+
+// The word the event is arranged around: the member holding the most edges,
 // which is the one the other members have in common. Ties break on headline
-// count and then on the word, so the same day always picks the same hub and the
-// layout stays reproducible.
-function chooseHubs(
-  words: MeasuredWord[],
-  communities: Map<string, number>,
-  degrees: Map<string, number>,
-): Map<number, string> {
-  const best = new Map<number, MeasuredWord>()
-
-  for (const word of words) {
-    const id = communities.get(word.word)
-    if (id === undefined) continue
-    const held = best.get(id)
-    if (!held || beatsAsHub(word, held, degrees)) best.set(id, word)
-  }
-
-  return new Map([...best].map(([id, word]) => [id, word.word]))
-}
-
-function beatsAsHub(a: MeasuredWord, b: MeasuredWord, degrees: Map<string, number>): boolean {
-  const da = degrees.get(a.word) ?? 0
-  const db = degrees.get(b.word) ?? 0
-  if (da !== db) return da > db
-  if (a.count !== b.count) return a.count > b.count
-  return a.word < b.word
-}
-
-// Holds each event's words together on the canvas. Without it the layout knows
-// only about individual edges, so a cluster's members end up scattered with
-// unrelated words between them — and then the hull drawn around them swallows
-// those strangers and the blobs pile up on each other.
+// count and then on the word, so the same day always picks the same hub.
 //
-// Members are pulled toward their event's **hub** — the member holding the most
-// edges — rather than toward the centroid. Both hold a cluster together, but a
-// centroid is an empty point that no word occupies, so the words ring a gap and
-// the reader has nothing to read the event from. Anchoring on the hub puts the
-// word the event is actually about in the middle of it.
-function clusterCohesion(
-  communities: Map<string, number>,
-  hubs: Map<number, string>,
-  strength: number,
-) {
-  let nodes: LayoutNode[] = []
-  let sized = new Set<number>()
-
-  function force(alpha: number) {
-    const anchors = new Map<number, LayoutNode>()
-    for (const n of nodes) {
-      const id = communities.get(n.word)
-      if (id === undefined || !sized.has(id)) continue
-      if (hubs.get(id) === n.word) anchors.set(id, n)
-    }
-
-    for (const n of nodes) {
-      const id = communities.get(n.word)
-      if (id === undefined) continue
-      const anchor = anchors.get(id)
-      // The hub anchors the event, so it is not pulled toward itself.
-      if (!anchor || anchor === n) continue
-      n.vx = (n.vx ?? 0) + ((anchor.x ?? 0) - (n.x ?? 0)) * strength * alpha
-      n.vy = (n.vy ?? 0) + ((anchor.y ?? 0) - (n.y ?? 0)) * strength * alpha
+// 허브를 가운데 두는 것은 무게중심을 쓰는 것과 다르다. 둘 다 사건을 붙여 놓지만
+// 무게중심은 아무 단어도 차지하지 않은 빈 점이라, 멤버들이 구멍을 둘러싸고 서고
+// 가운데에 사건을 읽을 것이 없다.
+function chooseHub(members: LayoutNode[], degrees: Map<string, number>): LayoutNode {
+  let best = members[0]
+  for (const n of members) {
+    if (n === best) continue
+    const dn = degrees.get(n.word) ?? 0
+    const db = degrees.get(best.word) ?? 0
+    if (dn !== db ? dn > db : n.count !== best.count ? n.count > best.count : n.word < best.word) {
+      best = n
     }
   }
-
-  force.initialize = (n: LayoutNode[]) => {
-    nodes = n
-    // A word alone in its community has no one to be pulled toward, and
-    // including it would only add a no-op centroid at its own position.
-    const counts = new Map<number, number>()
-    for (const node of nodes) {
-      const id = communities.get(node.word)
-      if (id === undefined) continue
-      counts.set(id, (counts.get(id) ?? 0) + 1)
-    }
-    sized = new Set([...counts].filter(([, c]) => c > 1).map(([id]) => id))
-  }
-
-  return force
+  return best
 }
+
+function placeRadially(members: LayoutNode[], links: LayoutLink[], padding: number): void {
+  const hub = chooseHub(members, degreesWithin(members, links))
+  const leaves = members.filter((n) => n !== hub)
+
+  // 허브가 원점. 12시부터 시계방향으로 고르게.
+  let radius = hub.halfWidth + Math.max(...leaves.map((n) => n.halfWidth)) + padding
+  for (let attempt = 0; attempt < RADIAL_TRIES; attempt++) {
+    hub.x = 0
+    hub.y = 0
+    leaves.forEach((leaf, i) => {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / leaves.length
+      leaf.x = radius * Math.cos(angle)
+      leaf.y = radius * Math.sin(angle)
+    })
+    if (!anyOverlap(members, padding)) return
+    radius *= RADIAL_GROWTH
+  }
+}
+
+/**
+ * 자리를 맞바꿔 가며 사건 **안쪽**의 선 교차를 줄인다.
+ *
+ * 이게 필요하다는 것은 측정이 알려준 것이고, 알려주기 전까지는 다리 탓인 줄
+ * 알았다. 구역을 나누고 나서 남은 교차를 구역 안(`xIn`)과 다리가 낀 것(`xBr`)으로
+ * 갈라 보니 08-02는 16 대 0, 08-03은 18 대 0이었다 — 사건들 사이는 이미 깨끗했고
+ * 난잡함은 통째로 하루의 제일 큰 사건 **하나 안에** 있었다. 13단어 27엣지짜리
+ * 덩어리를 힘 균형으로 펴는 데는 한계가 있다.
+ *
+ * 그래서 재는 값을 직접 줄인다. 두 멤버의 좌표를 맞바꿔 보고 교차가 줄면 남긴다.
+ * 멤버가 14개를 넘지 않으므로 모든 쌍을 봐도 91가지고, 판정은 곡선이 아니라
+ * 직선 현으로 한다 — 곡선 라우팅은 이 다음에 오고, 어차피 교차하는 곡선은
+ * 교차하는 현에서 나온다.
+ *
+ * **맞바꾼 뒤에는 충돌을 다시 푼다.** 이걸 빼면 아무 효과도 없다 — 한 사건 안의
+ * 라벨 폭은 50px에서 200px까지 벌어지므로(08-02의 정청래 160, 양산 63), 넓은
+ * 라벨을 좁은 라벨 자리에 그대로 놓으면 반드시 이웃과 부딪힌다. 겹치면 거부하는
+ * 첫 판본은 사실상 모든 맞바꿈을 거부해서 교차를 하나도 줄이지 못했다.
+ * 그러고도 안 풀리면 그 맞바꿈은 되돌린다.
+ *
+ * 결정적이다: 쌍을 고정된 순서로 훑고 개선되는 것만 남긴다.
+ */
+function untangle(members: LayoutNode[], links: LayoutLink[], padding: number): void {
+  if (links.length < 2) return
+
+  const snapshot = () => members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
+  const restore = (saved: { x: number; y: number }[]) => {
+    members.forEach((n, i) => {
+      n.x = saved[i].x
+      n.y = saved[i].y
+    })
+  }
+
+  let best = countCrossings(members, links)
+  for (let round = 0; round < UNTANGLE_ROUNDS && best > 0; round++) {
+    let improved = false
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const saved = snapshot()
+        const a = members[i]
+        const b = members[j]
+        const x = a.x
+        const y = a.y
+        a.x = b.x
+        a.y = b.y
+        b.x = x
+        b.y = y
+
+        relax(members, padding)
+        const now = countCrossings(members, links)
+        if (now < best && !anyOverlap(members, padding)) {
+          best = now
+          improved = true
+        } else {
+          restore(saved)
+        }
+      }
+    }
+    if (!improved) break
+  }
+}
+
+// 맞바꿈을 몇 번이나 훑을지. 개선이 없으면 그전에 멈추므로 상한일 뿐이다.
+const UNTANGLE_ROUNDS = 4
+// 맞바꾼 뒤 충돌만 푸는 반복 횟수.
+const RELAX_TICKS = 24
+
+/**
+ * 위치를 직접 밀어 겹침만 푼다. d3를 다시 돌리지 않는 이유는 링크와 척력이
+ * 방금 만든 배열을 도로 흐트러뜨리기 때문이다 — 여기서 원하는 것은 자리를
+ * 바꾼 두 라벨이 이웃을 밀어내는 것뿐이다.
+ */
+function relax(members: LayoutNode[], padding: number): void {
+  for (let tick = 0; tick < RELAX_TICKS; tick++) {
+    let moved = false
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const a = members[i]
+        const b = members[j]
+        const dx = (b.x ?? 0) - (a.x ?? 0)
+        const overlapX = a.halfWidth + b.halfWidth + padding - Math.abs(dx)
+        if (overlapX <= 0) continue
+        const dy = (b.y ?? 0) - (a.y ?? 0)
+        const overlapY = a.halfHeight + b.halfHeight + padding - Math.abs(dy)
+        if (overlapY <= 0) continue
+
+        moved = true
+        if (overlapX < overlapY) {
+          const push = (dx < 0 ? -overlapX : overlapX) * 0.5
+          a.x = (a.x ?? 0) - push
+          b.x = (b.x ?? 0) + push
+        } else {
+          const push = (dy < 0 ? -overlapY : overlapY) * 0.5
+          a.y = (a.y ?? 0) - push
+          b.y = (b.y ?? 0) + push
+        }
+      }
+    }
+    if (!moved) return
+  }
+}
+
+/** 중심-중심 직선으로 셌을 때 서로 교차하는 엣지 쌍의 수. */
+function countCrossings(members: LayoutNode[], links: LayoutLink[]): number {
+  const at = new Map(members.map((n) => [n.word, n]))
+  let count = 0
+  for (let i = 0; i < links.length; i++) {
+    for (let j = i + 1; j < links.length; j++) {
+      const p = links[i]
+      const q = links[j]
+      // 끝점을 공유하는 두 선은 단어 위에서 만나는 것이지 교차가 아니다.
+      if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+      const a = at.get(p.a)!
+      const b = at.get(p.b)!
+      const c = at.get(q.a)!
+      const d = at.get(q.b)!
+      if (segmentsCross(a, b, c, d)) count++
+    }
+  }
+  return count
+}
+
+interface Point {
+  x?: number
+  y?: number
+}
+
+function segmentsCross(p1: Point, p2: Point, p3: Point, p4: Point): boolean {
+  const side = (o: Point, a: Point, b: Point) =>
+    ((a.x ?? 0) - (o.x ?? 0)) * ((b.y ?? 0) - (o.y ?? 0)) -
+    ((a.y ?? 0) - (o.y ?? 0)) * ((b.x ?? 0) - (o.x ?? 0))
+  const d1 = side(p3, p4, p1)
+  const d2 = side(p3, p4, p2)
+  const d3 = side(p1, p2, p3)
+  const d4 = side(p1, p2, p4)
+  return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0
+}
+
+function anyOverlap(members: LayoutNode[], padding: number): boolean {
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const a = members[i]
+      const b = members[j]
+      if (
+        Math.abs((a.x ?? 0) - (b.x ?? 0)) < a.halfWidth + b.halfWidth + padding &&
+        Math.abs((a.y ?? 0) - (b.y ?? 0)) < a.halfHeight + b.halfHeight + padding
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function simulateLocally(
+  members: LayoutNode[],
+  links: LayoutLink[],
+  padding: number,
+  ticks: number,
+  seed: number,
+): void {
+  // 상자는 라벨들이 실제로 차지하는 넓이에서 잡는다. 캔버스 크기에서 나눠 주면
+  // 단어가 적은 사건이 큰 상자 안에서 흩어지고, 그 흩어짐이 그대로 구역 사이의
+  // 빈 공간이 된다.
+  let area = 0
+  let widest = 0
+  let tallest = 0
+  for (const n of members) {
+    area += (n.halfWidth * 2 + padding) * (n.halfHeight * 2 + padding)
+    widest = Math.max(widest, n.halfWidth * 2)
+    tallest = Math.max(tallest, n.halfHeight * 2)
+  }
+  const roomy = area * LOCAL_SLACK
+  const width = Math.max(Math.sqrt(roomy * LOCAL_ASPECT), widest + padding * 2)
+  const height = Math.max(roomy / width, tallest + padding * 2)
+
+  members.forEach((n, i) => {
+    Object.assign(n, initialPosition(i, members.length, width, height, padding))
+  })
+
+  const simulation = forceSimulation(members)
+    .randomSource(seededRandom(seed))
+    .force(
+      'link',
+      forceLink<LayoutNode, LayoutLink>(links)
+        .id((n) => n.word)
+        // Strongly associated words sit closer, which is the whole point of
+        // drawing edges at all; the size term keeps big labels from being
+        // pulled on top of each other.
+        .distance((l) => {
+          const a = l.source as LayoutNode
+          const b = l.target as LayoutNode
+          return (a.halfWidth + b.halfWidth + 24) * (1.3 - 0.5 * clamp01(l.npmi))
+        })
+        .strength((l) => 0.15 + 0.55 * clamp01(l.npmi)),
+    )
+    // Bigger words claim more room. Capping the range matters more than the
+    // strength does: let repulsion act across the whole box and the outermost
+    // words are pushed into the bounds clamp, where they pile up on the wall.
+    .force(
+      'charge',
+      forceManyBody<LayoutNode>()
+        .strength((n) => -35 - n.halfWidth * 2.0)
+        .distanceMax(Math.max(width, height) / 2),
+    )
+    .force('collide', rectCollide(padding, 0.8))
+    // 전역 배치일 때보다 세다. 구역은 촘촘할수록 좋다 — 사건 안의 여백은 이제
+    // 사건 사이의 여백과 경쟁하고, 그 둘이 비슷해지면 구역이 안 읽힌다.
+    .force('x', forceX<LayoutNode>(width / 2).strength(0.08))
+    .force('y', forceY<LayoutNode>(height / 2).strength(0.08))
+
+  // Run the whole thing synchronously and paint once. An animated settle looks
+  // busy on a page whose point is to be read, and a fixed tick count is what
+  // makes the same day render the same picture twice.
+  simulation.stop()
+  simulation.alpha(1).alphaDecay(1 - Math.pow(0.001, 1 / ticks))
+
+  for (let i = 0; i < ticks; i++) {
+    simulation.tick()
+    clampToBounds(members, width, height, padding)
+  }
+}
+
+/**
+ * 라벨 박스들을 딱 감싸는 상자. 여유를 두지 않는다 — 구역 사이의 간격은 패킹이
+ * gutter로 주고, 여기서도 여유를 두면 그 간격이 두 번 더해져 구역이 실제보다
+ * 멀어 보인다.
+ */
+function crop(members: LayoutNode[]) {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of members) {
+    minX = Math.min(minX, (n.x ?? 0) - n.halfWidth)
+    minY = Math.min(minY, (n.y ?? 0) - n.halfHeight)
+    maxX = Math.max(maxX, (n.x ?? 0) + n.halfWidth)
+    maxY = Math.max(maxY, (n.y ?? 0) + n.halfHeight)
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+}
+
+// --- B단계 -----------------------------------------------------------------
+
+/**
+ * 다리로 이어진 사건들이 서로 옆에 놓이도록 순서를 다시 짠다.
+ *
+ * 넓이순으로만 채우면 다리 하나가 화면을 대각선으로 가로지른다 — 측정하면
+ * 엣지 최대 길이가 208px에서 719px로 뛰었고, 07-31에 남은 교차 3개는 전부
+ * 다리가 낀 것이었다. 다리는 "두 이야기에 걸친 단어"라는 정보라서 없앨 수 없고,
+ * 없앨 것은 그 길이다.
+ *
+ * 넓이순으로 시작해, 이미 놓인 것들과 다리가 제일 많은 사건을 다음에 놓는다.
+ * 다리가 없으면 남은 것 중 제일 넓은 것. 하루의 제일 큰 이야기가 여전히
+ * 처음이고, 동수는 첫 단어로 깨므로 결정적이다.
+ */
+function orderForPacking(
+  boxes: LaidOutEvent[],
+  links: LayoutLink[],
+  eventOf: Map<string, number>,
+): LaidOutEvent[] {
+  if (boxes.length < 3) return boxes
+
+  const bridges = new Map<number, Map<number, number>>()
+  for (const l of links) {
+    const a = eventOf.get(l.a)
+    const b = eventOf.get(l.b)
+    if (a === undefined || b === undefined || a === b) continue
+    for (const [from, to] of [
+      [a, b],
+      [b, a],
+    ]) {
+      const held = bridges.get(from) ?? new Map<number, number>()
+      held.set(to, (held.get(to) ?? 0) + 1)
+      bridges.set(from, held)
+    }
+  }
+  if (bridges.size === 0) return boxes
+
+  const remaining = [...boxes]
+  const out: LaidOutEvent[] = [remaining.shift()!]
+  const placed = new Set<number>([out[0].id])
+
+  while (remaining.length > 0) {
+    let bestIndex = 0
+    let bestTies = 0
+    for (let i = 0; i < remaining.length; i++) {
+      let ties = 0
+      for (const [to, count] of bridges.get(remaining[i].id) ?? []) {
+        if (placed.has(to)) ties += count
+      }
+      // remaining은 이미 넓이순이므로, 동수일 때 앞을 지키면 넓은 쪽이 이긴다.
+      if (ties > bestTies) {
+        bestTies = ties
+        bestIndex = i
+      }
+    }
+    const next = remaining.splice(bestIndex, 1)[0]
+    placed.add(next.id)
+    out.push(next)
+  }
+
+  return out
+}
+
+interface Spot {
+  x: number
+  y: number
+  /** 이 상자가 속한 선반. 가운데 정렬이 선반 단위로 이뤄지므로 필요하다. */
+  shelf: number
+}
+
+interface Packing {
+  spots: Spot[]
+  /** 선반마다 실제로 쓰인 폭. */
+  shelfWidths: number[]
+  width: number
+  height: number
+}
+
+/**
+ * 상자들을 폭에 채운다 — 선반(shelf) 방식.
+ *
+ * 한 상자가 폭보다 넓으면 넘치도록 둔다. 뷰포트는 그려진 것에 맞춰 잘리고 svg는
+ * max-w-full로 축소되므로, 넘치는 것보다 억지로 줄이는 쪽이 더 나쁘다.
+ */
+function shelfPack(
+  sizes: { width: number; height: number }[],
+  width: number,
+  gutter: number,
+): Packing {
+  const spots: Spot[] = []
+  const shelfWidths: number[] = []
+  let shelf = 0
+  let x = 0
+  let y = 0
+  let shelfHeight = 0
+
+  for (const size of sizes) {
+    if (x > 0 && x + size.width > width) {
+      shelfWidths[shelf] = x - gutter
+      shelf += 1
+      y += shelfHeight + gutter
+      x = 0
+      shelfHeight = 0
+    }
+    spots.push({ x, y, shelf })
+    x += size.width + gutter
+    shelfHeight = Math.max(shelfHeight, size.height)
+  }
+
+  if (sizes.length > 0) shelfWidths[shelf] = x - gutter
+
+  return {
+    spots,
+    shelfWidths,
+    width: Math.max(0, ...shelfWidths),
+    height: sizes.length === 0 ? 0 : y + shelfHeight,
+  }
+}
+
+interface FlowSize {
+  width: number
+  height: number
+  /** 줄마다 쓰인 폭과, 그 줄에 속한 노드. 가운데 정렬용. */
+  rows: { width: number; nodes: LayoutNode[] }[]
+}
+
+/**
+ * 라벨을 한 줄씩 흘려 놓는다. 사건 구역이 아니라 **남은 단어들**을 위한 것이므로
+ * 간격은 단어 간격(padding)이지 구역 간격(gutter)이 아니다 — 이 단어들은 서로
+ * 아무 관계도 아니지만 서로에 대해서는 다 같은 지위라, 사건들처럼 벌려 놓으면
+ * 그 여백이 있지도 않은 구분을 주장하게 된다.
+ */
+function flowRows(
+  nodes: LayoutNode[],
+  width: number,
+  padding: number,
+  top: number,
+): FlowSize {
+  const rows: { width: number; nodes: LayoutNode[] }[] = []
+  let current: LayoutNode[] = []
+  let x = 0
+  let y = top
+  let rowHeight = 0
+
+  const close = () => {
+    if (current.length === 0) return
+    rows.push({ width: x - padding, nodes: current })
+  }
+
+  for (const n of nodes) {
+    const w = n.halfWidth * 2
+    if (x > 0 && x + w > width) {
+      close()
+      current = []
+      y += rowHeight + padding
+      x = 0
+      rowHeight = 0
+    }
+    n.x = x + n.halfWidth
+    n.y = y + n.halfHeight
+    current.push(n)
+    x += w + padding
+    rowHeight = Math.max(rowHeight, n.halfHeight * 2)
+  }
+  close()
+
+  // 줄 안에서 세로 가운데로. 글자 크기가 14부터 64까지 섞이므로 위에 맞추면
+  // 큰 단어 아래로 빈 칸이 생겨 줄이 어긋나 보인다.
+  for (const row of rows) {
+    const tallest = Math.max(...row.nodes.map((n) => n.halfHeight * 2))
+    for (const n of row.nodes) {
+      n.y = (n.y ?? 0) + (tallest - n.halfHeight * 2) / 2
+    }
+  }
+
+  return {
+    width: Math.max(0, ...rows.map((r) => r.width)),
+    height: nodes.length === 0 ? 0 : y + rowHeight - top,
+    rows,
+  }
+}
+
+/** 선반과 줄을 각각 실제로 쓰인 전체 폭 안에서 가운데로 민다. */
+function centerRows(
+  placed: PlacedNode[],
+  regions: EventRegion[],
+  packed: Packing,
+  boxes: LaidOutEvent[],
+  loose: FlowSize,
+  content: number,
+): void {
+  const byWord = new Map(placed.map((n) => [n.word, n]))
+
+  for (let i = 0; i < boxes.length; i++) {
+    const shift = round((content - packed.shelfWidths[packed.spots[i].shelf]) / 2)
+    if (shift === 0) continue
+    regions[i].x = round(regions[i].x + shift)
+    for (const member of boxes[i].members) {
+      const node = byWord.get(member.word)
+      if (node) node.x = round(node.x + shift)
+    }
+  }
+
+  for (const row of loose.rows) {
+    const shift = round((content - row.width) / 2)
+    if (shift === 0) continue
+    for (const member of row.nodes) {
+      const node = byWord.get(member.word)
+      if (node) node.x = round(node.x + shift)
+    }
+  }
+}
+
+// --- 선 ---------------------------------------------------------------------
 
 // Gap left between a line and the label it passes. Also what pulls an edge back
 // off its own endpoints, since a node's centre is inside its own box.
@@ -691,7 +1196,6 @@ function intrusion(curve: EdgeCurve, boxes: PlacedNode[], margin: number): numbe
   return hits
 }
 
-
 // Where the ray enters and leaves one label's box, as a fraction of the edge.
 // The slab method: clip the parameter range against each axis in turn and see
 // whether anything survives.
@@ -733,89 +1237,11 @@ function boxSpan(
   return t0 < t1 ? [t0, t1] : null
 }
 
-// How far the shaded blob sits outside the labels it wraps.
-const CLUSTER_PADDING = 14
-// Width of the stroke that rounds the hull's corners. Drawn in the same colour
-// as the fill, so it reads as one soft shape rather than as a polygon; half of
-// it spills outside the hull, which the bounding box has to allow for.
-export const CLUSTER_ROUNDING = 28
-// The all-categories view of 2026-08-01 splits into 26 communities. Shading all
-// of them tints most of the canvas and the shading stops meaning anything, so
-// only the day's biggest story gets a blob; the rest are still grouped by the
-// layout, just not outlined.
-//
-// This was 6, and six overlapping washes were the single dirtiest thing on the
-// canvas: they are hulls, so they are angular, and where two of them met the
-// page read as a smudge rather than as two events. Community is already carried
-// by position — the cohesion force is what puts an event's words together — so
-// the other five blobs were a third encoding of something said twice already.
-// One shape pointing at the day's biggest story is a claim; six are wallpaper.
-const DEFAULT_CLUSTER_LIMIT = 1
-
-// Connected components are not enough, which is worth stating because they look
-// like they would be. On a category tab they give clean events, but on the
-// all-categories view the day's 130 words and 85 edges chain through shared
-// words: 대통령 links to 한동훈 links to 민주당 links to 레버리지 links to
-// 곽상언, and one "cluster" swallowed nine words spanning four unrelated
-// stories. Any threshold that breaks that chain also disconnects the real
-// clusters, because the problem is topological rather than one of edge strength.
-//
-// So this is modularity — Louvain's first phase, run to convergence — which is
-// what the plan reserved clustering coefficient and chi-squared for. Both of
-// those measure "which event does this word belong to" for a single word;
-// modularity answers the same question for the partition as a whole, and cuts
-// the chain at the words that bridge two dense neighbourhoods.
-//
-// Clusters rank on total headline count rather than on chi-squared. Chi-squared
-// was rejected as a word score precisely because the day's biggest event
-// dominates it, which for ranking events is the wanted behaviour rather than a
-// fault — but headline count measures that directly and needs no second
-// statistic shipped from the database.
-function findClusters(
-  nodes: PlacedNode[],
-  communities: Map<string, number>,
-): PlacedCluster[] {
-  const members = new Map<number, PlacedNode[]>()
-  for (const n of nodes) {
-    const id = communities.get(n.word)
-    if (id === undefined) continue
-    const group = members.get(id)
-    if (group) group.push(n)
-    else members.set(id, [n])
-  }
-
-  const clusters: PlacedCluster[] = []
-  for (const group of members.values()) {
-    // A word joined to nothing is not an event.
-    if (group.length < 2) continue
-
-    const corners: { x: number; y: number }[] = []
-    for (const n of group) {
-      const left = n.x - n.halfWidth - CLUSTER_PADDING
-      const right = n.x + n.halfWidth + CLUSTER_PADDING
-      const top = n.y - n.halfHeight - CLUSTER_PADDING
-      const bottom = n.y + n.halfHeight + CLUSTER_PADDING
-      corners.push({ x: left, y: top }, { x: right, y: top })
-      corners.push({ x: right, y: bottom }, { x: left, y: bottom })
-    }
-
-    clusters.push({
-      words: group.map((n) => n.word),
-      headlines: group.reduce((sum, n) => sum + n.count, 0),
-      hull: convexHull(corners),
-    })
-  }
-
-  // Biggest story first. Ties break on the first word so a rerun of the same day
-  // marks the same cluster.
-  return clusters.sort(
-    (a, b) => b.headlines - a.headlines || a.words[0].localeCompare(b.words[0]),
-  )
-}
+// --- 커뮤니티 ---------------------------------------------------------------
 
 // Louvain's local-moving phase (Blondel et al. 2008), iterated until no word
-// changes community. The aggregation phase is skipped: a day tops out around 130
-// words and 150 edges, and on graphs that small the first phase already
+// changes community. The aggregation phase is skipped: a day tops out at 70
+// words and 60 edges, and on graphs that small the first phase already
 // converges to the same partition.
 //
 // Every node starts alone. Each pass offers each word to the community of each
@@ -902,39 +1328,12 @@ function detectCommunities(
   return new Map(nodes.map((n, i) => [n.word, community[i]]))
 }
 
-// Andrew's monotone chain. Returns the hull counter-clockwise; collinear points
-// are dropped, which keeps the rendered polygon free of zero-length edges.
-export function convexHull(points: { x: number; y: number }[]): { x: number; y: number }[] {
-  if (points.length < 3) return [...points]
+// --- 마무리 -----------------------------------------------------------------
 
-  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
-  const cross = (
-    o: { x: number; y: number },
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-  ) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-
-  const half = (input: { x: number; y: number }[]) => {
-    const out: { x: number; y: number }[] = []
-    for (const p of input) {
-      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) {
-        out.pop()
-      }
-      out.push(p)
-    }
-    out.pop()
-    return out
-  }
-
-  return [...half(sorted), ...half([...sorted].reverse())]
-}
-
-// Few words cannot generate enough mutual repulsion to resist the centring
-// forces, so a category with eight of them settles into a clump adrift in an
-// otherwise empty frame. Rather than tune the forces per node count — which
-// trades one bad case for another — the caller crops the viewport to whatever
-// was actually drawn.
-function boundingBox(nodes: PlacedNode[], clusters: PlacedCluster[], padding: number) {
+// The viewport is cropped to whatever was actually drawn rather than to a
+// nominal canvas, so a category with eight words gets a small frame instead of
+// a clump adrift in a large one.
+function boundingBox(nodes: PlacedNode[], padding: number) {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -947,19 +1346,6 @@ function boundingBox(nodes: PlacedNode[], clusters: PlacedCluster[], padding: nu
     maxY = Math.max(maxY, n.y + n.halfHeight)
   }
 
-  // Cluster blobs reach further out than the words they wrap — CLUSTER_PADDING
-  // to the hull, then half the rounding stroke beyond that — and cropping to the
-  // labels alone would shave their edges off.
-  const reach = CLUSTER_ROUNDING / 2
-  for (const c of clusters) {
-    for (const p of c.hull) {
-      minX = Math.min(minX, p.x - reach)
-      minY = Math.min(minY, p.y - reach)
-      maxX = Math.max(maxX, p.x + reach)
-      maxY = Math.max(maxY, p.y + reach)
-    }
-  }
-
   return {
     x: round(minX - padding),
     y: round(minY - padding),
@@ -968,8 +1354,8 @@ function boundingBox(nodes: PlacedNode[], clusters: PlacedCluster[], padding: nu
   }
 }
 
-// A label wider than the canvas cannot be kept inside it; centring it is the
-// least bad outcome, and beats Math.min/Math.max silently inverting the range.
+// A label wider than the box cannot be kept inside it; centring it is the least
+// bad outcome, and beats Math.min/Math.max silently inverting the range.
 function clampToBounds(nodes: LayoutNode[], width: number, height: number, padding: number): void {
   for (const n of nodes) {
     const marginX = n.halfWidth + padding
