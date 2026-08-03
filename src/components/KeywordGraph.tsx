@@ -12,23 +12,15 @@ import type { Surge } from '../lib/surge'
 // measured width is wrong and labels overlap.
 const FONT_FAMILY = 'sans-serif'
 
-const MIN_HEIGHT = 380
-// Width is fixed by the container and the svg is scaled down to fit it, so
-// spreading the words sideways buys nothing — the whole picture just shrinks by
-// the same factor. Height is the only free axis, and giving the simulation more
-// of it is what actually puts air between the labels.
-const MAX_HEIGHT = 820
-const HEIGHT_RATIO = 0.78
-
-// Below this the canvas is a phone's, and the desktop ratio gives a box far too
-// small to lay 70 labels out in: at 358px wide it is 358x279, and the collision
-// pass cannot resolve that many boxes in it, so the words simply land on top of
-// each other. The area a label needs does not shrink with the viewport — a
-// 14px word is 14px on a phone — so the canvas has to grow with the word count
-// rather than with the width, and on a phone the page scrolls anyway.
-const NARROW_WIDTH = 640
-const NARROW_HEIGHT_PER_WORD = 13
-const NARROW_MAX_HEIGHT = 1500
+// 높이는 여기서 정하지 않는다. 배치가 주어진 폭에 사건 구역을 채우고 필요한
+// 만큼 높아지므로, 높이는 입력이 아니라 결과다 — layout.bounds가 답한다.
+//
+// 이 자리에는 MIN_HEIGHT / MAX_HEIGHT / HEIGHT_RATIO와, 좁은 화면을 위한
+// NARROW_WIDTH / NARROW_HEIGHT_PER_WORD / NARROW_MAX_HEIGHT 분기가 있었다.
+// 그 분기가 있었던 이유는 폭에서 높이를 지어내면 폰에서 상자가 턱없이 모자라기
+// 때문인데(358px에서 358x279가 나왔고 충돌이 해소되지 않아 라벨이 서로 위에
+// 얹혔다 — 2026-07-31에서 실제로 한 쌍이 겹쳐 있었다), 높이를 지어내지 않으면
+// 그 문제 자체가 없다. 좁은 화면에서는 구역이 세로로 쌓이고 페이지가 스크롤된다.
 const FALLBACK_WIDTH = 700
 
 // scoring_weights.demote_factor is 0.3, but the RPC ships only the boolean
@@ -56,6 +48,27 @@ const EDGE_COLOR = 'var(--color-edge)'
 // Applied to an edge that had to be routed under a label because the field was
 // too crowded for any single curve to miss everything.
 const CROWDED_EDGE_FADE = 0.5
+
+// 강약을 벌리는 구간. 실측 NPMI는 0.31~1.00이고, 0부터 정규화하면 화면에 실제로
+// 나오는 값들이 위쪽 3분의 2에 몰려 서로 구별되지 않는다 — 굵기가 1.1px 폭 안에서
+// 놀았고 투명도가 0.26~0.48이었다. 개별로는 안 보이고 전체로는 소음이었다.
+//
+// 강한 결합은 진하게, 약한 결합은 옅게. 선의 세기가 이 캔버스에서 NPMI가 하는
+// 유일한 일이다 — 단어 품질 신호로는 이미 탈락했다.
+const EDGE_NPMI_FLOOR = 0.3
+const EDGE_WIDTH_MIN = 0.8
+const EDGE_WIDTH_SPAN = 2.2
+const EDGE_OPACITY_MIN = 0.15
+const EDGE_OPACITY_SPAN = 0.7
+// 선택되지 않은 관계. 노드가 물러나는 세기와 같은 값이지만 같은 상수는 아니다 —
+// 저쪽은 글자가 읽히지 않을 만큼 물러나는 것이고 이쪽은 선이 배경이 되는 것이다.
+const EDGE_UNSELECTED_OPACITY = 0.1
+
+/** 0(약함)에서 1(강함)로 편 결합 세기. */
+function edgeStrength(npmi: number): number {
+  const t = (npmi - EDGE_NPMI_FLOOR) / (1 - EDGE_NPMI_FLOOR)
+  return t < 0 ? 0 : t > 1 ? 1 : t
+}
 
 // Day-over-day movement. One glyph for both "new" and "surging": a word that
 // was not there yesterday is the limiting case of one that grew, and two
@@ -155,19 +168,6 @@ export function KeywordGraph({
   // 보통의 상호작용(단어 클릭 등)에서는 값이 같으므로 아무 차이도 없다.
   const layoutWidth = useDeferredValue(width)
 
-  const height = useMemo(() => {
-    if (layoutWidth >= NARROW_WIDTH) {
-      return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(layoutWidth * HEIGHT_RATIO)))
-    }
-    return Math.min(
-      NARROW_MAX_HEIGHT,
-      Math.max(
-        MIN_HEIGHT,
-        Math.round(layoutWidth * 0.5 + graph.nodes.length * NARROW_HEIGHT_PER_WORD),
-      ),
-    )
-  }, [layoutWidth, graph.nodes.length])
-
   const measured = useMemo<MeasuredWord[]>(() => {
     // computeFontSizes is the word cloud's, reused unchanged: size stays
     // proportional to headline count, which is the one thing a reader already
@@ -185,8 +185,8 @@ export function KeywordGraph({
   }, [graph.nodes])
 
   const layout = useMemo(
-    () => computeGraphLayout(measured, graph.edges, { width: layoutWidth, height }),
-    [measured, graph.edges, layoutWidth, height],
+    () => computeGraphLayout(measured, graph.edges, { width: layoutWidth }),
+    [measured, graph.edges, layoutWidth],
   )
 
   useEffect(() => {
@@ -293,6 +293,7 @@ export function KeywordGraph({
             const curve = edge.curve
             if (!curve) return null
             const touchesSelection = edgeLit(edge.a, edge.b)
+            const strength = edgeStrength(edge.npmi)
             return (
               <path
                 key={`${edge.a}--${edge.b}`}
@@ -300,7 +301,7 @@ export function KeywordGraph({
                 fill="none"
                 style={{ stroke: EDGE_COLOR }}
                 strokeLinecap="round"
-                strokeWidth={0.9 + 1.3 * edge.npmi}
+                strokeWidth={EDGE_WIDTH_MIN + EDGE_WIDTH_SPAN * strength}
                 // Stronger association draws a heavier, darker line; that is the
                 // only job NPMI has here, having failed as a word-quality signal.
                 //
@@ -308,8 +309,9 @@ export function KeywordGraph({
                 // fainter, so it stops competing with the words it runs under.
                 // That is the price of never dropping a relationship.
                 strokeOpacity={
-                  (touchesSelection ? 0.26 + 0.22 * edge.npmi : 0.1) *
-                  (curve.clear ? 1 : CROWDED_EDGE_FADE)
+                  (touchesSelection
+                    ? EDGE_OPACITY_MIN + EDGE_OPACITY_SPAN * strength
+                    : EDGE_UNSELECTED_OPACITY) * (curve.clear ? 1 : CROWDED_EDGE_FADE)
                 }
               />
             )

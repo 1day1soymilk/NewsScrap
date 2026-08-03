@@ -76,14 +76,24 @@ export const EVENT_LIST_LIMIT = 5
 // 트럼프 묶음(7단어)과 08-02의 전당대회(13단어)뿐이다.
 const LABEL_WORDS = 4
 
-export function buildEvents(
-  words: EventWord[],
-  edges: GraphEdge[],
+/**
+ * 루뱅 커뮤니티를 사건으로 합친다. 단어 → 사건 id.
+ *
+ * 혼자인 커뮤니티는 사건이 아니므로 **맵에서 빠진다.** 그런 단어에는 "자기 사건
+ * 밖"이라는 것이 정의되지 않으니 다리도 될 수 없고, 캔버스 쪽에서도 자기 구역을
+ * 받을 것이 없다.
+ *
+ * 목록과 캔버스가 **둘 다 이걸 부른다.** 캔버스의 응집력이 날것의 커뮤니티를
+ * 당기고 목록은 합쳐진 사건을 세던 시절에는, 목록이 하나라고 부르는 이야기를
+ * 캔버스가 두 덩어리로 쪼개 놓고 있었다. MERGE_MIN_EDGES의 사본이 하나여야
+ * 하는 것은 그 다음 문제고, 먼저 **같은 답을 봐야 한다**는 것이 이 함수가
+ * 있는 이유다.
+ */
+export function mergeCommunities(
+  words: readonly EventWord[],
+  edges: readonly GraphEdge[],
   communities: Map<string, number>,
-): EventGraph {
-  // 혼자인 커뮤니티는 사건이 아니다 — findClusters가 싱글턴을 버리는 것과 같은
-  // 컷이고, 그런 단어에는 "자기 사건 밖"이라는 것이 정의되지 않으므로 다리도
-  // 될 수 없다.
+): Map<string, number> {
   const size = new Map<number, number>()
   for (const word of words) {
     const id = communities.get(word.word)
@@ -129,11 +139,26 @@ export function buildEvents(
     if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb))
   }
 
-  const members = new Map<number, EventWord[]>()
+  const eventOf = new Map<string, number>()
   for (const word of words) {
     const id = communityOf.get(word.word)
     if (id === undefined) continue
-    const root = find(id)
+    eventOf.set(word.word, find(id))
+  }
+  return eventOf
+}
+
+export function buildEvents(
+  words: EventWord[],
+  edges: GraphEdge[],
+  communities: Map<string, number>,
+): EventGraph {
+  const merged = mergeCommunities(words, edges, communities)
+
+  const members = new Map<number, EventWord[]>()
+  for (const word of words) {
+    const root = merged.get(word.word)
+    if (root === undefined) continue
     const group = members.get(root)
     if (group) group.push(word)
     else members.set(root, [word])
