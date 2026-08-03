@@ -157,7 +157,14 @@ were already labelled bad.
 폭등장, all three bad. Revisit only if a labelled-good word ever appears cut by
 this clause alone; `31_fragments.sql` is the report that would show it.
 
-Found on the way and **not fixed**: `李대통령` exists in `headline_nouns` as two
-strings, `李` U+674E and the CJK compatibility ideograph U+F7A1, splitting 15
-rows across two words that render identically. Recorded in `CLAUDE.md` beside the
-canonical-link invariant it resembles.
+Found on the way and since **fixed**: `李대통령` existed in `headline_nouns` as
+two strings, `李` U+674E and the CJK compatibility ideograph `李` U+F9E1,
+splitting 15 rows across two words that render identically. Five compatibility
+ideographs occur in the archive (李 U+F9E1, 金 U+F90A, 勞 U+F92F, 盧 U+F933,
+女 U+F981). Migration `0012` backfilled 54 titles and 15 noun rows, and
+`extractHeadlines` and `filterNouns` normalise to NFC so it cannot return.
+
+The harness was re-run afterwards because the archive moved under a complete
+label set — rule 4's second trigger — and came back byte-identical, both
+worklists empty. The verdict above therefore stands on the repaired data as well
+as the data it was measured on.

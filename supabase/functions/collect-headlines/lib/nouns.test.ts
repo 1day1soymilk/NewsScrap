@@ -157,6 +157,20 @@ describe('filterNouns', () => {
   it('drops words shorter than 2 characters and known stopwords', () => {
     expect(filterNouns(['여야', '예산안', '것', '기자', '사진'])).toEqual(['여야', '예산안'])
   })
+
+  // 단어는 headline_nouns의 키이므로, 같은 글자의 두 표현이 두 단어가 되면 모든
+  // 집계가 조용히 갈린다. 제목 쪽에서도 정규화하지만 여기서 다시 하는 것은
+  // 중복이 아니다 — ETRI가 입력의 문자를 그대로 돌려준다는 가정을 하지 않기
+  // 위해서다. 아카이브에 실제로 있던 형태가 李대통령이다.
+  it('normalises compatibility ideographs to NFC', () => {
+    expect(filterNouns(['李대통령', '盧배신'])).toEqual(['李대통령', '盧배신'])
+  })
+
+  // 정규화가 길이 컷보다 먼저여도 뒤여도 결과가 같아야 한다는 확인은 아니고,
+  // 정규화된 결과에 대해 스톱워드가 걸리는지를 본다.
+  it('applies the stopword list after normalising', () => {
+    expect(filterNouns(['李대통령', '기자'])).toEqual(['李대통령'])
+  })
 })
 
 describe('callEtriMorphAnalysis', () => {

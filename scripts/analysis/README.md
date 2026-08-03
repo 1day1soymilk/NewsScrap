@@ -318,20 +318,27 @@ configuration wins by the same margin — which is the claim this file has alway
 made about where the good-word line sits, reproduced on purpose rather than by
 assertion.
 
-### A collection defect found on the way
+### A collection defect found on the way, and fixed
 
-`李대통령` exists in `headline_nouns` as **two different strings**: `李` U+674E and
-the CJK compatibility ideograph U+F7A1, which Naver's headlines use
-interchangeably. They render identically and are two separate words to every
-count in this project — 15 rows between them, and `李정부` splits the same way
-over 3. Six words in the archive carry a compatibility ideograph (`李공격`,
-`李대통령`, `李정부`, `李지지율`, `李필패론`, `盧배신`); two of them currently
-collide with an NFC twin.
+`李대통령` existed in `headline_nouns` as **two different strings**: `李` U+674E
+and the CJK compatibility ideograph `李` U+F9E1, which Naver's headlines use
+interchangeably. They render identically and were two separate words to every
+count here — 15 rows between them, and `李정부` splitting the same way over 3.
+Five compatibility ideographs occur in this archive: 李 U+F9E1, 金 U+F90A,
+勞 U+F92F, 盧 U+F933, 女 U+F981.
 
-This is the canonical-link bug in a different alphabet: one thing, two keys,
-silently splitting counts. It is **not fixed** — `lib/nouns.ts` would have to
-normalise to NFC before storing, and the archive would need a backfill. Nothing
-in this round depends on it, and the label file simply labels both forms.
+The canonical-link bug in a different alphabet: one thing, two keys, silently
+splitting counts. Fixed by migration `0012` plus normalisation in
+`extractHeadlines` and `filterNouns` — see `CLAUDE.md` for why it takes both
+places and why NFC rather than NFKC.
+
+**The measurement above survived it unchanged.** The archive moved under a label
+set that was already complete, which is rule 4's second trigger, so both
+worklists and the whole harness were re-run after the backfill: both worklists
+empty, every figure byte-identical. `李대통령` went from two words of df 6 and 5
+to one of df 7 on 08-02 and 08-03 and still does not reach the top 70. Recorded
+because "we re-ran it and nothing moved" is the only version of that claim worth
+anything.
 
 ```sql
 select normalize(word, nfc) as nfc_form, count(distinct word) as forms

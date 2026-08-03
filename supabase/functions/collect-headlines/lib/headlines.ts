@@ -51,7 +51,15 @@ export function extractHeadlines(html: string): ScrapedHeadline[] {
 
     const strongMatch = STRONG_RE.exec(inner)
     const rawTitle = strongMatch ? strongMatch[1] : inner
-    const title = decodeHtmlEntities(stripTags(rawTitle))
+    // NFC folds the CJK compatibility ideographs Naver uses interchangeably with
+    // the ordinary ones (李 U+F9E1 / 李 U+674E, and 金, 勞, 盧, 女 likewise) onto
+    // one code point. They render identically, so an unnormalised title is a
+    // difference nothing on screen can show — and it reaches further than the
+    // title: keyword_signals' `standalone` matches the word against this string,
+    // so a word normalised on its own while the title was not would score 0.00
+    // and be cut as a fragment. Normalising here keeps both sides in one form
+    // and hands ETRI text that is already NFC. See migration 0012.
+    const title = decodeHtmlEntities(stripTags(rawTitle)).normalize('NFC')
     if (!title) continue
 
     seenLinks.add(link)

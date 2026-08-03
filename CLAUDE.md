@@ -655,21 +655,34 @@ backfills headlines that somehow have no nouns.
   ) d;
   ```
 
-- **One word, two keys — the same bug in the alphabet, and this one is still
-  open.** Naver's headlines use both the ordinary CJK ideograph `李` (U+674E) and
-  the CJK *compatibility* ideograph at U+F7A1. They render identically and are
-  different strings, so `headline_nouns` holds `李대통령` twice — 15 rows split
-  across the two — and every count in this project treats them as two words. The
-  same split hits `李정부` over 3 rows. Six words in the archive carry a
-  compatibility ideograph at all (`李공격`, `李대통령`, `李정부`, `李지지율`,
-  `李필패론`, `盧배신`). Found 2026-08-03 while labelling; **not fixed**, because
-  the fix is to normalise to NFC in `lib/nouns.ts` before storing plus a backfill,
-  and nothing yet measured depends on it. The query that names it:
+- **One word, two keys — the same bug in the alphabet.** Naver's headlines use
+  the Unicode CJK *compatibility* ideographs interchangeably with the ordinary
+  ones. They render identically and are different strings, so before migration
+  `0012` `headline_nouns` held `李대통령` twice with 15 rows split between them,
+  and `李정부` twice over 3. Five occur in this archive: 李 U+F9E1→U+674E,
+  金 U+F90A→U+91D1, 勞 U+F92F→U+52DE, 盧 U+F933→U+76E7, 女 U+F981→U+5973.
+
+  **Fixed in two places, and it has to be both.** `extractHeadlines` normalises
+  the title and `filterNouns` normalises the word. Normalising only the word
+  would be worse than leaving it: `keyword_signals`' `standalone` matches the
+  word against the title with a regex, so an NFC word against a raw title scores
+  0.00 and the word is cut as a fragment. The title is also what is handed to
+  ETRI, so the lemmas come back already folded; `filterNouns` does it again
+  rather than depend on ETRI echoing its input's code points.
+
+  **NFC, never NFKC.** NFKC would also rewrite ￦, ①, ㈜ and the halfwidth forms
+  these headlines genuinely use — different characters, not two spellings of one.
+
+  Migration `0012` backfilled 54 titles and 15 noun rows. It changed no drawn
+  word on any of the four labelled days: the whole sieve harness re-ran
+  byte-identical afterwards. This query must return 0:
 
   ```sql
-  select normalize(word, nfc) as nfc_form, count(distinct word) as forms
-  from (select distinct word from headline_nouns) t
-  group by 1 having count(distinct word) > 1;
+  select count(*) from (
+    select normalize(word, nfc)
+    from (select distinct word from headline_nouns) t
+    group by 1 having count(*) > 1
+  ) d;
   ```
 
 Section IDs are fixed: 정치 100, 경제 101, 사회 102, 생활/문화 103, 세계 104,

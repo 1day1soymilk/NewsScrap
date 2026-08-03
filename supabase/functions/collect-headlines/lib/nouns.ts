@@ -119,8 +119,21 @@ export function extractNouns(response: EtriResponse): string[] {
   return nouns
 }
 
+// The word is the key every count in this project is grouped by, so two
+// spellings of one word are two words and nothing on screen says so. Naver's
+// headlines use the CJK compatibility ideographs interchangeably with the
+// ordinary ones — 李 U+F9E1 against 李 U+674E, and likewise 金 U+F90A,
+// 勞 U+F92F, 盧 U+F933, 女 U+F981 — and they render identically. Before
+// migration 0012 the archive held 李대통령 as two words splitting 15 rows, and
+// 李정부 as two more. NFC folds the compatibility form onto the ordinary one.
+//
+// extractHeadlines normalises the title too, so in the shipped pipeline ETRI is
+// already handed NFC text. This is not that guarantee restated: it is the one
+// that does not depend on ETRI echoing its input's code points back.
 export function filterNouns(words: string[]): string[] {
-  return words.filter((word) => word.length >= 2 && !STOPWORDS.has(word))
+  return words
+    .map((word) => word.normalize('NFC'))
+    .filter((word) => word.length >= 2 && !STOPWORDS.has(word))
 }
 
 export async function callEtriMorphAnalysis(text: string, apiKey: string): Promise<EtriResponse> {

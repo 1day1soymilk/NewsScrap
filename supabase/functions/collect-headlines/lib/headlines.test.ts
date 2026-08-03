@@ -143,6 +143,23 @@ describe('extractHeadlines', () => {
       },
     ])
   })
+
+  // 네이버 헤드라인은 같은 한자를 보통 한자와 CJK 호환 한자 두 가지로 쓴다.
+  // 화면에서는 구별되지 않지만 서로 다른 문자열이라, 정규화하지 않으면 李대통령이
+  // 두 단어가 되어 모든 집계가 갈린다. 2026-08-03에 아카이브에서 발견된 실제 값
+  // 다섯 자: 金 U+F90A, 勞 U+F92F, 盧 U+F933, 女 U+F981, 李 U+F9E1.
+  it('normalises compatibility ideographs in the title to NFC', () => {
+    const html = `
+<li class="sa_item"><div class="sa_text">
+  <a href="https://n.news.naver.com/article/001/0016226272" class="sa_text_title">
+    <strong>李대통령, 金총리와 회동</strong>
+  </a>
+</div></li>
+`
+    const [headline] = extractHeadlines(html)
+    expect(headline.title).toBe('李대통령, 金총리와 회동')
+    expect(headline.title).toBe(headline.title.normalize('NFC'))
+  })
 })
 
 // Taken verbatim from a live section page; the paging state rides on the list
