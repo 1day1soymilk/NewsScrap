@@ -23,11 +23,23 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // so this cap is reached in four pages (measured across all six sections).
 // MAX_LIST_PAGES is slack for a section whose pages come back short.
 //
-// **Raising this is the wrong way to collect more, and it was tried.** 300 over
-// 12 pages killed the run: status 546, WORKER_RESOURCE_LIMIT, at 63s, against a
-// successful 150-page run of 64.6s the same morning. The wall on this plan is
-// near 63s and not the 150s the docs quote, so a bigger cap does not buy a
-// bigger run — it buys a run that returns nothing.
+// **The measurement that set this needs re-testing, and it is now known to have
+// measured the wrong thing.** 300 over 12 pages killed the run — 546
+// WORKER_RESOURCE_LIMIT at 63s, against a successful 150-per-section run of
+// 64.6s the same morning — and that was read as a wall-clock wall near 63s.
+// It is not. The platform kills on **CPU time**, roughly 3s of it per worker,
+// and it says so: `CPU Time exceeded` in the function logs. The 63s run died
+// because it was doing 5,400 ETRI-paced round trips, not because 63 seconds
+// had passed; a 64.6s run passed the same morning on fewer of them.
+//
+// Since storage was batched (see processHeadlines) a full 900-headline run
+// costs 4-5s of wall clock and a small fraction of the CPU budget, so **deeper
+// paging may now fit and nobody has tried.** Measure `elapsedMs` and watch for
+// `CPU Time exceeded` rather than trusting either number above.
+//
+// Note that the reason to prefer running more often is unaffected, because it
+// is about freshness rather than cost: **a deeper page is older news, a later
+// run is newer news.**
 //
 // The way to collect more is **to run more often**, and it is better on its own
 // terms. A deeper page is older news; a later run is newer news. Measured on
@@ -45,10 +57,23 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // thin.** A word needs four headlines to be worth drawing whether the day holds
 // 900 or 1,800; what changes is how many words clear it.
 //
-// ETRI allows 5,000 calls a day and a duplicate costs none, so four runs at a
-// few hundred new headlines each sit comfortably inside it.
+// There is no external call limit any more — the analyser is in-process — so
+// nothing outside this function constrains how often or how deep it runs.
 const MAX_HEADLINES_PER_CATEGORY = 150
 const MAX_LIST_PAGES = 8
+
+// **What the next version of this file is for**, written down because all three
+// of the numbers around here lost their justification on the same day:
+//
+// 1. **Re-tune collection volume** — the cap and the page count, each measured
+//    on its own, against the CPU budget rather than the wall clock.
+// 2. **A collect-now button** in the frontend, so a collection can be taken on
+//    demand instead of waiting for the next of six crons.
+// 3. **Filter duplicate headlines by title.** `UNIQUE (category_id, link)` plus
+//    `canonicalLink` stop one article arriving twice, but the same story from a
+//    different outlet is not caught — 2026-08-01 holds 190 such rows.
+//    Duplicates inflate co-occurrence, so `edge_min_cooc = 2` can be satisfied
+//    by a single story collected twice.
 
 // **ANALYSIS_CONCURRENCY is gone rather than left unreasoned.** Eight in flight
 // existed because every headline waited ~500ms on ETRI and the pool was what
@@ -61,17 +86,24 @@ const MAX_LIST_PAGES = 8
 
 // Stop handing out new work here so the function returns its summary instead of
 // being killed mid-flight. Anything left over is picked up by the next run,
-// since duplicates skip ETRI entirely.
+// since a duplicate costs one batched lookup and no analysis.
 //
-// **This was 110_000 and that number was never real.** The platform returned
-// 546 WORKER_RESOURCE_LIMIT at 63s on a heavier run, while a successful run the
-// same morning took 64.6s — so the wall is around 63s and this budget never
-// once fired. It now sits below the wall, which is the whole point of having
-// it: a killed run reports nothing, and the summary is the only way index.ts is
-// checked at all (it is not type-checked and not unit-tested).
+// **This budget has lost its reason, and worse, it never guarded the thing that
+// actually kills the run.** It was 110_000 and never fired; it was lowered to
+// 50_000 on the belief that the platform's wall was ~63s of wall clock. It is
+// not. The kill is on **CPU time** — the logs say `CPU Time exceeded` — at
+// roughly 3s per worker, and a wall-clock budget cannot see that number at all.
+// A 45s run died while a 64.6s one passed, which is the shape of a limit that
+// is not about elapsed time.
 //
-// Raise toward 360_000 on a paid plan, but measure the wall first rather than
-// trusting the documented limit.
+// What keeps the function inside the CPU budget is the batching in
+// processHeadlines, not this constant. A full 900-headline run now finishes in
+// 4-5s, so 50_000 is ten times slack and fires never — the same state it was in
+// at 110_000. It stays because a scrape that hangs on Naver still needs some
+// stop, and because the per-category slice keeps a slow section from starving
+// the ones after it. **It may be able to go away entirely.** Check `elapsedMs`
+// in the response before touching it, and note that raising it buys nothing
+// against the limit that does the killing.
 const RUN_BUDGET_MS = 50_000
 
 function todayInSeoul(): string {

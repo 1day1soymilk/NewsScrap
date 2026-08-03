@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A personal Naver-news keyword graph. A Supabase Edge Function scrapes six Naver
-news sections daily, extracts Korean nouns via ETRI's morphological-analysis API,
-and stores them in Postgres. A Vite + React frontend reads that data and renders a
+news sections daily, extracts Korean nouns with a morphological analyser running
+inside the function itself, and stores them in Postgres. A Vite + React frontend reads that data and renders a
 d3-force graph filterable by date and category: words that share headlines are
 joined by an edge, size stays proportional to headline count, and clicking a word
 dims everything outside its neighbourhood and lists the headlines it came from.
@@ -865,29 +865,58 @@ route. Two details that are easy to get wrong:
 ### Edge Function run budget
 
 The function paginates each section's "더보기" endpoint to 150 headlines, six
-sections per run. Every headline costs an ETRI round trip plus a few DB calls, so
-the work runs `ANALYSIS_CONCURRENCY` items in flight off a shared cursor, and two
-deadlines keep a slow run from being killed mid-flight: `RUN_BUDGET_MS` overall,
-divided into a per-category slice so the last sections in the list are not the
-ones starved on every slow run. Unprocessed headlines are picked up by the next
-run, since duplicates skip ETRI entirely.
+sections per run.
+
+**The limit that kills this function is CPU time, not the wall clock, and every
+number in this section used to be written against the wrong one.** The platform
+allows roughly **3 seconds of accumulated CPU per worker** and says so in the
+logs — `CPU Time exceeded` — before returning 546 WORKER_RESOURCE_LIMIT with no
+body at all. A 45s run has died where a 64.6s run passed.
+
+Analysis is not what spends it. Measured on the platform: **0.88ms a headline,
+900 of them for 0.8s, heap flat at 9MB.** What spent it was the round trips
+around them — a lookup, a count, and two inserts per headline, about 2,700 of
+them. Under ETRI every one of those sat behind a ~500ms wait, so the worker
+idled through ~98% of a 64s run and its cumulative CPU stayed small. **Removing
+the wait did not add CPU; it removed the idling**, and the function died the
+first time it was deployed with the analyser inside it.
+
+So storage is **batched per category** (`processHeadlines`): one lookup per 50
+links, carrying an embedded `headline_nouns(count)` so "does this exist" and
+"does it already have nouns" are answered in the same request; one upsert with
+`onConflict` so an overlapping cron cannot fail the batch; a few noun inserts.
+Five or six requests where there were ~450. A full 900-headline run now takes
+**4-5 seconds** — 5.0s measured on the heavy path where 755 headlines all needed
+analysing — against 44.9s before, when it returned a summary at all.
+
+`ANALYSIS_CONCURRENCY` is **deleted**, not merely unreasoned: eight in flight
+existed to hide ETRI's wait, and with sequential batches there is no wait to
+hide. `RUN_BUDGET_MS` (50_000, divided into a per-category slice so the last
+sections are not the ones starved) survives, but it is wall clock and therefore
+**cannot see the limit that does the killing** — what keeps the run inside the
+CPU budget is the batching. It now has ten times the slack it needs and may be
+able to go away.
+
+A killed run returns no body, so the `summary` this file calls `index.ts`'s only
+check is exactly what is missing when it is most needed. The function logs
+`CHK <category> scraped/processed` lines for that case.
 
 **It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
-pg_cron jobs, all calling the same function). It used to run once, and going
-wider was tried first and failed: raising the cap to 300 over 12 pages returned
-**546 WORKER_RESOURCE_LIMIT at 63s**, against a successful 150-per-section run of
-64.6s the same morning. The wall on this plan is near 63s, not the 150s the docs
-quote, so a bigger cap buys a run that returns nothing. `RUN_BUDGET_MS` was
-110_000 and therefore never once fired; it is now 50_000, below the observed
-wall, because a killed run reports no summary and the summary is the only check
-`index.ts` has.
+pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
+is not a health signal**: `succeeded` means `net.http_post` queued a request and
+returned a row, and all six jobs read `succeeded` throughout the days when ETRI
+was blocked and nothing was collected. Check `max(created_at)` on `headlines`.
 
-Running more often is also the better instrument on its own terms: **a deeper
-page is older news, a later run is newer news.** Measured on 2026-08-03, one run
-some hours after the 07:00 cron found 404 new headlines inside the same
+Running more often is the better instrument on its own terms: **a deeper page is
+older news, a later run is newer news.** Measured on 2026-08-03, one run some
+hours after the 07:00 cron found 404 new headlines inside the same
 150-per-section window — the sections churn all day. The day went from 900
-headlines to 2,197, and ETRI's 5,000-call limit is not close to binding, since a
-duplicate costs a lookup and no call.
+headlines to 2,197. There is no external call limit any more.
+
+**Raising `MAX_HEADLINES_PER_CATEGORY` deserves re-testing rather than the
+refusal that used to stand here.** The 300-over-12-pages failure was read as a
+wall near 63s; it was CPU, spent on ETRI-paced round trips that no longer exist.
+Deeper paging may now fit, and nobody has tried.
 
 That change is what settled the `min_headlines` question — see the round-seven
 section of `scripts/analysis/README.md`. The short version: on a thin day the
@@ -905,10 +934,31 @@ backfills headlines that somehow have no nouns.
 - **Naver RSS is discontinued. Never use it.** Headlines come from parsing
   `news.naver.com/section/{id}` HTML plus its `SECTION_ARTICLE_LIST` pagination
   endpoint, which returns the same markup wrapped in JSON.
-- **ETRI's old portal `aiopen.etri.re.kr` shut down on 2025-06-30** (its
-  certificate has since expired). The successor is
-  `http://epretx.etri.re.kr:8000/api/WiseNLU`, same request/response schema,
-  5,000 calls/day.
+- **There is no morphological-analysis service any more.** `npm:garu-ko@0.9.12`
+  (MIT, a 1.4MB model and a WASM binary) runs inside the Edge Function. No
+  account, no key, no call limit, and `.env.functions` sets nothing.
+
+  **It was measured against ETRI before it was adopted**, on 2,197 real
+  headlines: **0.79ms a headline against ETRI's ~500ms**, 96% of noun rows
+  identical, and 68 of the drawn 70 the same — 삼전닉스 and 오늘 the only movers.
+  The analyser boundary the swap was expected to introduce is mostly not there,
+  which is what made re-analysing the whole archive worth doing rather than
+  merely possible: the table now comes from one analyser, which it never had.
+
+  **Loading is the part that needs care, and only one path works.** The node
+  entry (`import { Garu } from 'npm:garu-ko@0.9.12'`, then `Garu.load()`) reads
+  the wasm and the model off disk through `fs/promises`, and npm packages sit on
+  disk under Deno, so it simply works — measured at 91ms. Supplying the bytes by
+  hand is **not** a fallback: the package's `exports` map defines no subpath
+  beyond `.`, `./browser` and `./node`, so `garu-ko/models/base.gmdl` cannot be
+  resolved and `./pkg/garu_wasm.js` is refused outright.
+
+  ETRI's own history, kept because it is why this file used to say otherwise:
+  the old portal `aiopen.etri.re.kr` shut down on 2025-06-30 and its successor
+  `http://epretx.etri.re.kr:8000/api/WiseNLU` served 5,000 calls/day. The key
+  went dead on 2026-08-03 and is **blocked rather than throttled** — probed again
+  after the quota day rolled over and it still answers
+  `{"success":false,"reason":"Blocked KEY"}`.
 
 - **One article, one link.** The section's first page and its `SECTION_ARTICLE_LIST`
   pagination hand back different URLs for the same article —
@@ -943,8 +993,8 @@ backfills headlines that somehow have no nouns.
   would be worse than leaving it: `keyword_signals`' `standalone` matches the
   word against the title with a regex, so an NFC word against a raw title scores
   0.00 and the word is cut as a fragment. The title is also what is handed to
-  ETRI, so the lemmas come back already folded; `filterNouns` does it again
-  rather than depend on ETRI echoing its input's code points.
+  the analyser, so the tokens come back already folded; `filterNouns` does it
+  again rather than depend on the analyser echoing its input's code points.
 
   **NFC, never NFKC.** NFKC would also rewrite ￦, ①, ㈜ and the halfwidth forms
   these headlines genuinely use — different characters, not two spellings of one.
@@ -1058,10 +1108,15 @@ script is wrong, not the sieve.
 
 Two things they found on the first run, both recorded in
 `scripts/analysis/README.md`. The compound merge did not restore 반도체, 무인기,
-상한가 or 유조선, because it named the tags allowed to join a run and ETRI tags
+상한가 or 유조선, because it named the tags allowed to join a run and ETRI tagged
 those words' prefixes `XPN` and suffixes `XSN`. **Fixed by inverting the rule:**
 the headline's own spacing already says what belongs together, so an eojeol is
 kept whole and the run breaks only on what is not part of the word.
+
+**The rule outlived the analyser that motivated it, which is the argument for
+it.** garu returns 반도체 and 무인기 whole, so an allowlist would not fail here in
+the same way — and that is exactly why the denylist stays: it does not depend on
+which splits any particular analyser happens to make.
 
 The `standalone` cut's blind spot was the other, and it is now **measured and
 closed with no code change** (2026-08-03, round four, four days). The signal is
