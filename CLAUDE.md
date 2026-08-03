@@ -218,14 +218,21 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words on the two labelled days: 24.3% / 30.0%
-for frequency alone, 84.3% / 84.3% for the sieve with the dictionary, from the
-run that decided `0009`. Those figures come from `analysis.word_labels` and are
-**not comparable to any percentage quoted elsewhere, or to any earlier figure in
-this file's history** — the label set has been extended five times and each
-extension moves them, most recently by `08_labels_after_dedup.sql`. Compare
-configurations against each other inside one run, never against a number someone
-wrote down.
+Measured precision of the top 70 words, four days, from the round-four run of
+2026-08-03: **84.3 / 84.3 / 67.1 / 62.9**, mean F1 64.4. Those figures come from
+`analysis.word_labels` and are **not comparable to any percentage quoted
+elsewhere, or to any earlier figure in this file's history** — the label set has
+been extended six times and each extension moves them, most recently by
+`09_labels_four_days.sql` (139 words, and five of those reversed on review).
+Compare configurations against each other inside one run, never against a number
+someone wrote down.
+
+That run is the demonstration as well as the warning. Reversing 윤리위, 반도체 and
+李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
+63.1 and 08-03 from 52.6 to 56.1 — and **moved nothing in the ranking**: the same
+configuration won by the same margin. Where the good-word line sits changes the
+percentages and not the verdict, which this file has always claimed and had not
+until now measured.
 
 `08_labels_after_dedup.sql` is itself the second half of rule 4 firing:
 `02_sieve_configs.sql` was untouched, but migrations `0007` and `0008` moved the
@@ -648,6 +655,23 @@ backfills headlines that somehow have no nouns.
   ) d;
   ```
 
+- **One word, two keys — the same bug in the alphabet, and this one is still
+  open.** Naver's headlines use both the ordinary CJK ideograph `李` (U+674E) and
+  the CJK *compatibility* ideograph at U+F7A1. They render identically and are
+  different strings, so `headline_nouns` holds `李대통령` twice — 15 rows split
+  across the two — and every count in this project treats them as two words. The
+  same split hits `李정부` over 3 rows. Six words in the archive carry a
+  compatibility ideograph at all (`李공격`, `李대통령`, `李정부`, `李지지율`,
+  `李필패론`, `盧배신`). Found 2026-08-03 while labelling; **not fixed**, because
+  the fix is to normalise to NFC in `lib/nouns.ts` before storing plus a backfill,
+  and nothing yet measured depends on it. The query that names it:
+
+  ```sql
+  select normalize(word, nfc) as nfc_form, count(distinct word) as forms
+  from (select distinct word from headline_nouns) t
+  group by 1 having count(distinct word) > 1;
+  ```
+
 Section IDs are fixed: 정치 100, 경제 101, 사회 102, 생활/문화 103, 세계 104,
 IT/과학 105.
 
@@ -748,9 +772,23 @@ Two things they found on the first run, both recorded in
 상한가 or 유조선, because it named the tags allowed to join a run and ETRI tags
 those words' prefixes `XPN` and suffixes `XSN`. **Fixed by inverting the rule:**
 the headline's own spacing already says what belongs together, so an eojeol is
-kept whole and the run breaks only on what is not part of the word. Still open is
-the `standalone` cut, which loses more whole words to a following 조사 (유시민,
-골리앗, 앤트로픽) than it catches fragments.
+kept whole and the run breaks only on what is not part of the word.
+
+The `standalone` cut's blind spot was the other, and it is now **measured and
+closed with no code change** (2026-08-03, round four, four days). The signal is
+genuinely wrong about a word followed by a 조사 — Korean attaches it with no
+space, so 골리앗의 and 자국민에 score 0.00 exactly as 도체 inside 반도체 does. It
+does not matter. Six words are kept off screen by this clause and nothing else
+across the whole archive, **and all six are labelled bad**: 춘천시, 한화에어,
+특별감찰 are real fragments, and 골리앗, 자국민, 폭등장 are the whole words the
+signal misjudges. 골리앗 is the instructive one — four of its five headlines are
+the same book, 『골리앗의 저주』, in a book-review column, and 북리뷰 and 저주 were
+already bad. An earlier version of this file cited 유시민, 골리앗 and 앤트로픽 as
+the cost; 유시민 now scores 0.67 and 0.92 and clears the cut, and the other two
+sit below `min_headlines`. Turning the clause off loses 1.1 mean F1 day-wide and
+0.4 on the category tabs, winning no day and no cell; `.05` through `.30` are
+identical, so 0.10 sits mid-plateau. **Do not build a particle-aware variant** —
+it would rescue three bad words and carry no measurement.
 
 The archive **spans the merge's own deploy** — 1,716 of the 2,043 rows on the
 two labelled days (2026-07-31 and 2026-08-01) were analysed before it first
