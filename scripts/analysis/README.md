@@ -42,8 +42,13 @@ Postgres — see CLAUDE.md. It needs `.env.supabase`.
 5. **Never optimise precision alone.** Precision does not punish discarding good
    words, so maximising it converges on a degenerate answer: on 7/31 the
    highest-precision configuration (91.4%) dropped 폭염, the day's biggest story at
-   45 headlines. The harness prints `recall_pct`, `f1_pct` and `heatwave` — a
-   configuration reading `DROPPED` is rejected regardless of its precision.
+   45 headlines. The harness prints `recall_pct`, `f1_pct`, `story` and
+   `story_rank` — a configuration reading `DROPPED` is rejected regardless of its
+   precision. The story is **per day**, read from `analysis.eval_days`: 폭염 leads
+   three of the four days and 김민석 leads 2026-08-02, where 폭염 is only third.
+   This column was a hardcoded `heatwave` while the harness measured two days,
+   and leaving it that way would have quietly excused a configuration that
+   dropped 08-02's real story.
 
 ## The dictionary is measured too
 

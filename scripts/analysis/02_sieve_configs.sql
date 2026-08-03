@@ -13,6 +13,15 @@
 -- To disable a sieve-4 clause, push it out of range: min_word_len 99,
 -- min_spec 9.9, max_npd -1. To disable sieve 4 entirely (the frequency-only
 -- baseline), set min_word_len to 1 — every word clears it.
+--
+-- `active` is what scopes a round without deleting its history. Both files read
+-- only the active rows, so rule 4 stays satisfiable: a configuration nobody is
+-- going to adopt still puts words on screen, and each of those words has to be
+-- labelled before any row means anything. Rounds one to three sweep min_spec and
+-- max_npd, and migrations 0003 and 0009 turned both of those clauses off after
+-- measuring them — keeping their rows scored costs 116 further labels and
+-- decides nothing. They stay in this file, inactive, and flipping one back to
+-- true re-opens it (then re-run 20_unlabeled.sql, as ever).
 
 create schema if not exists analysis;
 
@@ -25,10 +34,13 @@ create table analysis.sieve_configs (
   min_word_len   numeric not null,
   min_spec       numeric not null,
   max_npd        numeric not null,
-  use_dict       boolean not null
+  use_dict       boolean not null,
+  active         boolean not null default false
 );
 
-insert into analysis.sieve_configs values
+insert into analysis.sieve_configs
+  (ord, name, min_headlines, min_standalone, min_word_len, min_spec, max_npd, use_dict)
+values
   -- Baselines.
   ( 1, 'frequency only (current app)',     3, 0.00,  1, 9.90, -1.0, false),
   ( 2, 'standalone >= .10 only',           3, 0.10,  1, 9.90, -1.0, false),
@@ -113,6 +125,41 @@ insert into analysis.sieve_configs values
   -- Does the sieve keep the day's biggest story on its own, or only because a
   -- human whitelisted 폭염? 2.8 is the first cut above its 2.733 neighbour count.
   (88, 'npd 2.5, standal .30, no dict',    3, 0.30,  3, 9.90,  2.5, false),
-  (89, 'npd 2.8, standal .30, no dict',    3, 0.30,  3, 9.90,  2.8, false);
+  (89, 'npd 2.8, standal .30, no dict',    3, 0.30,  3, 9.90,  2.8, false),
 
-select count(*) as configs from analysis.sieve_configs;
+  -- Round four: the standalone cut, re-swept over what actually ships. Every
+  -- earlier standalone sweep (66-68, 80-83) lays npd 2.5 underneath, and
+  -- migration 0009 turned that clause off — so those rows measure a sieve no
+  -- longer in use. The shipped configuration is config 60 above, and these hold
+  -- everything at its values and move min_standalone alone.
+  --
+  -- 60 itself is the baseline (standalone >= .10) and is not repeated here.
+  -- The sweep opens on both sides of it so an optimum at the edge of the range
+  -- would be visible as one (rule 2).
+  --
+  -- What the cut is worth is a much smaller question than README.md records.
+  -- Measured on 2026-08-03 across all four collected days, six words are kept
+  -- off screen by this clause and nothing else, and five of those reach the top
+  -- 70: 춘천시, 한화에어 and 폭등장 (all labelled bad), 골리앗 and 자국민 (both
+  -- unlabelled at the time, and what this round is really asking about). The
+  -- fragments the clause was built for — 도체, 무인, 상한, 유조 — are all two
+  -- characters and fail the length clause first.
+  (90, 'r4: standalone off',               3, 0.00,  3, 9.90, -1.0, true),
+  (91, 'r4: standalone >= .05',            3, 0.05,  3, 9.90, -1.0, true),
+  (92, 'r4: standalone >= .20',            3, 0.20,  3, 9.90, -1.0, true),
+  (93, 'r4: standalone >= .30',            3, 0.30,  3, 9.90, -1.0, true),
+  (94, 'r4: standalone >= .50',            3, 0.50,  3, 9.90, -1.0, true),
+  -- Does the dictionary catch what the cut would have, if the cut goes? The
+  -- same question migration 0005's measurement asked of the sieve as a whole.
+  (95, 'r4: standalone off, no dict',      3, 0.00,  3, 9.90, -1.0, false);
+
+-- The round under comparison, plus the shipped configuration it is compared
+-- against. 60 is the sieve as deployed: min_headlines 3, standalone .10, length
+-- 3, specificity off, neighbours off, dictionary on.
+update analysis.sieve_configs
+   set active = true
+ where ord in (60, 90, 91, 92, 93, 94, 95);
+
+select count(*) filter (where active) as active,
+       count(*)                       as total
+from analysis.sieve_configs;
