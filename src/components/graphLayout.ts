@@ -2,6 +2,7 @@ import { forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-fo
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import { mergeCommunities } from '../lib/events'
 import type { GraphEdge } from '../lib/types'
+import { planarPositions, type PlanarPoint } from './planar'
 
 // Everything in this file is arithmetic, deliberately separated from
 // KeywordGraph.tsx so it can be tested under jsdom. The one thing jsdom cannot
@@ -505,8 +506,7 @@ function layoutEvent(
   } else if (isStar(ordered, links)) {
     placeRadially(ordered, links, padding)
   } else {
-    simulateLocally(ordered, links, padding, ticks, seed)
-    untangle(ordered, links, padding)
+    layoutCluster(ordered, links, padding, ticks, seed)
   }
 
   const box = crop(ordered)
@@ -641,6 +641,142 @@ function untangle(members: LayoutNode[], links: LayoutLink[], padding: number): 
     }
     if (!improved) break
   }
+}
+
+/**
+ * 교차 하나를 없애는 데 상자를 몇 배까지 키워 줄지.
+ *
+ * 교차를 없애는 값은 자리다. 평면 그림은 라벨이 떨어질 때까지 키워야 하고, 커진
+ * 상자는 그 사건이 캔버스에서 먹는 자리이자 하루 전체의 세로 길이다.
+ *
+ * **정액이 아니라 정률인 이유**는 재고 알았다. "넓이 5배까지"라는 고정 예산은
+ * 교차 하나를 없애는 것과 스물셋을 없애는 것에 같은 값을 매긴다. 그래서 정육면체
+ * (8점 12선, 교차 23개)가 거부됐다 — 라벨이 다 같은 크기라 힘 배치가 아주 촘촘한
+ * 상자를 내놓고, 평면 그림은 그보다 다섯 배가 넘게 필요했다. 23개를 없애는 데
+ * 그만큼도 못 쓴다는 것은 말이 안 된다. 얻는 만큼 낸다.
+ */
+const PLANAR_AREA_PER_CROSSING = 0.5
+
+/**
+ * 덩어리 사건 하나를 배치한다 — 힘으로 한 번, 되면 평면으로 한 번, 나은 쪽.
+ *
+ * 힘 균형이 조밀한 사건을 못 편다는 것은 측정된 사실이다. 08-02의 전당대회는
+ * 교차 15개를 내는데 `LOCAL_SLACK` 훑기로도 `untangle`로도 안 줄었다. 그런데
+ * `scripts/layout/planarity.ts`를 돌려 보면 **교차를 내는 여섯 사건 중 다섯이
+ * 완전히 평면**이다 — 하한 합계 2에 실제 30. 즉 거의 전부가 그래프 탓이 아니라
+ * 배치 탓이고, 힘 균형은 그걸 푸는 도구가 아니다.
+ *
+ * 그래서 평면으로 그릴 수 있으면 그렇게 그린다. `planarPositions`는 **교차 0을
+ * 확인한 그림만** 돌려주므로 여기서 다시 셀 필요가 없고, 못 그리면 null이라
+ * 힘 배치가 그대로 남는다.
+ *
+ * **단위원 좌표를 라벨이 떨어질 때까지 통째로 키우는 것이 안전한 이유**는 교차가
+ * 닮음변환에 불변이기 때문이다. 좌표를 하나씩 밀어 겹침을 풀면 교차가 되살아날 수
+ * 있지만, 전체를 같은 배율로 키우면 위상이 그대로다.
+ */
+function layoutCluster(
+  members: LayoutNode[],
+  links: LayoutLink[],
+  padding: number,
+  ticks: number,
+  seed: number,
+): void {
+  simulateLocally(members, links, padding, ticks, seed)
+  untangle(members, links, padding)
+
+  const forced = countCrossings(members, links)
+  if (forced === 0) return
+
+  const places = planarPositions(
+    members.map((n) => n.word),
+    links,
+  )
+  if (!places) return
+
+  const saved = members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
+  const forcedArea = areaOf(members)
+  const full = separatingScale(members, places, padding)
+
+  // 통째로 키우는 것만으로 겹침을 풀면 상자가 터무니없이 커진다 — 재어 보면
+  // 08-03이 865px에서 **7,377px**가 된다. 그 값은 위상이 아니라 Tutte 특유의
+  // 왜곡이다: 안쪽 점들이 바깥 면 쪽으로 몰려 나오므로, 제일 가까운 두 점을
+  // 떼려고 나머지 전부를 같이 끌고 나가게 된다.
+  //
+  // 그래서 작은 배율부터 올려 가며 **밀어서** 겹침을 푼다. 미는 것은 닮음변환이
+  // 아니므로 교차가 되살아날 수 있고, 그래서 밀 때마다 확인한다. 통과하는 제일
+  // 작은 배율이 답이다.
+  // **배율과 넓이는 같이 가지 않는다.** 너무 작게 놓으면 라벨이 통째로 겹치고,
+  // 그걸 미느라 사방으로 흩어져 오히려 상자가 커진다. 그래서 제일 먼저 통과하는
+  // 것을 쓰지 않고 전부 재본 뒤 **제일 작은 것**을 고른다 — 단계를 촘촘히 했다가
+  // 정육면체가 도로 23개로 돌아간 것이 이걸 안 했을 때였다.
+  let bestArea = Infinity
+  let bestPlaces: { x: number; y: number }[] | null = null
+
+  for (const step of PLANAR_SCALE_STEPS) {
+    for (const node of members) {
+      const point = places.get(node.word)!
+      node.x = point.x * full * step
+      node.y = point.y * full * step
+    }
+    if (step < 1) relax(members, padding)
+    if (anyOverlap(members, padding)) continue
+    if (countCrossings(members, links) > 0) continue
+
+    const area = areaOf(members)
+    if (area < bestArea) {
+      bestArea = area
+      bestPlaces = members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
+    }
+  }
+
+  const chosen =
+    bestPlaces !== null && bestArea <= forcedArea * (1 + PLANAR_AREA_PER_CROSSING * forced)
+      ? bestPlaces
+      : saved
+  members.forEach((n, i) => {
+    n.x = chosen[i].x
+    n.y = chosen[i].y
+  })
+}
+
+/**
+ * 겹침을 푸는 데 필요한 배율의 몇 배부터 시험할지. 작은 쪽부터 — 통과하는 제일
+ * 작은 것이 상자를 제일 덜 키운다.
+ */
+const PLANAR_SCALE_STEPS = [0.12, 0.16, 0.2, 0.25, 0.3, 0.36, 0.45, 0.55, 0.7, 0.85, 1]
+
+/** 라벨 상자를 다 감싸는 넓이. 상자를 얼마나 키웠는지 재는 자다. */
+function areaOf(members: LayoutNode[]): number {
+  const box = crop(members)
+  return box.width * box.height
+}
+
+/**
+ * 어느 두 라벨도 안 겹치게 만드는 제일 작은 배율.
+ *
+ * 두 라벨은 가로로 떨어지거나 세로로 떨어지면 안 겹치므로, 한 쌍이 요구하는
+ * 배율은 두 축이 요구하는 것 중 **작은** 쪽이다. 전체는 그중 제일 큰 것.
+ */
+function separatingScale(
+  members: LayoutNode[],
+  places: Map<string, PlanarPoint>,
+  padding: number,
+): number {
+  let scale = 1
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const a = members[i]
+      const b = members[j]
+      const pa = places.get(a.word)!
+      const pb = places.get(b.word)!
+      const dx = Math.abs(pa.x - pb.x)
+      const dy = Math.abs(pa.y - pb.y)
+      const needX = dx > 0 ? (a.halfWidth + b.halfWidth + padding) / dx : Infinity
+      const needY = dy > 0 ? (a.halfHeight + b.halfHeight + padding) / dy : Infinity
+      scale = Math.max(scale, Math.min(needX, needY))
+    }
+  }
+  return scale
 }
 
 // 맞바꿈을 몇 번이나 훑을지. 개선이 없으면 그전에 멈추므로 상한일 뿐이다.

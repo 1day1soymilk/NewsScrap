@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPlanar, skewness, type PlanarEdge } from './planar'
+import { isPlanar, planarPositions, skewness, type PlanarEdge } from './planar'
 
 function edges(pairs: string): PlanarEdge[] {
   return pairs
@@ -140,5 +140,87 @@ describe('skewness', () => {
     // 때문이다 — 3단계가 갈리는 지점이 정확히 거기다.
     const list = complete(6)
     expect(skewness(nodesOf(list), list, 2)).toBeNull()
+  })
+})
+
+describe('planarPositions', () => {
+  /** 직선으로 이었을 때 서로 만나는 간선 쌍. 끝점을 공유하는 쌍은 뺀다. */
+  function straightCrossings(
+    places: Map<string, { x: number; y: number }>,
+    list: PlanarEdge[],
+  ): number {
+    const side = (o: number[], a: number[], b: number[]) =>
+      (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    const at = (w: string) => [places.get(w)!.x, places.get(w)!.y]
+
+    let count = 0
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const p = list[i]
+        const q = list[j]
+        if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+        const [p1, p2, p3, p4] = [at(p.a), at(p.b), at(q.a), at(q.b)]
+        const d1 = side(p3, p4, p1)
+        const d2 = side(p3, p4, p2)
+        const d3 = side(p1, p2, p3)
+        const d4 = side(p1, p2, p4)
+        if (d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0) count++
+      }
+    }
+    return count
+  }
+
+  const cube = edges(`
+    a-b b-c c-d d-a
+    e-f f-g g-h h-e
+    a-e b-f c-g d-h
+  `)
+  const wheel = edges('h-a h-b h-c h-d a-b b-c c-d d-a')
+
+  it('K4를 교차 없이 그린다', () => {
+    // 지금 배치는 K4에 교차를 하나 낸다. 네 점짜리 평면 그래프다.
+    const list = complete(4)
+    const places = planarPositions(nodesOf(list), list)
+    expect(places).not.toBeNull()
+    expect(straightCrossings(places!, list)).toBe(0)
+  })
+
+  it('바퀴를 교차 없이 그린다', () => {
+    // 지금 배치는 셋을 낸다.
+    const places = planarPositions(nodesOf(wheel), wheel)
+    expect(places).not.toBeNull()
+    expect(straightCrossings(places!, wheel)).toBe(0)
+  })
+
+  it('정육면체를 교차 없이 그린다', () => {
+    // 이 시험이 제일 세다. 8점 12선, 누구나 평면으로 그릴 줄 아는 그래프인데
+    // 지금 배치는 **교차 23개**를 낸다 — 12개 간선에서 나올 수 있는 66쌍 중 23쌍.
+    const places = planarPositions(nodesOf(cube), cube)
+    expect(places).not.toBeNull()
+    expect(straightCrossings(places!, cube)).toBe(0)
+  })
+
+  it('모든 점이 서로 다른 자리에 놓인다', () => {
+    // Tutte 그림은 꼭짓점이 겹치거나 한 직선에 몰릴 수 있고, 그러면 교차는 0이라도
+    // 라벨을 놓을 수 없다. 겹친 점은 실패로 다뤄야지 성공으로 돌려주면 안 된다.
+    const places = planarPositions(nodesOf(cube), cube)!
+    const seen = new Set([...places.values()].map((p) => `${p.x.toFixed(6)} ${p.y.toFixed(6)}`))
+    expect(seen.size).toBe(places.size)
+  })
+
+  it('평면이 아니면 null이다', () => {
+    const list = complete(5)
+    expect(planarPositions(nodesOf(list), list)).toBeNull()
+  })
+
+  it('같은 입력은 같은 좌표를 준다', () => {
+    // 배치 전체가 결정적이라는 것이 이 저장소의 불변식이다 — e2e가 좌표에 단정을
+    // 걸고, 같은 날은 같은 그림을 내야 한다.
+    const first = planarPositions(nodesOf(cube), cube)!
+    const second = planarPositions(nodesOf(cube), cube)!
+    for (const [word, point] of first) {
+      expect(second.get(word)!.x).toBe(point.x)
+      expect(second.get(word)!.y).toBe(point.y)
+    }
   })
 })

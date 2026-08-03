@@ -443,6 +443,43 @@ describe('사건 구역', () => {
     }
   })
 
+  it('평면으로 그릴 수 있는 사건은 교차 없이 그린다', () => {
+    // 정육면체 — 8점 12선, 누구나 평면으로 그릴 줄 아는 그래프다. 힘 균형에
+    // 맡겨 두면 **교차 23개**를 냈다. 12개 간선에서 나올 수 있는 66쌍 중 23쌍이라
+    // 사실상 아무것도 안 읽히는 상태였고, `LOCAL_SLACK` 훑기로도 `untangle`로도
+    // 안 줄던 그 실패다.
+    //
+    // 여기서 세는 것은 중심-중심 직선이다. 곡선 라우팅은 이 다음에 오고, 어차피
+    // 교차하는 곡선은 교차하는 현에서 나온다.
+    const spec = [
+      ['가', '나'], ['나', '다'], ['다', '라'], ['라', '가'],
+      ['마', '바'], ['바', '사'], ['사', '아'], ['아', '마'],
+      ['가', '마'], ['나', '바'], ['다', '사'], ['라', '아'],
+    ]
+    const words = ['가', '나', '다', '라', '마', '바', '사', '아'].map((w) => word(w))
+    const links = spec.map(([a, b]) => edge(a, b, 0.9))
+    const { nodes, edges: drawn } = computeGraphLayout(words, links, SIZE)
+
+    const at = new Map(nodes.map((n) => [n.word, n]))
+    const side = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
+      (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+
+    let crossings = 0
+    for (let i = 0; i < drawn.length; i++) {
+      for (let j = i + 1; j < drawn.length; j++) {
+        const p = drawn[i]
+        const q = drawn[j]
+        if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+        const [p1, p2, p3, p4] = [at.get(p.a)!, at.get(p.b)!, at.get(q.a)!, at.get(q.b)!]
+        if (side(p3, p4, p1) > 0 !== side(p3, p4, p2) > 0 &&
+            side(p1, p2, p3) > 0 !== side(p1, p2, p4) > 0) {
+          crossings++
+        }
+      }
+    }
+    expect(crossings).toBe(0)
+  })
+
   it('다리를 든 단어를 상대 구역을 바라보는 쪽에 놓는다', () => {
     // 구역 밖으로 나가는 선이 자기 사건의 내부 선을 자르는 것이, 재어 보니
     // 다리가 낀 교차의 거의 전부였다(데스크톱 2026-08-03은 14개 중 14개).
