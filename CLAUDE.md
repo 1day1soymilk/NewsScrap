@@ -254,10 +254,25 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words, four days, after the round-six demotion
-shipped (`0015`): **85.7 / 84.3 / 70.0 / 71.4**, mean F1 67.3, against
-84.3 / 84.3 / 67.1 / 65.7 and mean F1 65.05 immediately before it. The drawn set
-went from 211 good and 69 bad to **218 good and 62 bad** across the four days. Those figures come from
+Measured precision of the top 70 words, four days, as of 2026-08-03 night:
+**85.7 / 84.3 / 70.0 / 67.1**, mean F1 63.2. The drawn set is 215 good and 65
+bad.
+
+**Do not read the 2026-08-03 column against the one this file used to carry**
+(71.4, mean F1 67.3). Only that day moved, and it moved because the collector
+went to six runs and the day went from 900 headlines to 2,197 — not because
+anything about the sieve changed. The other three days reproduce to the decimal,
+which is what identifies the cause.
+
+**F1 is not comparable across days of different thickness, and this is the
+mechanism.** Recall is the drawn good words over every good word with `df >= 3`,
+so a fat day has a much larger denominator while the screen still holds 70:
+08-03's good pool is 129 against recall of 36.4%. A thick day therefore scores
+*worse* on F1 while showing strictly more of the news. Judge configurations
+against each other inside one run — the rule this file already states for label
+sets applies to collection depth too, and this is the first time it has bitten.
+
+Those figures come from
 `analysis.word_labels` and are **not comparable to any percentage quoted
 elsewhere, or to any earlier figure in this file's history** — the label set has
 been extended six times and each extension moves them, most recently by
@@ -265,10 +280,19 @@ been extended six times and each extension moves them, most recently by
 Compare configurations against each other inside one run, never against a number
 someone wrote down.
 
-That run is the demonstration as well as the warning. Reversing 윤리위, 반도체 and
+That claim has now been measured three times. Reversing 윤리위, 반도체 and
 李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
-63.1 and 08-03 from 52.6 to 56.1 — and **moved nothing in the ranking**: the same
-configuration won by the same margin. Where the good-word line sits changes the
+63.1 and 08-03 from 52.6 to 56.1; reversing **보완수사권** to good on 2026-08-03
+moved that day from 65.7 to 67.1 precision and 46.5 to 47.2 F1 — and **neither
+moved anything in the ranking**: the same configuration won by the same margin
+each time. 보완수사권 is the sharpest version of the question so far, because it
+was labelled bad on the reasoning that a power is not an event, and 거부권 sits
+two entries away labelled good on the reasoning that it is the instrument one
+dated fight is about. Both are true of both words; the line was drawn between
+them and could not be stated, so it moved. 수사권 and 보완수사 stay bad, and the
+distinction that survives is not specificity — it is that those name the power
+in general, in any week, while 보완수사권 names the one a dated bill removed.
+Where the good-word line sits changes the
 percentages and not the verdict, which this file has always claimed and had not
 until now measured.
 

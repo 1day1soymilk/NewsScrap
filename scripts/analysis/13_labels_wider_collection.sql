@@ -47,11 +47,22 @@ select w, 'good', 'arguable: instrument, but follows 특검/필리버스터/긴�
 from unnest(array['거부권']) w
 on conflict (word) do update set label = excluded.label, note = excluded.note;
 
--- ARGUABLE (2/4): 보완수사권. Follows 수사권 and 보완수사, both already bad.
--- More specific than either, which is the argument for good; still the name of
--- a power rather than of a thing that happened, which is the argument that wins.
+-- ARGUABLE (2/4): 보완수사권. **Reversed to good on review, 2026-08-03.**
+--
+-- It was first labelled bad on the reasoning that 수사권 and 보완수사 are both
+-- bad and this is still the name of a power rather than of a thing that
+-- happened. Reversed because that reasoning does not survive next to 거부권,
+-- which is good three entries down: both are instruments, both are named here
+-- because one particular fight is about them, and the sixteen headlines holding
+-- this word are all the same fight — the abolition that passed on 08-02 and the
+-- veto demanded on 08-03. A line that admits 거부권 and refuses 보완수사권
+-- cannot be stated.
+--
+-- 수사권 and 보완수사 stay bad, and the difference is not specificity for its
+-- own sake: those two name the power in general and are the words a story about
+-- prosecutors uses in any week. This one names the power a dated bill removed.
 insert into analysis.word_labels (word, label, note)
-select w, 'bad', 'arguable: more specific than 수사권/보완수사, but still a power not an event'
+select w, 'good', 'reversed on review: same case as 거부권 — the instrument one dated fight is about'
 from unnest(array['보완수사권']) w
 on conflict (word) do update set label = excluded.label, note = excluded.note;
 
