@@ -85,6 +85,26 @@ Thirty-five of the 61 candidates were left in on purpose. 공습, 압박, 배터
 excluding them would be using the dictionary to paper over where the good-word
 line sits — which is a labelling question, not a dictionary one.
 
+**Migration `0013` added two more**, 이용자 and 피해자, on 2026-08-03 after they
+were seen on the day's canvas at ranks 67 and 41. Both were already labelled bad
+in the group holding 국민, 외국인, 사망자 and 투표자: they name a role rather than
+anyone in it, and the word carrying the story is the crime or the person beside
+them. Not part of the 35 above — a role noun cannot head a headline on its own,
+so excluding it settles nothing about the good-word line.
+
+Measured, and only 2026-08-03 moves because neither reaches the top 70 on the
+other three days:
+
+| 2026-08-03 | before | after |
+| --- | --- | --- |
+| top-70 precision | 62.9 | **65.7** |
+| top-70 F1 | 56.1 | **58.6** |
+
+The two words promoted into the freed slots are 탄도미사일 (69) and 합수본 (70),
+**both labelled good** — two bad out, two good in, and `unlabeled` stays 0 on
+every row. That last part is luck rather than design: `0005` excluded 26 and
+promoted 7, all bad. Re-run `20_unlabeled.sql` after every dictionary edit.
+
 ## Labels
 
 606 words, covering everything drawn by every **active** configuration in

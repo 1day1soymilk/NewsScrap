@@ -146,8 +146,11 @@ describe('extractHeadlines', () => {
 
   // 네이버 헤드라인은 같은 한자를 보통 한자와 CJK 호환 한자 두 가지로 쓴다.
   // 화면에서는 구별되지 않지만 서로 다른 문자열이라, 정규화하지 않으면 李대통령이
-  // 두 단어가 되어 모든 집계가 갈린다. 2026-08-03에 아카이브에서 발견된 실제 값
-  // 다섯 자: 金 U+F90A, 勞 U+F92F, 盧 U+F933, 女 U+F981, 李 U+F9E1.
+  // 두 단어가 되어 모든 집계가 갈린다. 2026-08-03에 아카이브에서 발견된 다섯 자:
+  // 金 U+F90A, 勞 U+F92F, 盧 U+F933, 女 U+F981, 李 U+F9E1.
+  //
+  // 입력은 **반드시 이스케이프로** 만든다. 그냥 타이핑하면 입력과 기대값이 같은
+  // 문자열이 되어 통과하면서 아무것도 검증하지 않는다. 글자를 "고치지" 말 것.
   it('normalises compatibility ideographs in the title to NFC', () => {
     const html = `
 <li class="sa_item"><div class="sa_text">
@@ -158,7 +161,8 @@ describe('extractHeadlines', () => {
 `
     const [headline] = extractHeadlines(html)
     expect(headline.title).toBe('李대통령, 金총리와 회동')
-    expect(headline.title).toBe(headline.title.normalize('NFC'))
+    // 문자열 비교가 깨지면 두 줄이 똑같아 보이므로, 코드포인트로도 확인한다.
+    expect(headline.title.codePointAt(0)).toBe(0x674e)
   })
 })
 
