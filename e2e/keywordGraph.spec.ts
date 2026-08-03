@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { DEFAULT_GRAPH, ECONOMY_GRAPH, EMPTY_GRAPH, todayInSeoul } from './support/fixtures'
+import {
+  DEFAULT_GRAPH,
+  DENSE_GRAPH,
+  ECONOMY_GRAPH,
+  EMPTY_GRAPH,
+  EVENT_GRAPH,
+  todayInSeoul,
+} from './support/fixtures'
 import type { GraphNodeRow, GraphPayload } from './support/fixtures'
 import { mockSupabase } from './support/mockSupabase'
 
@@ -270,4 +277,136 @@ test('resolves the design tokens to real colours in the SVG', async ({ page }) =
   const tabDot = page.getByRole('button', { name: '정치' }).locator('span').first()
   const dotColor = await tabDot.evaluate((el) => getComputedStyle(el).backgroundColor)
   expect(dotColor).toBe('rgb(190, 18, 60)')
+})
+
+// --- 브라우저만이 답할 수 있는 것 ---------------------------------------------
+//
+// 배치의 기하는 scripts/layout/measure.ts가 픽스처 위에서 이미 잰다. 브라우저가
+// 그보다 더 아는 것은 딱 하나, **진짜 글자 폭**이다 — 하네스에는 캔버스가 없어
+// `length * fontSize * 0.95`로 대신하므로, 하네스에서 겹침 0인 배치가 여기서는
+// 겹칠 수 있다. 그래서 아래 둘은 하네스의 중복이 아니다.
+
+/** `M x1 y1 Q cx cy x2 y2`를 폴리라인으로 편다. 교차 판정은 이 위에서 한다. */
+function flatten(d: string, steps = 24): [number, number][] {
+  const n = d.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
+  const [x1, y1, cx, cy, x2, y2] = n
+  const points: [number, number][] = []
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const m = 1 - t
+    points.push([m * m * x1 + 2 * m * t * cx + t * t * x2, m * m * y1 + 2 * m * t * cy + t * t * y2])
+  }
+  return points
+}
+
+function segmentsCross(
+  p1: [number, number], p2: [number, number],
+  p3: [number, number], p4: [number, number],
+): boolean {
+  const side = (a: [number, number], b: [number, number], c: [number, number]) =>
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+  const d1 = side(p3, p4, p1)
+  const d2 = side(p3, p4, p2)
+  const d3 = side(p1, p2, p3)
+  const d4 = side(p1, p2, p4)
+  return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0
+}
+
+function meets(a: [number, number][], b: [number, number][]): boolean {
+  for (let i = 0; i < a.length - 1; i++) {
+    for (let j = 0; j < b.length - 1; j++) {
+      if (segmentsCross(a[i], a[i + 1], b[j], b[j + 1])) return true
+    }
+  }
+  return false
+}
+
+test('평면으로 그릴 수 있는 하루는 브라우저에서도 선이 안 엇갈린다', async ({ page }) => {
+  // DENSE_GRAPH는 정육면체다. 힘 균형에 맡기면 교차 23개가 나오고, 평면 경로가
+  // 돌면 0이 된다 — 이 단정이 그 경로가 **실제로 브라우저에서 도는지**를 묻는
+  // 유일한 자리다. 나머지 픽스처는 전부 그 분기를 안 밟는다.
+  await mockSupabase(page, { keyword_graph: DENSE_GRAPH })
+  await page.goto('/')
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+
+  const drawn = await page.locator('svg path').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('d') ?? ''),
+  )
+  expect(drawn.length).toBe(12)
+
+  // 선은 자기가 어느 두 단어를 잇는지 DOM에 적어 두지 않는다. 끝점이 라벨 상자
+  // 바로 바깥에서 시작하므로 제일 가까운 상자로 되짚는다 — 그리고 **못 찾으면
+  // 조용히 넘어가지 않고 터진다.** 끝점을 공유하는 쌍을 빼는 것이 이 시험의
+  // 전부이므로, 되짚기가 틀리면 시험이 거짓으로 통과한다.
+  const labels = await page.locator('svg text[role="button"]').evaluateAll((els) =>
+    els.map((el) => {
+      const b = (el as SVGGraphicsElement).getBBox()
+      return { word: el.textContent ?? '', x: b.x, y: b.y, w: b.width, h: b.height }
+    }),
+  )
+
+  // 중심까지가 아니라 **상자까지**의 거리다. 라벨 폭이 50px에서 200px까지 벌어지므로
+  // 중심으로 재면 넓은 라벨의 모서리에서 출발한 선이 옆의 좁은 라벨을 더 가깝게
+  // 본다 — 처음 판본이 열두 선을 열한 쌍으로 되짚은 것이 그것이었다.
+  const nearest = (x: number, y: number) => {
+    let best = labels[0]
+    let smallest = Infinity
+    for (const l of labels) {
+      const dx = Math.max(l.x - x, 0, x - (l.x + l.w))
+      const dy = Math.max(l.y - y, 0, y - (l.y + l.h))
+      const d = Math.hypot(dx, dy)
+      if (d < smallest) {
+        smallest = d
+        best = l
+      }
+    }
+    return best.word
+  }
+
+  const lines = drawn.map((d) => flatten(d))
+  const ends = lines.map((points) => [
+    nearest(points[0][0], points[0][1]),
+    nearest(points[points.length - 1][0], points[points.length - 1][1]),
+  ])
+  // 열두 선이 여덟 단어를 잇는다면 서로 다른 쌍 열두 개가 나와야 한다. 되짚기가
+  // 어긋나면 여기서 걸린다.
+  expect(new Set(ends.map((e) => [...e].sort().join('—'))).size).toBe(12)
+
+  let crossings = 0
+  for (let i = 0; i < drawn.length; i++) {
+    for (let j = i + 1; j < drawn.length; j++) {
+      if (ends[i].some((w) => ends[j].includes(w))) continue
+      if (meets(lines[i], lines[j])) crossings++
+    }
+  }
+  expect(crossings).toBe(0)
+})
+
+test('어느 두 라벨도 겹치지 않는다 — 진짜로 측정된 글자 폭으로', async ({ page }) => {
+  // 이 배치의 유일한 절대 불변식이고, 하네스가 대신해 줄 수 없는 유일한 단정이다.
+  for (const graph of [DENSE_GRAPH, EVENT_GRAPH]) {
+    await mockSupabase(page, { keyword_graph: graph })
+    await page.goto('/')
+    await expect(page.locator('svg text').first()).toBeVisible()
+
+    const boxes = await page.locator('svg text[role="button"]').evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect()
+        return { word: el.textContent ?? '', x: r.x, y: r.y, w: r.width, h: r.height }
+      }),
+    )
+    expect(boxes.length).toBe(graph.nodes.length)
+
+    const touching: string[] = []
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]
+        const b = boxes[j]
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+          touching.push(`${a.word}/${b.word}`)
+        }
+      }
+    }
+    expect(touching).toEqual([])
+  }
 })
