@@ -468,6 +468,65 @@ events and every edge had to cross somebody else's story.
   exit across more spokes. Switching the objective to a crossing count would buy
   one crossing on one of eight cells and cost the geometry of every inner edge at
   flip time. Not done.
+- **`xIn` was not one thing either, and the same split settled it.** A story's
+  lines crossing each other may be forced by its graph or left there by the
+  layout, and only the second kind can be fixed. `scripts/layout/planarity.ts`
+  reports, per event, whether it is planar and — if not — its **skewness**, the
+  fewest edges that have to go, which is also the floor on that event's
+  crossings under *any* drawing. Six events drew a crossing, their floors summed
+  to 2 and they produced 30. Only 2026-08-02's thirteen-word 전당대회 is
+  non-planar at all, and five of the six were flat-drawable all along, which is
+  why sweeping `LOCAL_SLACK` and running `untangle` had moved none of them: the
+  tool was wrong, not the setting. Neither edge counting nor subgraph search
+  answers this — K3,3 clears the 3n−6 bound comfortably, and the Petersen graph
+  is non-planar while holding K5 and K3,3 only as subdivisions. Both are in
+  `planar.test.ts` for that reason.
+- **`layoutCluster` draws an event flat when it can**, via `src/components/planar.ts`:
+  Tutte's barycentric solve over a fixed convex outer boundary, with the
+  non-planar case handled by dropping the smallest edge set that makes the rest
+  planar and laying those edges back on top. **It computes no planar embedding**
+  — it tries short cycles as candidate boundaries and returns a drawing only
+  after verifying on the original edges that nothing crosses and no two points
+  coincide. Failing to find a drawing that exists costs nothing, since the force
+  layout is still there; returning a wrong one would, and this way round cannot.
+  Three things had to be measured rather than reasoned:
+  - **Tutte coordinates are unusable as drawn.** They need 3-connectivity, and a
+    day's events are sparse, so the graph is triangulated first — which makes
+    every face a triangle, hangs ten points inside one, and wants **31x** the
+    area (13 words) or **199x** (11 words). Scaling to separate labels is safe,
+    since crossings are similarity-invariant, but 865px became **7,377px**.
+  - **Seeding the force simulation from the flat drawing does nothing at all.**
+    300 ticks walk back to the same minimum and all four days returned to their
+    old numbers. A force layout does not remember where it started. Do not
+    re-run this experiment.
+  - **Bounding each step does work.** Cap a vertex's move at a third of its
+    distance to the nearest edge it does not touch and no edge can cross another
+    (PrEd's argument). And spreading and scaling **solve different days** —
+    spreading unlocked 08-02, scaling unlocked 08-03 — so both are candidates
+    and the winner is measured per event.
+  The area a flat drawing may cost is priced **per crossing removed**, and that
+  price must be a condition of entry: applied to the winner instead, the
+  candidate that removes the most crossings wins and is then disqualified,
+  taking the affordable one with it (08-02 went back from 5 to 15 that way).
+  Measured: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0 throughout, events
+  drawing a crossing 6 → 3 against a floor of 2. **The price is height** —
+  08-02 desktop 651 → 1544px — **and the per-crossing price is a cliff, not a
+  dial**: 0.15, 0.25 and 0.35 draw the four days identically to having no planar
+  path at all, and 0.5 buys the whole move. There is no middle setting, so this
+  is a judgement about the picture rather than something the harness settles,
+  and `PLANAR_AREA_PER_CROSSING` reverses it.
+- **Shelves wrap like a snake, and the packing order was never the problem.**
+  `orderForPacking` puts bridged events next to each other, and the shelf wrap
+  then splits that pair across the full width of the canvas — the two boxes
+  deliberately made adjacent end up as far apart as possible. That was the 703px
+  bridge on desktop 08-01 that `OPEN.md` had written off as unfixable because
+  the day holds only two bridges. Mirroring odd shelves takes it to 274px and
+  its `xBr` to 0, with no constant involved. **First-fit packing is measured and
+  declined**: reclaiming the row a two-word event wastes saves 5–11% of the
+  phone's height but takes phone 08-03 from 6 bridge crossings to 9, because
+  going back to fill an earlier shelf is the same act as separating the
+  neighbours `orderForPacking` just placed. A wasted row is cosmetic; a bridge
+  cutting through another story is not.
 - **The pass condition is written in terms of `xIn`/`xBr`, never total
   `crossings`** (`scripts/layout/README.md`). The region rewrite dropped `crowded`
   on all eight cells while raising total `crossings` on three, so the total called
