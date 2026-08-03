@@ -244,6 +244,33 @@ word invalidates every threshold tuned when that kind could not appear. Round
 nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
 canvas.
 
+## Round twelve — the dictionary, re-derived against the new screen
+
+36 exclusions (migration `0021`). The largest of the four post-`0018` changes and
+the cheapest: no threshold moves, no signal is added.
+
+| | day-wide F1 | day-wide precision | category F1 |
+| --- | --- | --- | --- |
+| before | 54.10 | 77.85 | 67.02 |
+| after | **62.43** | **90.35** | **71.80** |
+
+Chosen the way `0005` chose its 26 — from the query "labelled bad, drawn by the
+shipped sieve on at least one day, not already in the dictionary", which returned
+44 — and **not** by looking at the canvas.
+
+**The eight left in are the exercise.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
+요양병원, 재선거, 개정안 can each head a real story; excluding them would use the
+dictionary to paper over where the good-word line sits, which is a labelling
+question. Same call `0005` made about 공습, 압박, 배터리, 클라우드, 바이오.
+
+Seven entries exist because of round nine, reaching the canvas through
+`passed_by = 'proper'`: 유럽, 남미, 중동, 한국 as backdrop, and 어스, 모스, 민주 —
+the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls proper nouns.
+
+`20_unlabeled.sql` returned nothing afterwards, which is luck rather than design:
+`0005` excluded 26 and promoted 7, all bad and all unlabelled. Re-run it after
+every dictionary edit regardless.
+
 Labels: `17_labels_two_character.sql` (44) and
 `18_labels_two_character_category.sql` (36). Both worklists empty afterwards.
 

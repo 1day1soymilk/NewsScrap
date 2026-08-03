@@ -284,10 +284,29 @@ time and should not be rediscovered:
   missing. A demotion reorders and removes nothing, so it can only act where the
   render cap binds, and a tab draws at most 46 against a cap of 70.
 
-**Where the three changes leave the sieve, measured in one run**: day-wide mean
-F1 **49.48 → 54.10** and mean precision **71.07 → 77.85**; the 24 category cells
-**55.07 → 67.02**. All of it from the analyser being in-process — one new
-signal and two thresholds it invalidated.
+- **The dictionary was re-derived against the new screen** (migration `0021`,
+  36 exclusions) and it is the largest and cheapest of the four: day-wide F1
+  54.10 → **62.43** and precision 77.85 → **90.35**, tabs 67.02 → **71.80**, with
+  no threshold moved and no signal added. Chosen the way `0005` chose its 26 —
+  from the query "labelled bad, drawn by the shipped sieve, not already
+  excluded", which returned 44.
+
+  **The eight left in are the point.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
+  요양병원, 재선거 and 개정안 can each head a real story, and excluding them
+  would be using the dictionary to paper over where the good-word line sits —
+  a labelling question, not a dictionary one. Same judgement `0005` made about
+  공습, 압박, 배터리 and 클라우드.
+
+  Seven entries exist *because* of the rescue, arriving through
+  `passed_by = 'proper'`: 유럽, 남미, 중동 and 한국 as backdrop, and 어스, 모스
+  and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
+  proper nouns.
+
+**Where the four changes leave the sieve, measured in one run**: day-wide mean
+F1 **49.48 → 62.43** and mean precision **71.07 → 90.35**; the 24 category cells
+**55.07 → 71.80**. All of it downstream of the analyser being in-process — one
+new signal, two thresholds it invalidated, and a dictionary re-derived against
+the screen it produced.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
