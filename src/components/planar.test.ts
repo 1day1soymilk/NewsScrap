@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPlanar, planarPositions, skewness, type PlanarEdge } from './planar'
+import { isPlanar, nearPlanarPositions, planarPositions, skewness, type PlanarEdge } from './planar'
 
 function edges(pairs: string): PlanarEdge[] {
   return pairs
@@ -222,5 +222,68 @@ describe('planarPositions', () => {
       expect(second.get(word)!.x).toBe(point.x)
       expect(second.get(word)!.y).toBe(point.y)
     }
+  })
+})
+
+describe('nearPlanarPositions', () => {
+  const petersen = edges(`
+    o0-o1 o1-o2 o2-o3 o3-o4 o4-o0
+    i0-i2 i2-i4 i4-i1 i1-i3 i3-i0
+    o0-i0 o1-i1 o2-i2 o3-i3 o4-i4
+  `)
+
+  function crossingsAmong(
+    places: Map<string, { x: number; y: number }>,
+    list: PlanarEdge[],
+  ): number {
+    const side = (o: number[], a: number[], b: number[]) =>
+      (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    const at = (w: string) => [places.get(w)!.x, places.get(w)!.y]
+    let count = 0
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const p = list[i]
+        const q = list[j]
+        if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+        const [p1, p2, p3, p4] = [at(p.a), at(p.b), at(q.a), at(q.b)]
+        if (
+          side(p3, p4, p1) > 0 !== side(p3, p4, p2) > 0 &&
+          side(p1, p2, p3) > 0 !== side(p1, p2, p4) > 0
+        ) {
+          count++
+        }
+      }
+    }
+    return count
+  }
+
+  it('K5는 간선 하나만 빼고 나머지를 교차 없이 그린다', () => {
+    const list = complete(5)
+    const drawing = nearPlanarPositions(nodesOf(list), list, 2)!
+    expect(drawing.dropped).toHaveLength(1)
+
+    const kept = list.filter((e) => !drawing.dropped.some((d) => d.a === e.a && d.b === e.b))
+    expect(crossingsAmong(drawing.places, kept)).toBe(0)
+  })
+
+  it('페테르센 그래프는 둘을 뺀다 — 그 사건의 피할 수 없는 교차가 둘이라는 뜻이다', () => {
+    const drawing = nearPlanarPositions(nodesOf(petersen), petersen, 3)!
+    expect(drawing.dropped).toHaveLength(2)
+
+    const kept = petersen.filter((e) => !drawing.dropped.some((d) => d.a === e.a && d.b === e.b))
+    expect(crossingsAmong(drawing.places, kept)).toBe(0)
+  })
+
+  it('허용치보다 더 빼야 하면 null이다', () => {
+    // K6은 셋을 빼야 한다. 둘까지만 허용하면 포기해야지, 둘만 빼고 나머지가
+    // 교차하는 그림을 "성공"이라고 돌려주면 안 된다.
+    const list = complete(6)
+    expect(nearPlanarPositions(nodesOf(list), list, 2)).toBeNull()
+  })
+
+  it('평면 그래프는 아무것도 안 뺀다', () => {
+    const list = complete(4)
+    const drawing = nearPlanarPositions(nodesOf(list), list, 2)!
+    expect(drawing.dropped).toEqual([])
   })
 })

@@ -2,7 +2,7 @@ import { forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-fo
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import { mergeCommunities } from '../lib/events'
 import type { GraphEdge } from '../lib/types'
-import { planarPositions, type PlanarPoint } from './planar'
+import { nearPlanarPositions, type PlanarPoint } from './planar'
 
 // Everything in this file is arithmetic, deliberately separated from
 // KeywordGraph.tsx so it can be tested under jsdom. The one thing jsdom cannot
@@ -687,52 +687,68 @@ function layoutCluster(
   const forced = countCrossings(members, links)
   if (forced === 0) return
 
-  const places = planarPositions(
+  // 비평면이면 최소한만 빼고 나머지를 평면으로 그린다. 뺀 것은 그냥 얹으므로
+  // 나오는 그림의 교차는 0이 아니라 뺀 개수 근처가 되고, 그래서 아래에서 "교차 0"이
+  // 아니라 **"지금보다 적으면"**으로 받는다. 08-02의 전당대회가 그 경우다 — 왜곡도
+  // 2에 실제 27이므로 스물다섯은 배치 탓이고 둘은 어떻게 그려도 남는다.
+  const drawing = nearPlanarPositions(
     members.map((n) => n.word),
     links,
+    MAX_EDGES_DROPPED,
   )
-  if (!places) return
+  if (!drawing) return
 
   const saved = members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
   const forcedArea = areaOf(members)
-  const full = separatingScale(members, places, padding)
 
-  // 통째로 키우는 것만으로 겹침을 풀면 상자가 터무니없이 커진다 — 재어 보면
-  // 08-03이 865px에서 **7,377px**가 된다. 그 값은 위상이 아니라 Tutte 특유의
-  // 왜곡이다: 안쪽 점들이 바깥 면 쪽으로 몰려 나오므로, 제일 가까운 두 점을
-  // 떼려고 나머지 전부를 같이 끌고 나가게 된다.
-  //
-  // 그래서 작은 배율부터 올려 가며 **밀어서** 겹침을 푼다. 미는 것은 닮음변환이
-  // 아니므로 교차가 되살아날 수 있고, 그래서 밀 때마다 확인한다. 통과하는 제일
-  // 작은 배율이 답이다.
-  // **배율과 넓이는 같이 가지 않는다.** 너무 작게 놓으면 라벨이 통째로 겹치고,
-  // 그걸 미느라 사방으로 흩어져 오히려 상자가 커진다. 그래서 제일 먼저 통과하는
-  // 것을 쓰지 않고 전부 재본 뒤 **제일 작은 것**을 고른다 — 단계를 촘촘히 했다가
-  // 정육면체가 도로 23개로 돌아간 것이 이걸 안 했을 때였다.
-  let bestArea = Infinity
-  let bestPlaces: { x: number; y: number }[] | null = null
+  // **평면 좌표를 실제 자리로 바꾸는 방법이 둘이고, 둘은 서로 다른 사건을 푼다.**
+  // 둘 다 재고 나은 쪽을 쓴다 — 어느 하나가 늘 이긴다는 근거가 없고, 실제로
+  // 벌리기는 08-02를 16에서 5로 내리고 확대는 08-03을 14에서 5로 내렸다. 하나만
+  // 쓰면 나머지 한 날을 그냥 버리는 것이 된다.
+  interface Candidate {
+    crossings: number
+    area: number
+    at: { x: number; y: number }[]
+  }
+  let best: Candidate | null = null
 
+  // **예산은 경쟁에 들어가는 조건이지 우승자를 재는 잣대가 아니다.** 나중에 걸면
+  // "교차는 제일 적지만 너무 큰" 후보가 이긴 뒤 탈락하면서, 예산 안에 드는 다른
+  // 후보까지 같이 버려진다. 08-02가 그렇게 5에서 15로 되돌아갔었다.
+  const consider = () => {
+    if (anyOverlap(members, padding)) return
+    const crossings = countCrossings(members, links)
+    if (crossings >= forced) return
+    const area = areaOf(members)
+    if (area > forcedArea * (1 + PLANAR_AREA_PER_CROSSING * (forced - crossings))) return
+
+    // 교차가 먼저, 같으면 좁은 쪽. 넓이가 값이고 교차가 얻는 것이므로, 더 싼
+    // 그림을 찾자고 덜 편 그림을 고를 수는 없다.
+    const current: Candidate = { crossings, area, at: members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 })) }
+    if (
+      best === null ||
+      current.crossings < best.crossings ||
+      (current.crossings === best.crossings && current.area < best.area)
+    ) {
+      best = current
+    }
+  }
+
+  spreadPlanar(members, links, drawing.places, padding)
+  consider()
+
+  const full = separatingScale(members, drawing.places, padding)
   for (const step of PLANAR_SCALE_STEPS) {
     for (const node of members) {
-      const point = places.get(node.word)!
+      const point = drawing.places.get(node.word)!
       node.x = point.x * full * step
       node.y = point.y * full * step
     }
     if (step < 1) relax(members, padding)
-    if (anyOverlap(members, padding)) continue
-    if (countCrossings(members, links) > 0) continue
-
-    const area = areaOf(members)
-    if (area < bestArea) {
-      bestArea = area
-      bestPlaces = members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
-    }
+    consider()
   }
 
-  const chosen =
-    bestPlaces !== null && bestArea <= forcedArea * (1 + PLANAR_AREA_PER_CROSSING * forced)
-      ? bestPlaces
-      : saved
+  const chosen: { x: number; y: number }[] = best === null ? saved : (best as Candidate).at
   members.forEach((n, i) => {
     n.x = chosen[i].x
     n.y = chosen[i].y
@@ -740,16 +756,14 @@ function layoutCluster(
 }
 
 /**
- * 겹침을 푸는 데 필요한 배율의 몇 배부터 시험할지. 작은 쪽부터 — 통과하는 제일
- * 작은 것이 상자를 제일 덜 키운다.
+ * 겹침을 통째로 키워서 풀 때, 필요한 배율의 몇 배부터 시험할지.
+ *
+ * **배율과 넓이는 같이 가지 않는다.** 너무 작게 놓으면 라벨이 전부 겹치고, 그걸
+ * `relax`가 미느라 사방으로 흩어져 오히려 상자가 커진다. 그래서 제일 먼저 통과하는
+ * 것을 쓰지 않고 전부 재본다 — 단계를 촘촘히 했다가 정육면체가 도로 23개로
+ * 돌아간 것이 이걸 안 했을 때였다.
  */
 const PLANAR_SCALE_STEPS = [0.12, 0.16, 0.2, 0.25, 0.3, 0.36, 0.45, 0.55, 0.7, 0.85, 1]
-
-/** 라벨 상자를 다 감싸는 넓이. 상자를 얼마나 키웠는지 재는 자다. */
-function areaOf(members: LayoutNode[]): number {
-  const box = crop(members)
-  return box.width * box.height
-}
 
 /**
  * 어느 두 라벨도 안 겹치게 만드는 제일 작은 배율.
@@ -778,6 +792,135 @@ function separatingScale(
   }
   return scale
 }
+
+/** 벌리기를 몇 번 반복할지. 한 번마다 모든 점이 한 걸음씩 움직인다. */
+const SPREAD_ROUNDS = 120
+
+/**
+ * 평면 그림을 **위상을 안 깨고** 벌린다.
+ *
+ * Tutte 그림은 그 자체로는 못 쓴다. 안쪽 꼭짓점이 바깥 면 쪽으로 몰려 나오는데,
+ * 3-연결을 얻으려고 삼각분할까지 하고 나면 면이 전부 삼각형이라 바깥 테두리가
+ * 삼각형이 되고, 열 몇 점이 그 삼각형 안에 겹겹이 몰린다. 라벨을 떼려고 통째로
+ * 키우면 상자가 **31배**(13단어 사건), **199배**(11단어)가 됐다.
+ *
+ * 시뮬레이션의 출발점으로 주는 것도 시도했고 실패했다 — 300틱이 위상을 도로
+ * 흩어서 네 날의 숫자가 전부 원위치했다. 힘은 자기가 아는 에너지 최소로 갈 뿐
+ * 어디서 출발했는지 기억하지 않는다.
+ *
+ * 그래서 **한 걸음의 크기를 제한한다.** 어떤 점이 자기와 안 닿은 선까지 거리의
+ * 1/3보다 적게 움직이면 그 선을 넘을 수 없고, 모든 점이 그 규칙을 지키면 어떤
+ * 선도 다른 선을 넘지 못한다 — 평면성이 **보장**된다(PrEd의 논거). 그러니 밀되
+ * 그만큼만 민다. 교차를 다시 셀 필요조차 없지만, 부르는 쪽은 어차피 센다.
+ */
+function spreadPlanar(
+  members: LayoutNode[],
+  links: LayoutLink[],
+  places: Map<string, PlanarPoint>,
+  padding: number,
+): void {
+  // 출발 크기는 라벨들이 실제로 차지하는 넓이에서 잡는다 — 다른 사건과 같은 자다.
+  let area = 0
+  for (const n of members) area += (n.halfWidth * 2 + padding) * (n.halfHeight * 2 + padding)
+  const span = Math.sqrt(area * LOCAL_SLACK)
+
+  for (const node of members) {
+    const point = places.get(node.word)!
+    node.x = point.x * span
+    node.y = point.y * span
+  }
+
+  const at = new Map(members.map((n) => [n.word, n]))
+
+  for (let round = 0; round < SPREAD_ROUNDS; round++) {
+    const step = members.map(() => ({ x: 0, y: 0 }))
+
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const a = members[i]
+        const b = members[j]
+        const dx = (b.x ?? 0) - (a.x ?? 0)
+        const dy = (b.y ?? 0) - (a.y ?? 0)
+        const distance = Math.hypot(dx, dy) || 1e-9
+        // 두 라벨이 안 겹치려면 이만큼은 떨어져야 한다. 대각선으로 재는 것은
+        // 방향을 모르기 때문이고, 넉넉한 쪽으로 틀리는 편이 낫다.
+        const want = Math.hypot(a.halfWidth + b.halfWidth + padding, a.halfHeight + b.halfHeight + padding)
+        if (distance >= want) continue
+        const push = ((want - distance) / distance) * 0.5
+        step[i].x -= dx * push
+        step[i].y -= dy * push
+        step[j].x += dx * push
+        step[j].y += dy * push
+      }
+    }
+
+    let moved = false
+    for (let i = 0; i < members.length; i++) {
+      const node = members[i]
+      const want = Math.hypot(step[i].x, step[i].y)
+      if (want < 0.01) continue
+
+      const limit = nearestEdgeDistance(node, members, links, at) / 3
+      const allowed = Math.min(want, limit)
+      if (allowed < 0.01) continue
+
+      node.x = (node.x ?? 0) + (step[i].x / want) * allowed
+      node.y = (node.y ?? 0) + (step[i].y / want) * allowed
+      moved = true
+    }
+    if (!moved) break
+  }
+}
+
+/** 이 점에서 자기와 안 닿은 선까지의 최단 거리. 한 걸음의 상한을 정한다. */
+function nearestEdgeDistance(
+  node: LayoutNode,
+  members: LayoutNode[],
+  links: LayoutLink[],
+  at: Map<string, LayoutNode>,
+): number {
+  let nearest = Infinity
+
+  for (const link of links) {
+    if (link.a === node.word || link.b === node.word) continue
+    const a = at.get(link.a)
+    const b = at.get(link.b)
+    if (!a || !b) continue
+    nearest = Math.min(nearest, pointToSegment(node, a, b))
+  }
+
+  // 선이 하나도 안 닿는 점이면 다른 점까지의 거리로 대신한다. 상한이 무한이면
+  // 한 걸음에 화면 밖으로 나간다.
+  if (!Number.isFinite(nearest)) {
+    for (const other of members) {
+      if (other === node) continue
+      nearest = Math.min(nearest, Math.hypot((other.x ?? 0) - (node.x ?? 0), (other.y ?? 0) - (node.y ?? 0)))
+    }
+  }
+  return Number.isFinite(nearest) ? nearest : 1
+}
+
+function pointToSegment(p: LayoutNode, a: LayoutNode, b: LayoutNode): number {
+  const ax = a.x ?? 0
+  const ay = a.y ?? 0
+  const dx = (b.x ?? 0) - ax
+  const dy = (b.y ?? 0) - ay
+  const length = dx * dx + dy * dy
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, (((p.x ?? 0) - ax) * dx + ((p.y ?? 0) - ay) * dy) / length))
+  return Math.hypot((p.x ?? 0) - (ax + t * dx), (p.y ?? 0) - (ay + t * dy))
+}
+
+/** 라벨 상자를 다 감싸는 넓이. 상자를 얼마나 키웠는지 재는 자다. */
+function areaOf(members: LayoutNode[]): number {
+  const box = crop(members)
+  return box.width * box.height
+}
+
+/**
+ * 평면으로 만드느라 뺄 수 있는 간선의 최대 개수. 하루의 사건 중 비평면인 것은
+ * 08-02의 전당대회 하나이고 왜곡도가 2이므로, 3은 여유다.
+ */
+const MAX_EDGES_DROPPED = 3
 
 // 맞바꿈을 몇 번이나 훑을지. 개선이 없으면 그전에 멈추므로 상한일 뿐이다.
 const UNTANGLE_ROUNDS = 4
