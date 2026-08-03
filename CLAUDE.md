@@ -302,11 +302,25 @@ time and should not be rediscovered:
   and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
   proper nouns.
 
-**Where the four changes leave the sieve, measured in one run**: day-wide mean
-F1 **49.48 → 62.43** and mean precision **71.07 → 90.35**; the 24 category cells
-**55.07 → 71.80**. All of it downstream of the analyser being in-process — one
-new signal, two thresholds it invalidated, and a dictionary re-derived against
-the screen it produced.
+**Where the four changes leave the sieve**: day-wide mean F1 **49.48 → 62.43**
+and mean precision **71.07 → 90.35**; the 24 category cells **55.07 → 71.80**.
+
+**The decomposition matters more than the total, and it is measurable because
+`19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row.** Run
+against the *same* dictionary, the pre-`0018` sieve scores 54.52 / 78.57 and the
+shipped one 62.43 / 90.35, so the three sieve changes are worth **+7.9 F1 and
++11.8 precision** and the dictionary the remaining **+5.0**. Neither figure is
+the one you get by reading the commits in order, because each was measured
+against the dictionary of its moment.
+
+**The dictionary is still load-bearing after all of it**: turn it off and the
+shipped sieve falls to 50.97 / 73.22 *and drops the day's biggest story on three
+of four days*, because 폭염 is two characters, tagged NNG, and lives on its
+`allow` entry from `0003`.
+
+All of it is downstream of the analyser being in-process — one new signal, two
+thresholds it invalidated, and a dictionary re-derived against the screen it
+produced.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
