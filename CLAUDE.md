@@ -700,8 +700,26 @@ events and every edge had to cross somebody else's story.
   price must be a condition of entry: applied to the winner instead, the
   candidate that removes the most crossings wins and is then disqualified,
   taking the affordable one with it (08-02 went back from 5 to 15 that way).
-  Measured: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0 throughout, events
-  drawing a crossing 6 → 3 against a floor of 2. **The price is height** —
+  Measured at the time: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0
+  throughout, events drawing a crossing 6 → 3 against a floor of 2.
+
+  **Those figures are from the canvas of 2026-08-03 and the canvas has moved
+  twice since** — once when the analyser changed and again when migrations
+  `0018`–`0021` retuned the sieve. `scripts/layout/README.md` carries the
+  current table. The short version: `overlap` is still 0 everywhere and `xBr` is
+  down to 4 with `brOther` 0 in every cell, while `xIn` is 34 and **all of the
+  rise is one event** — 2026-08-02's 김민석·정청래·민주당, 12 words and 26 edges,
+  the archive's only non-planar event, drawing 11 against a floor of 2. The
+  better sieve brought the 전당대회 story back to the screen. Every other event
+  is planar.
+
+  `PLANAR_AREA_PER_CROSSING` was re-swept on the new canvas and is **still a
+  staircase**: 0.5 gives `xIn` 34, 1.0 and 2.0 both give 24 for 11% more height
+  with no other column moving, 4.0 gives 12 for 47% more height and pushes `xBr`
+  back to 7. Left at 0.5 — the price is a cliff, so this is a judgement about the
+  picture rather than something the harness settles, and whether 11% more
+  scrolling buys ten straightened lines inside one story is not a measured
+  question. **The price is height** —
   08-02 desktop 651 → 1544px — **and the per-crossing price is a cliff, not a
   dial**: 0.15, 0.25 and 0.35 draw the four days identically to having no planar
   path at all, and 0.5 buys the whole move. There is no middle setting, so this
