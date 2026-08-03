@@ -71,11 +71,39 @@ invariant it resembles.
 
 - **The particle-aware signal.** Spec section 4.4, conditional on the
   measurement, which came back the other way.
-- **The `李대통령` U+F7A1 split.** Recorded, not fixed: it needs NFC
-  normalisation in `lib/nouns.ts` plus a backfill, and nothing measured here
-  depends on it.
+- ~~**The `李대통령` U+F9E1 split.**~~ Done as a follow-up the same day — see
+  task 6 below. (Recorded here as U+F7A1 when the round closed; that was an
+  arithmetic slip reading the UTF-8 bytes `ef a7 a1`, which are U+F9E1.)
 - **Any threshold change.** The round's output is that the deployed value is
   right, which is a result rather than a non-event.
+
+## Task 6 — the compatibility ideographs (follow-up, same day)
+
+Naver writes the same hanja two ways. `李` U+F9E1 and `李` U+674E render
+identically and are different strings, so `李대통령` was two words splitting 15
+rows and `李정부` two more over 3. Five such characters occur in the archive:
+李 U+F9E1, 金 U+F90A, 勞 U+F92F, 盧 U+F933, 女 U+F981. 54 titles and 15 noun rows
+were affected.
+
+Normalise in **both** `extractHeadlines` (the title) and `filterNouns` (the
+word); migration `0012` backfills. Only the word would be actively harmful —
+`standalone` regex-matches the word against the title, so an NFC word against a
+raw title scores 0.00 and is cut as a fragment. NFC, not NFKC: NFKC would rewrite
+￦, ①, ㈜ and the halfwidth forms these headlines genuinely use.
+
+**Done**, tests first (three, all failing before the change and unreadable in the
+failure output because the two strings look the same). Verified: titles not NFC
+0, noun rows not NFC 0, words under two spellings 0.
+
+Migration history needed repairing first — `0011` had been applied through MCP
+and recorded as `20260803003632`, the same defect `0010` had. `supabase migration
+repair` is unusable here (its command line carries the DB password), so the row's
+`version` was updated through the Management API, preserving its statements.
+History reads 0001..0012 contiguous and `db push` works again.
+
+**Then the harness was re-run, because the archive moved under a complete label
+set** — rule 4's second trigger. Both worklists empty, every figure
+byte-identical, `李대통령` now one word at df 7 and still outside the top 70.
 
 ## Running the next round
 
