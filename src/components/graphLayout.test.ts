@@ -443,6 +443,37 @@ describe('사건 구역', () => {
     }
   })
 
+  it('다리를 든 단어를 상대 구역을 바라보는 쪽에 놓는다', () => {
+    // 구역 밖으로 나가는 선이 자기 사건의 내부 선을 자르는 것이, 재어 보니
+    // 다리가 낀 교차의 거의 전부였다(데스크톱 2026-08-03은 14개 중 14개).
+    // 상자를 거울처럼 뒤집어 고치는데, 그 결과는 **고정점**이다 — 어느 쪽으로
+    // 뒤집어도 다리가 더 짧아지지 않는 상태. 여기서 세 가지 뒤집기를 다 재는
+    // 이유가 그것이고, 이 단정이 통과하면 뒤집기 순환이 끝났다는 뜻이기도 하다.
+    const { nodes, regions } = computeGraphLayout(bridged.words, bridged.edges, SIZE)
+
+    for (const [mine, theirs] of [
+      ['가1', '나1'],
+      ['나1', '가1'],
+    ] as const) {
+      const node = find(nodes, mine)
+      const other = find(nodes, theirs)
+      const box = regions.find((r) => r.words.includes(mine))!
+      const cx = box.x + box.width / 2
+      const cy = box.y + box.height / 2
+      const away = Math.hypot(node.x - other.x, node.y - other.y)
+
+      for (const [flipX, flipY] of [
+        [true, false],
+        [false, true],
+        [true, true],
+      ] as const) {
+        const x = flipX ? 2 * cx - node.x : node.x
+        const y = flipY ? 2 * cy - node.y : node.y
+        expect(Math.hypot(x - other.x, y - other.y)).toBeGreaterThanOrEqual(away - 1)
+      }
+    }
+  })
+
   it('엣지가 없는 단어는 어느 구역에도 들어가지 않는다', () => {
     // 70개 중 23~28개가 그렇다. 예전에는 캔버스 안쪽 고리로 보내져 사건들
     // 사이사이에 끼었고, 그것이 가운데를 붐비게 만든 주범이었다.

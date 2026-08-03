@@ -443,6 +443,38 @@ events and every edge had to cross somebody else's story.
   now almost entirely inside one dense event** (`xIn` 18, `xBr` 0). Crossings
   between unrelated stories are gone. Do not read the flat total as "no change";
   read the `xIn`/`xBr` split, which is why the harness prints it.
+- **`xBr` is not one thing either, and splitting it overturned the diagnosis.**
+  Once collection went to six runs a day, 2026-08-03 doubled and its bridges went
+  2 → 7 with `xBr` 0 → 14, which reads as "the greedy ordering can no longer put
+  every bridge next to its partner". `scripts/layout/bridges.ts` breaks that
+  column into bridge×bridge, bridge×**own** region's inner edges, and
+  bridge×another region's inner edges. Across eight cells the first is **1** and
+  the third is **3** (all from one 703px bridge on a day with two bridges and no
+  reordering freedom); everything else — 14 of 14 on desktop 08-03 — is a bridge
+  cutting its **own** event's spokes on the way out. `orderForPacking` cannot
+  touch that. A word sitting mid-box crosses its event whichever way it leaves.
+- **The fix is a mirror, and it was chosen for a property rather than a score.**
+  `faceBridges` flips each region within its own box (identity / horizontal /
+  vertical / both, cheapest total bridge length, iterated to a fixed point).
+  Reflection is an isometry, so the box keeps its size — no re-packing — and it
+  **cannot change `xIn` or `overlap` at all**, since those depend only on
+  distances inside the region. It is a lever that can only move the thing it was
+  built for, which is why there is no regression surface to guard. Measured:
+  `xBr` 24 → 13 over eight cells, desktop 08-03 14 → 5, `xIn` and `overlap`
+  identical everywhere. It converges in **one** round; `FACE_ROUNDS` (4) is slack,
+  not a tuned number — 1, 2, 3, 4 and 8 all give the same picture.
+  One cell regresses and it is instructive: phone 08-03 goes 4 → 5 because the
+  cost is **length, not crossings**, so shortening one bridge can drag another's
+  exit across more spokes. Switching the objective to a crossing count would buy
+  one crossing on one of eight cells and cost the geometry of every inner edge at
+  flip time. Not done.
+- **The pass condition is written in terms of `xIn`/`xBr`, never total
+  `crossings`** (`scripts/layout/README.md`). The region rewrite dropped `crowded`
+  on all eight cells while raising total `crossings` on three, so the total called
+  a better picture a failure. `overlap` is the only column with an absolute rule:
+  never above 0. And a change that claims to move `xBr` has to show the
+  three-way split, because the total does not say whether the cause was guessed
+  right — the paragraph above is what that costs when it is skipped.
 
 Still true, and still arrived at by looking at real days:
 

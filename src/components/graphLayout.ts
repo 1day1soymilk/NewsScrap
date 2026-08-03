@@ -396,6 +396,8 @@ export function computeGraphLayout(
     }
   }
 
+  faceBridges(packOrder, packed.spots, links, eventOf)
+
   // --- 무연결 단어는 구역 **바깥**으로 ---------------------------------------
   //
   // 이 단어들이 가운데를 붐비게 만드는 주범이었다: 70개 중 23~28개가 아무 선도
@@ -937,6 +939,114 @@ function shelfPack(
     shelfWidths,
     width: Math.max(0, ...shelfWidths),
     height: sizes.length === 0 ? 0 : y + shelfHeight,
+  }
+}
+
+/** 뒤집기가 더 이상 아무 상자도 안 움직일 때까지 도는 횟수의 상한. */
+const FACE_ROUNDS = 4
+
+/**
+ * 다리를 든 단어가 상대 구역을 **바라보는 쪽**에 오도록 상자를 거울처럼 뒤집는다.
+ *
+ * 이걸 붙인 이유는 재고 나서다. `xBr`(다리가 낀 교차)를 쪼개 보면 다리끼리
+ * 엇갈린 것은 여덟 칸 통틀어 1개, 남의 구역을 가로지른 것은 3개뿐이고, **나머지는
+ * 전부 다리가 자기 구역의 내부 선을 자르고 나간 것**이다 — 데스크톱 08-03은
+ * 14개 중 14개가 그것이었다. 즉 이건 구역을 어떤 **순서로** 늘어놓느냐의 문제가
+ * 아니어서 `orderForPacking`으로는 손댈 수 없다. 민주당이 12단어짜리 전당대회
+ * 덩어리 한가운데 앉아 있으면, 그 단어에서 나가는 다리는 어느 쪽으로 가든 그
+ * 사건의 바큇살을 가로지른다.
+ *
+ * 뒤집기를 고른 것도 측정이 아니라 **성질** 때문이다. 거울 반사는 등거리변환이라
+ * 상자의 크기가 그대로여서 패킹을 다시 하지 않아도 되고, 구역 **안**의 교차수와
+ * 라벨 겹침을 한 개도 바꿀 수 없다(그 둘은 거리와 방향으로만 정해진다). 바꿀 수
+ * 있는 것은 바깥과의 관계뿐이다 — 이 문제에만 듣고 다른 것은 건드릴 수 없는
+ * 지렛대라서, 회귀를 걱정할 자리가 구조적으로 없다.
+ *
+ * 비용은 다리 길이의 합이다. 교차수를 직접 세지 않는 것은 근사가 아니라 같은
+ * 것이다: 다리가 짧아지는 방향이 곧 그 단어가 상대 쪽 모서리로 가는 방향이고,
+ * 자기 사건을 가로지르지 않는 것도 바로 그 자리다.
+ *
+ * 상대 구역도 뒤집히므로 한 번으로는 안 끝난다. 아무 상자도 안 움직일 때까지
+ * 돌리고, 동수면 뒤집지 않는 쪽이 이기므로 결정적이다.
+ */
+function faceBridges(
+  boxes: LaidOutEvent[],
+  spots: Spot[],
+  links: LayoutLink[],
+  eventOf: Map<string, number>,
+): void {
+  const byWord = new Map<string, LayoutNode>()
+  for (const box of boxes) for (const m of box.members) byWord.set(m.word, m)
+
+  // 사건 id → 그 사건의 단어가 든 다리들. 양끝이 다 구역 안에 있다 — 선을 가진
+  // 단어는 반드시 사건을 받으므로(혼자면 혼자짜리 구역), 다리의 상대가 무연결
+  // 띠에 있는 경우는 없다.
+  const held = new Map<number, { mine: LayoutNode; theirs: LayoutNode }[]>()
+  for (const l of links) {
+    const a = eventOf.get(l.a)
+    const b = eventOf.get(l.b)
+    if (a === undefined || b === undefined || a === b) continue
+    const na = byWord.get(l.a)
+    const nb = byWord.get(l.b)
+    if (!na || !nb) continue
+    for (const [id, mine, theirs] of [
+      [a, na, nb],
+      [b, nb, na],
+    ] as const) {
+      const list = held.get(id)
+      if (list) list.push({ mine, theirs })
+      else held.set(id, [{ mine, theirs }])
+    }
+  }
+  if (held.size === 0) return
+
+  for (let round = 0; round < FACE_ROUNDS; round++) {
+    let moved = false
+
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i]
+      const bridges = held.get(box.id)
+      if (!bridges) continue
+
+      const cx = spots[i].x + box.width / 2
+      const cy = spots[i].y + box.height / 2
+      const cost = (flipX: boolean, flipY: boolean) => {
+        let sum = 0
+        for (const { mine, theirs } of bridges) {
+          const x = flipX ? 2 * cx - mine.x! : mine.x!
+          const y = flipY ? 2 * cy - mine.y! : mine.y!
+          sum += Math.hypot(x - theirs.x!, y - theirs.y!)
+        }
+        return sum
+      }
+
+      // 항등을 먼저 재고 이후는 진짜로 더 나을 때만 이기게 해서, 같은 값이면
+      // 뒤집지 않는다.
+      let bestX = false
+      let bestY = false
+      let best = cost(false, false)
+      for (const [flipX, flipY] of [
+        [true, false],
+        [false, true],
+        [true, true],
+      ] as const) {
+        const c = cost(flipX, flipY)
+        if (c < best) {
+          best = c
+          bestX = flipX
+          bestY = flipY
+        }
+      }
+      if (!bestX && !bestY) continue
+
+      for (const m of box.members) {
+        if (bestX) m.x = 2 * cx - m.x!
+        if (bestY) m.y = 2 * cy - m.y!
+      }
+      moved = true
+    }
+
+    if (!moved) break
   }
 }
 
