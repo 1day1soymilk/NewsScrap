@@ -39,3 +39,6 @@ supabase/.temp/
 # Playwright output.
 test-results/
 playwright-report/
+
+# Reproducible from scripts/reanalyze/*.mjs and the archive; 1.9MB of literals.
+scripts/reanalyze/reanalyze.sql
