@@ -443,6 +443,33 @@ describe('사건 구역', () => {
     }
   })
 
+  it('선반이 넘어가도 순서상 이웃한 두 구역이 좌우 끝으로 갈라지지 않는다', () => {
+    // `orderForPacking`은 다리로 이어진 사건을 순서상 옆에 놓는다. 그런데 선반이
+    // 넘어가는 자리에서는 그 이웃 둘이 화면의 왼쪽 끝과 오른쪽 끝으로 갈라져,
+    // 순서로 붙여 놓은 것이 2차원에서 제일 멀어진다. 데스크톱 2026-08-01의
+    // 703px짜리 다리가 그것이었다.
+    //
+    // 홀수 선반을 좌우로 뒤집으면 넘김 지점이 위아래로 붙는다.
+    const pairs = ['가나다라', '마바사아', '자차카타', '파하거너', '더러머버', '서어저처']
+    const words = pairs.flatMap((p) => [word(`${p}1`), word(`${p}2`)])
+    const links = pairs.map((p) => edge(`${p}1`, `${p}2`, 0.9))
+    const { regions, bounds } = computeGraphLayout(words, links, SIZE)
+
+    expect(regions.length).toBeGreaterThan(3)
+    const rows = new Set(regions.map((r) => r.y))
+    expect(rows.size).toBeGreaterThan(1) // 실제로 선반이 넘어가야 의미가 있다
+
+    for (let i = 1; i < regions.length; i++) {
+      const before = regions[i - 1]
+      const after = regions[i]
+      if (before.y === after.y) continue
+      const gap = Math.abs(
+        before.x + before.width / 2 - (after.x + after.width / 2),
+      )
+      expect(gap).toBeLessThan(bounds.width / 2)
+    }
+  })
+
   it('평면으로 그릴 수 있는 사건은 교차 없이 그린다', () => {
     // 정육면체 — 8점 12선, 누구나 평면으로 그릴 줄 아는 그래프다. 힘 균형에
     // 맡겨 두면 **교차 23개**를 냈다. 12개 간선에서 나올 수 있는 66쌍 중 23쌍이라

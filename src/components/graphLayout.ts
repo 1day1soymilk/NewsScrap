@@ -1193,31 +1193,59 @@ function shelfPack(
 ): Packing {
   const spots: Spot[] = []
   const shelfWidths: number[] = []
-  let shelf = 0
-  let x = 0
-  let y = 0
-  let shelfHeight = 0
+
+  // 한 상자가 안 들어가면 **새 선반으로 넘어가고, 앞 선반은 다시 안 본다**
+  // (next-fit). 그래서 두 단어짜리 사건이 자기 선반 한 줄을 통째로 차지하는 일이
+  // 생긴다 — 2026-07-31 데스크톱의 `로보틱스—제미나이`가 그렇다.
+  //
+  // **자리가 남은 앞 선반에 끼워 넣는 것(first-fit)은 재보고 안 쓰기로 했다.**
+  // 폰 높이를 5~11% 줄이지만(08-01이 1811에서 1619) 폰 08-03의 `xBr`를 6에서
+  // 9로 올린다. 앞 선반으로 되돌아가 끼우는 것이 곧 `orderForPacking`이 다리를
+  // 보고 옆에 붙여 둔 이웃을 떼어 놓는 것이기 때문이다. 버리는 한 줄은 미용
+  // 문제고 다리가 남의 사건을 자르는 것은 읽기 문제라, 바꿀 것이 아니다.
+  const shelves: { used: number; height: number }[] = []
 
   for (const size of sizes) {
-    if (x > 0 && x + size.width > width) {
-      shelfWidths[shelf] = x - gutter
-      shelf += 1
-      y += shelfHeight + gutter
-      x = 0
-      shelfHeight = 0
+    let shelf = shelves.length - 1
+    if (shelf < 0 || (shelves[shelf].used > 0 && shelves[shelf].used + size.width > width)) {
+      shelf = shelves.length
+      shelves.push({ used: 0, height: 0 })
     }
-    spots.push({ x, y, shelf })
-    x += size.width + gutter
-    shelfHeight = Math.max(shelfHeight, size.height)
+    const here = shelves[shelf]
+    spots.push({ x: here.used, y: 0, shelf })
+    here.used += size.width + gutter
+    here.height = Math.max(here.height, size.height)
   }
 
-  if (sizes.length > 0) shelfWidths[shelf] = x - gutter
+  // 선반의 y는 앞 선반들의 높이가 다 정해진 뒤에야 알 수 있다.
+  let y = 0
+  const shelfTops = shelves.map((s) => {
+    const top = y
+    y += s.height + gutter
+    return top
+  })
+  for (const spot of spots) spot.y = shelfTops[spot.shelf]
+  shelves.forEach((s, i) => {
+    shelfWidths[i] = s.used - gutter
+  })
+
+  // **홀수 선반은 좌우를 뒤집는다** — 뱀이 기어가듯.
+  //
+  // `orderForPacking`이 다리로 이어진 사건을 순서상 이웃에 놓아 두는데, 선반이
+  // 넘어가는 자리에서는 그 이웃 둘이 화면의 왼쪽 끝과 오른쪽 끝으로 갈라진다.
+  // 순서상 붙여 놓은 것이 2차원에서는 제일 멀어지는 것이다. 뒤집으면 넘김 지점이
+  // 위아래로 붙는다. 상수가 없고, 구역의 크기도 개수도 안 건드린다.
+  for (let i = 0; i < spots.length; i++) {
+    const spot = spots[i]
+    if (spot.shelf % 2 === 0) continue
+    spot.x = shelfWidths[spot.shelf] - (spot.x + sizes[i].width)
+  }
 
   return {
     spots,
     shelfWidths,
     width: Math.max(0, ...shelfWidths),
-    height: sizes.length === 0 ? 0 : y + shelfHeight,
+    height: sizes.length === 0 ? 0 : y - gutter,
   }
 }
 
