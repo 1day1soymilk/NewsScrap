@@ -9,24 +9,29 @@
 -- and all six tabs — **and the edge set is identical on all 35 too**, hashed
 -- after sorting each edge array by its own text.
 --
--- **The edge *ordering* did move, on 7 of the first 10 cells hashed, and that is
--- the one thing here not lifted verbatim.** The differences were permutations of
--- exactly-tied edges and nothing else: on 2026-07-31, 박지원·한동훈 /
--- 세우타·스페인 / 머스크·중간선거 all carry cooc 3 and npmi
+-- **The edge *ordering* did move, and that is the one thing here not lifted
+-- verbatim.** It moved on 7 of the first 10 cells hashed, and every difference
+-- was a permutation of exactly-tied edges and nothing else: on 2026-07-31,
+-- 박지원·한동훈 / 세우타·스페인 / 머스크·중간선거 all carry cooc 3 and npmi
 -- 0.80097396756174372838 — equal to the last digit, not merely equal once
 -- rounded to the three places the JSON ships.
 --
--- The cause is that `order by npmi desc, cooc desc` **is not a total order**, so
--- which of a set of tied edges came out first was never decided by this function;
--- it was decided by the plan, and lifting the edge query into a function of its
--- own changed the plan. That is not a property to chase back. It is a bug that
--- was invisible while the plan happened to be stable, and it is load-bearing:
--- `detectCommunities` in graphLayout.ts builds its neighbour lists in the order
--- the edges arrive, so a permutation of tied edges can move the Louvain
--- partition, which moves which box a word is laid out in and which stories the
--- event list names. CLAUDE.md already claims the picture is reproducible because
--- ties are "broken on the word server side" — which was true of the nodes and
--- not of the edges.
+-- The cause is that `order by npmi desc, cooc desc` **is not a total order**. When
+-- two edges tie on both keys nothing in the query says which comes first, so the
+-- answer was decided by the query plan; lifting the edge query into a function of
+-- its own changed the plan, and the tied pairs came back permuted. That is not a
+-- property to chase back into place. It is a latent bug that was invisible only
+-- while the plan happened to be stable, and it is load-bearing rather than
+-- cosmetic: `detectCommunities` in `src/components/graphLayout.ts` builds its
+-- adjacency lists by walking the edge array in the order it arrives and keeps the
+-- first-seen best move, so **a permutation of tied edges can move the Louvain
+-- partition between two runs over identical data** — and the partition decides
+-- which box a word is laid out in and which stories the event list names.
+-- CLAUDE.md already claims the picture is reproducible because ties are "broken
+-- on the word server side, so the same day always renders the same picture and
+-- the e2e suite can assert on it". That was true of the nodes and quietly untrue
+-- of the edges. The tie-break below is that stated constraint being enforced for
+-- the first time, not a new rule.
 --
 -- So the ordering gains `, a, b`, the same tie-break the node ranking already
 -- uses, and the gate was then re-run against 0018's own body **with that same
@@ -43,22 +48,6 @@
 -- rescues one. So the answer has to be iterated to a fixed point. A recursive CTE
 -- cannot express it: Postgres forbids window functions in the recursive term and
 -- the ranking is `row_number()`. Hence a loop, and hence plpgsql.
---
--- **Why the node and edge queries move into helper functions.** The loop needs
--- the node set and the edge set on every pass, and the final JSON needs both
--- again. Inlining them would put two copies of the sieve in one file, and this
--- project has already paid for a second copy of a formula more than once —
--- `keyword_signals` exists as one function for the same reason, and CLAUDE.md
--- records what measuring a hand-copied sieve costs. `keyword_graph_nodes` and
--- `keyword_graph_edges` are lifted verbatim out of 0018; the node query gains
--- exactly two things, a `p_banned` filter and an `is_place` column, and the edge
--- query gains the redirect of its `exists` clause onto the node function, the
--- tie-break above, and the `materialized` fence noted at the CTE itself.
---
--- `scoped` and `scoped_df` appear in both helpers. That is duplication of a
--- *selection* — which of the day's rows the viewer is looking at — and not of a
--- threshold or a formula, and the alternative is a third function returning a
--- set that both would have to re-join anyway.
 --
 -- **Termination is by monotonicity, not by the guard.** `banned` only ever grows,
 -- and it can only ever hold words carrying a `word_overrides` 'place' entry, of
@@ -77,43 +66,117 @@
 -- qualifies only 69 words and the render cap was never binding — the same
 -- cap-binding argument CLAUDE.md makes about head_pos, seen from the other side.
 --
--- **"Has an edge" means "has a line on screen".** The loop asks
--- `keyword_graph_edges` — the same function the JSON's `edges` array comes from,
--- so the same `edge_min_cooc`, the same `edge_min_npmi`, and both endpoints drawn.
--- A pair that co-occurs in the data but is not drawn does not rescue a place; the
--- reader cannot see it.
+-- **"Has an edge" means "has a line on screen".** The loop asks for the drawn
+-- edges — the same `edge_min_cooc`, the same `edge_min_npmi`, and both endpoints
+-- among the drawn nodes — because a pair that co-occurs in the data but is not
+-- drawn cannot be seen by the reader and so cannot be a place's reason to be
+-- there.
 --
--- All three functions stay SECURITY INVOKER (the SQL default, stated anyway) with
+--
+-- ## How the work is split, and why it is split that way
+--
+-- The first version of this migration had one helper for nodes and one for edges,
+-- each taking `(p_date, p_category, p_banned)`, and the loop called them. It was
+-- correct and far too slow: **13 seconds with the gate on**, against 1,417ms for
+-- 0018. Profiling put essentially all of it in one place:
+--
+--     keyword_signals('2026-08-03')            951 ms
+--     the whole pair/npmi arithmetic           144 ms
+--     keyword_graph_nodes  (signals + sieve)   982 ms
+--     keyword_graph_edges  (nodes + pairs)   1,156 ms
+--
+-- The sieve, the ranking, the cap and the pair arithmetic together are noise
+-- beside `keyword_signals`, and the loop was paying for it eight times over — two
+-- passes at three node evaluations each, plus two more for the final JSON.
+--
+-- **This is the second time in this project that a cost turned out to be round
+-- trips rather than computation.** `supabase/functions/collect-headlines/index.ts`
+-- records the same shape from the other side: the morphological analyser costs
+-- 0.88ms a headline, and it was the ~2,700 round trips around it that killed the
+-- function, so batching them took a run from 44.9s to 4-5s. Same finding here,
+-- one layer up — nothing was made faster, something expensive was simply stopped
+-- from being asked eight times. Measure which half the time is in before tuning
+-- either half.
+--
+-- **`keyword_signals` does not depend on `banned`.** Neither does the scoped
+-- count, the sieve verdict, the `passed_by` reason, or the raw pair list. All
+-- `banned` can do is remove rows, and removing rows changes only the ranking and
+-- what fits under the cap. So the split is by *what a thing depends on*:
+--
+--   * `keyword_graph_candidates(p_date, p_category)` — expensive, banned-blind.
+--     Runs `keyword_signals` once and applies sieves 1 to 4. The one and only
+--     place that decides **whether a word may be drawn at all**.
+--   * `keyword_graph_rank(p_cands, p_banned)` — cheap, banned-aware. Ranking,
+--     the head_pos demotion, the render cap and the `faded` / `is_place` flags.
+--     The one and only place that decides **which of them are drawn and in what
+--     order**. It takes the candidate set as an array of composite values so the
+--     loop can hand it the same set repeatedly without paying for it again.
+--   * `keyword_graph_pick_edges(p_date, p_category, p_words)` — the one and only
+--     place that decides **what an edge is**: both thresholds, both endpoints
+--     drawn, the ordering and the limit. It takes the drawn words as an argument
+--     rather than computing them, which is what keeps it off `keyword_signals`.
+--
+-- The node rule is therefore in two functions rather than one, split along the
+-- `banned` dependency — but each half exists exactly once, which is the rule that
+-- matters. Nothing is duplicated; a threshold still lives in one place.
+--
+-- `keyword_graph_nodes` and `keyword_graph_edges` survive with the signatures they
+-- were specified with, as thin wrappers, because `scripts/analysis/` and later
+-- tasks want the whole answer from a date. `keyword_graph` itself does not use
+-- them: it holds the candidate array across the loop and calls
+-- `keyword_graph_rank` and `keyword_graph_pick_edges` directly, so
+-- **`keyword_signals` runs exactly once per `keyword_graph` call, gate on or
+-- off**. Measured on 2026-08-03: 1,417ms for 0018, 1,096ms with the gate off,
+-- 1,340ms with it on.
+--
+-- All functions are SECURITY INVOKER (the SQL default, stated anyway) with
 -- `set search_path = ''`. RLS is the whole access model here — there is no login
--- and `anon` reaches these functions directly — so a SECURITY DEFINER in this
--- chain would hand out the service role's view of the tables.
+-- and `anon` reaches these functions directly — so a SECURITY DEFINER anywhere in
+-- this chain would hand out the service role's view of the tables.
 
-create or replace function public.keyword_graph_nodes(
-  p_date date,
-  p_category text,
-  p_banned text[]
-)
-returns table (
+-- Dropped in dependency order so a re-push is idempotent. `drop type … cascade`
+-- takes `keyword_graph_rank` with it, which is why that one is not named here.
+drop function if exists public.keyword_graph_nodes(date, text, text[]);
+drop function if exists public.keyword_graph_edges(date, text, text[]);
+drop function if exists public.keyword_graph_pick_edges(date, text, text[]);
+drop function if exists public.keyword_graph_candidates(date, text);
+drop type if exists public.keyword_candidate cascade;
+
+-- The candidate set, as a value that can be carried across loop iterations.
+--
+-- `override_mode` rides along rather than the two flags derived from it, because
+-- `faded` also needs the rank and so cannot be settled here. `head_pos` rides
+-- along because the demotion is a ranking decision, not a sieve one.
+--
+-- A migration that adds a column to `keyword_signals` and wants it on the node
+-- row has to add it here too (`alter type … add attribute`). That is the cost of
+-- carrying the set by value, and it is cheap beside eight runs of the signal
+-- query.
+create type public.keyword_candidate as (
   word              text,
   count             int,
   spec              numeric,
   standalone        numeric,
   neighbors_per_doc numeric,
   assoc             numeric,
+  head_pos          numeric,
   passed_by         text,
   category_slug     text,
-  is_place          boolean,
-  faded             boolean,
-  rank              bigint
+  override_mode     text
+);
+
+-- Sieves 1 to 4: may this word be drawn at all? Independent of `p_banned` by
+-- construction — this is the expensive half, and it runs once per RPC call.
+create or replace function public.keyword_graph_candidates(
+  p_date date,
+  p_category text
 )
+returns setof public.keyword_candidate
 language sql
 stable
 security invoker
 set search_path = ''
 as $fn$
--- Every reference below is qualified. RETURNS TABLE columns are output
--- parameters and are in scope in the body, so a bare `word` or `count` here
--- would be ambiguous rather than wrong-looking.
 with w as (
   -- One row even when the table is empty, so the defaults here are the single
   -- source of truth if a key is ever missing.
@@ -125,11 +188,7 @@ with w as (
     -- Sieve 4d. 9.9 disables it, the convention min_spec uses, since the
     -- signal maxes at 1.
     coalesce(max(value) filter (where key = 'min_proper'), 9.90)           as min_proper,
-    coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_neighbors_per_doc,
-    -- Sieve 5, as a demotion rather than a cut. 9.9 disables it.
-    coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90)      as demote_head_pos,
-    coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit,
-    coalesce(max(value) filter (where key = 'render_cap'), 130)            as render_cap
+    coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_neighbors_per_doc
   from public.scoring_weights
 ),
 sig as (
@@ -167,10 +226,6 @@ candidates as (
   from scoped_df sd
   join sig on sig.word = sd.word
   left join public.word_overrides ov on ov.word = sd.word
-  -- Sieve 6's only foothold in the node query. The caller decides what is
-  -- banned; with an empty array — which is what an off gate always passes —
-  -- this clause admits everything and the plan is the one 0018 had.
-  where not (sd.word = any (coalesce(p_banned, '{}'::text[])))
 ),
 -- passed_by names the sieve-4 clause that actually let the word through, in a
 -- fixed order, so tuning can tell which rescue is carrying the day. 'allow' only
@@ -190,6 +245,54 @@ sieved as (
   where c.day_df >= w.min_headlines
     and c.standalone >= w.min_standalone
     and c.override_mode is distinct from 'exclude'
+)
+select
+  s.word, s.count, s.spec, s.standalone, s.neighbors_per_doc, s.assoc,
+  s.head_pos, s.passed_by, s.category_slug, s.override_mode
+from sieved s
+where s.passed_by is not null;
+$fn$;
+
+-- Which of the candidates are drawn, in what order, and how they are flagged.
+-- Cheap, and the only part of the node rule that `p_banned` can reach.
+create or replace function public.keyword_graph_rank(
+  p_cands public.keyword_candidate[],
+  p_banned text[]
+)
+returns table (
+  word              text,
+  count             int,
+  spec              numeric,
+  standalone        numeric,
+  neighbors_per_doc numeric,
+  assoc             numeric,
+  passed_by         text,
+  category_slug     text,
+  is_place          boolean,
+  faded             boolean,
+  rank              bigint
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $fn$
+-- Every reference below is qualified. RETURNS TABLE columns are output
+-- parameters and are in scope in the body, so a bare `word` or `count` here
+-- would be ambiguous rather than merely untidy.
+with w as (
+  select
+    -- Sieve 5, as a demotion rather than a cut. 9.9 disables it.
+    coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90) as demote_head_pos,
+    coalesce(max(value) filter (where key = 'node_limit'), 70)        as node_limit,
+    coalesce(max(value) filter (where key = 'render_cap'), 130)       as render_cap
+  from public.scoring_weights
+),
+-- Sieve 6's only foothold. The caller decides what is banned; with an empty
+-- array — which is what an off gate always passes — this admits everything.
+kept as (
+  select c.* from unnest(p_cands) c
+  where not (c.word = any (coalesce(p_banned, '{}'::text[])))
 ),
 -- Frequency decides the order, and it is the category's own count that orders
 -- them: the day-wide figure only decides eligibility.
@@ -205,11 +308,10 @@ sieved as (
 -- head_pos is day-wide, like every other sieve signal since migration 0004:
 -- the category filter decides what is shown and how big, never what qualifies.
 ranked as (
-  select s.*, row_number() over (
-    order by (s.head_pos > w.demote_head_pos) asc, s.count desc, s.word) as rank
-  from sieved s
+  select k.*, row_number() over (
+    order by (k.head_pos > w.demote_head_pos) asc, k.count desc, k.word) as rank
+  from kept k
   cross join w
-  where s.passed_by is not null
 )
 select
   r.word, r.count, r.spec, r.standalone, r.neighbors_per_doc, r.assoc,
@@ -225,10 +327,13 @@ cross join w
 where r.rank <= w.render_cap;
 $fn$;
 
-create or replace function public.keyword_graph_edges(
+-- What an edge is: both thresholds, both endpoints drawn, the ordering and the
+-- limit. `p_words` is the drawn node set, passed in rather than computed, which
+-- is the whole reason this function never touches `keyword_signals`.
+create or replace function public.keyword_graph_pick_edges(
   p_date date,
   p_category text,
-  p_banned text[]
+  p_words text[]
 )
 returns table (
   a    text,
@@ -262,16 +367,6 @@ scoped_df as (
 corpus as (
   select count(distinct s.headline_id)::numeric as n from scoped s
 ),
--- `materialized` is load-bearing, not decoration. The two `exists` clauses below
--- both need the node set, and written against the function directly the planner
--- evaluated it once per clause — three runs of `keyword_signals` per
--- `keyword_graph` call against 0018's one, measured at 3,099ms on 2026-08-03
--- where 0018 took 1,408ms. Pinning it to a materialized CTE takes it to two.
--- Two is the floor while the node set reaches this function through its
--- arguments rather than as an argument.
-node_words as materialized (
-  select n.word from public.keyword_graph_nodes(p_date, p_category, p_banned) n
-),
 pairs as (
   select x.word as a, y.word as b, count(*)::int as cooc
   from scoped x
@@ -287,22 +382,76 @@ scored_pairs as (
   join scoped_df da on da.word = p.a
   join scoped_df db on db.word = p.b
 )
--- An edge is drawn only between two drawn words, which is what makes this the
--- honest answer to "does this place have a line on screen". The node set is
--- asked for, never re-derived.
 select sp.a, sp.b, sp.cooc, sp.npmi
 from scored_pairs sp
 cross join w
 where sp.cooc >= w.edge_min_cooc
   and sp.npmi >= w.edge_min_npmi
-  and exists (select 1 from node_words nw where nw.word = sp.a)
-  and exists (select 1 from node_words nw where nw.word = sp.b)
--- The word is the tie-break, exactly as it is in the node ranking, and it is
--- the one thing here that is not lifted verbatim from 0018. See the migration
--- header: `npmi desc, cooc desc` is not a total order, so which of a set of
--- exactly-tied edges came out first was decided by the plan.
+  -- An edge is drawn only between two drawn words, which is what makes this the
+  -- honest answer to "does this place have a line on screen".
+  and sp.a = any (coalesce(p_words, '{}'::text[]))
+  and sp.b = any (coalesce(p_words, '{}'::text[]))
+-- The word is the tie-break, exactly as it is in the node ranking. See the
+-- migration header: without it this is not a total order.
 order by sp.npmi desc, sp.cooc desc, sp.a, sp.b
 limit (select w2.edge_limit::int from w w2);
+$fn$;
+
+-- The whole-answer forms. `keyword_graph` does not call these — it holds the
+-- candidate array itself — but `scripts/analysis/` and later tasks want a node
+-- set or an edge set from a date, and this is the one place composing the halves
+-- above into that.
+create or replace function public.keyword_graph_nodes(
+  p_date date,
+  p_category text,
+  p_banned text[]
+)
+returns table (
+  word              text,
+  count             int,
+  spec              numeric,
+  standalone        numeric,
+  neighbors_per_doc numeric,
+  assoc             numeric,
+  passed_by         text,
+  category_slug     text,
+  is_place          boolean,
+  faded             boolean,
+  rank              bigint
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $fn$
+  select
+    r.word, r.count, r.spec, r.standalone, r.neighbors_per_doc, r.assoc,
+    r.passed_by, r.category_slug, r.is_place, r.faded, r.rank
+  from public.keyword_graph_rank(
+    array(select c from public.keyword_graph_candidates(p_date, p_category) c),
+    p_banned) r;
+$fn$;
+
+create or replace function public.keyword_graph_edges(
+  p_date date,
+  p_category text,
+  p_banned text[]
+)
+returns table (
+  a    text,
+  b    text,
+  cooc int,
+  npmi numeric
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $fn$
+  select e.a, e.b, e.cooc, e.npmi
+  from public.keyword_graph_pick_edges(
+    p_date, p_category,
+    array(select n.word from public.keyword_graph_nodes(p_date, p_category, p_banned) n)) e;
 $fn$;
 
 create or replace function public.keyword_graph(p_date date, p_category text default null)
@@ -313,29 +462,43 @@ security invoker
 set search_path = ''
 as $fn$
 declare
+  cands   public.keyword_candidate[];
   banned  text[] := '{}';
   dropped text[];
   gate    boolean;
   guard   int := 0;
+  result  json;
 begin
   select coalesce(max(value), 0) = 1 into gate
   from public.scoring_weights where key = 'place_needs_edge';
 
+  -- The expensive half, once. Everything below is arithmetic over a few hundred
+  -- rows, so the loop is affordable however many times it goes round.
+  cands := array(select c from public.keyword_graph_candidates(p_date, p_category) c);
+
   if gate then
     loop
       guard := guard + 1;
-      -- A place with no edge to a drawn non-place. The edges asked for here are
-      -- the same ones the JSON below emits, so "has an edge" means "has a line
-      -- on screen" rather than "co-occurs somewhere in the data".
-      select coalesce(array_agg(n.word), '{}') into dropped
-      from public.keyword_graph_nodes(p_date, p_category, banned) n
-      where n.is_place
+      -- Both CTEs are `materialized` on purpose: the `not exists` below is
+      -- correlated on the outer place, and without the fence the planner is free
+      -- to re-run the edge query once per place on screen.
+      with n as materialized (
+        select * from public.keyword_graph_rank(cands, banned)
+      ),
+      e as materialized (
+        select * from public.keyword_graph_pick_edges(
+          p_date, p_category, array(select nn.word from n nn))
+      )
+      -- A place with no edge to a drawn non-place.
+      select coalesce(array_agg(p.word), '{}')
+      into dropped
+      from n p
+      where p.is_place
         and not exists (
           select 1
-          from public.keyword_graph_edges(p_date, p_category, banned) e
-          join public.keyword_graph_nodes(p_date, p_category, banned) m
-            on m.word = case when e.a = n.word then e.b else e.a end
-          where (e.a = n.word or e.b = n.word) and not m.is_place
+          from e ee
+          join n m on m.word = case when ee.a = p.word then ee.b else ee.a end
+          where (ee.a = p.word or ee.b = p.word) and not m.is_place
         );
       -- Dropping a place promotes the next-ranked word, which can rescue or
       -- strand another place, so this runs to a fixed point. `banned` only
@@ -346,33 +509,41 @@ begin
     end loop;
   end if;
 
-  return (
-    select json_build_object(
-      'nodes', coalesce((
-        select json_agg(json_build_object(
-          'word', n.word,
-          'count', n.count,
-          'spec', round(n.spec, 3),
-          'standalone', round(n.standalone, 3),
-          'neighbors_per_doc', round(n.neighbors_per_doc, 3),
-          'assoc', round(n.assoc, 3),
-          'passed_by', n.passed_by,
-          'category_slug', n.category_slug,
-          'faded', n.faded
-        ) order by n.rank)
-        from public.keyword_graph_nodes(p_date, p_category, banned) n
-      ), '[]'::json),
-      'edges', coalesce((
-        select json_agg(json_build_object(
-          'a', e.a,
-          'b', e.b,
-          'cooc', e.cooc,
-          'npmi', round(e.npmi, 3)
-        ) order by e.npmi desc, e.cooc desc, e.a, e.b)
-        from public.keyword_graph_edges(p_date, p_category, banned) e
-      ), '[]'::json)
-    )
-  );
+  with n as materialized (
+    select * from public.keyword_graph_rank(cands, banned)
+  ),
+  e as materialized (
+    select * from public.keyword_graph_pick_edges(
+      p_date, p_category, array(select nn.word from n nn))
+  )
+  select json_build_object(
+    'nodes', coalesce((
+      select json_agg(json_build_object(
+        'word', x.word,
+        'count', x.count,
+        'spec', round(x.spec, 3),
+        'standalone', round(x.standalone, 3),
+        'neighbors_per_doc', round(x.neighbors_per_doc, 3),
+        'assoc', round(x.assoc, 3),
+        'passed_by', x.passed_by,
+        'category_slug', x.category_slug,
+        'faded', x.faded
+      ) order by x.rank)
+      from n x
+    ), '[]'::json),
+    'edges', coalesce((
+      select json_agg(json_build_object(
+        'a', y.a,
+        'b', y.b,
+        'cooc', y.cooc,
+        'npmi', round(y.npmi, 3)
+      ) order by y.npmi desc, y.cooc desc, y.a, y.b)
+      from e y
+    ), '[]'::json)
+  )
+  into result;
+
+  return result;
 end;
 $fn$;
 
@@ -386,12 +557,25 @@ insert into public.scoring_weights (key, value, note) values
    'sieve 6: DISABLED. 1 draws a word_overrides place only when a line joins it to a non-place. 0 draws every place. Turned on by 0025 after measurement.')
 on conflict (key) do update set value = excluded.value, note = excluded.note;
 
--- create or replace keeps the existing grants, but re-stating them costs nothing
--- and makes a fresh database built from migrations alone come out the same as
--- one that was migrated. The helpers get the same grantees as keyword_graph
--- rather than only anon: it is SECURITY INVOKER and calls them as the caller, so
--- a role that may execute it and not them would get a permission error instead
--- of a graph.
-grant execute on function public.keyword_graph_nodes(date, text, text[]) to anon, authenticated;
-grant execute on function public.keyword_graph_edges(date, text, text[]) to anon, authenticated;
-grant execute on function public.keyword_graph(date, text) to anon, authenticated;
+-- The functions were dropped above, so these grants are load-bearing rather than
+-- a restatement: a drop discards them.
+--
+-- **`anon` and nothing else**, which is a change from 0018's `anon, authenticated`
+-- and matches `keyword_signals` in 0017. There is no login in this project:
+-- `src/lib/supabaseClient.ts` builds a `PostgrestClient` by hand with the anon key
+-- in both the `apikey` and `Authorization` headers, and there is no auth-js in the
+-- bundle at all, so `authenticated` is a role nothing can ever arrive as. One
+-- grantee list across the whole chain is worth more than a role that cannot occur.
+--
+-- Naming one role here cannot half-break the chain, which is the thing worth
+-- checking before writing a grant for a SECURITY INVOKER call tree. Postgres
+-- grants EXECUTE on a new function to PUBLIC by default, and `keyword_signals`'
+-- ACL shows it — `=X/postgres` alongside the explicit `anon=X`. So every grant in
+-- this file states intent rather than conferring access, and dropping
+-- `authenticated` takes nothing away from anyone.
+grant execute on function public.keyword_graph_candidates(date, text) to anon;
+grant execute on function public.keyword_graph_rank(public.keyword_candidate[], text[]) to anon;
+grant execute on function public.keyword_graph_pick_edges(date, text, text[]) to anon;
+grant execute on function public.keyword_graph_nodes(date, text, text[]) to anon;
+grant execute on function public.keyword_graph_edges(date, text, text[]) to anon;
+grant execute on function public.keyword_graph(date, text) to anon;
