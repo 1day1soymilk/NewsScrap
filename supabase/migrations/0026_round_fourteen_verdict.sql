@@ -57,10 +57,16 @@
 -- binding cell, which is the same mechanism seen from the other side and is not
 -- enough to carry the other 23.
 --
--- The machinery from 0023 and 0024 stays in place. It costs nothing switched off
--- (`keyword_graph` measured at 1,096ms with the gate off against 0018's 1,417ms)
--- and `word_overrides` mode 'place' is now a labelled fact about 45 words that a
--- later round can read for something else.
+-- The machinery from 0023 and 0024 stays in place. It costs nothing switched off,
+-- and the figures that support that are Task 2's **same-sitting** pair — 0018 at
+-- 1,417ms against the gate *on* at 1,342ms on 2026-08-03, so even the expensive
+-- path is inside the untouched RPC's own cost. Do **not** read 0024's 1,096ms
+-- gate-off figure against it: that is a different sitting, 0024's header carries
+-- both numbers for the same query on the same day, and after 0025 the gate-off
+-- query runs 1,293-1,299ms. Task 5's report says so explicitly, and quoting
+-- across sittings is the defect class this repository keeps re-committing.
+-- `word_overrides` mode 'place' also stays: a labelled fact about 45 words that a
+-- later round can read for something other than a cut.
 --
 --
 -- ## 2. `render_cap` and `node_limit` stay 70 — and the harness cannot price them
@@ -141,19 +147,29 @@
 -- available at all.
 --
 -- **The day the mechanism was built for is 2026-08-04 and it is not in
--- `analysis.eval_days`** — society 582 against it 241, factors 0.741 to 1.790.
--- It is not there because it is *today*: the cron collects again at 15, 19 and 23
--- KST, and a day that is still moving cannot carry a label set. That is rule 4's
--- second trigger, which has already fired once on this branch.
+-- `analysis.eval_days`.** It is not there because it is *today*: the cron
+-- collects again at 15, 19 and 23 KST, and a day that is still moving cannot
+-- carry a label set. That is rule 4's second trigger, which has already fired
+-- once on this branch.
 --
--- Diagnostic on that day, out of band and label-free, alpha 0 against alpha 0.50:
--- four words of seventy swap, and they swap in the designed direction — 강도살인
--- and 오토바이 (society, 582) and 고려아연 and 근원물가 (economy, 561) leave;
--- 기아 (culture, 322), 무장해제안, 미일 and 아이디어 (world, 403) enter. The
--- thinnest section, it at 241, gains nothing. Whether that trade is an
+-- **Every 2026-08-04 figure below is stamped, and none of it is reproducible** —
+-- the same fact stated as a warning. Measured twice, hours apart, it moved both
+-- times: society 582 / it 241, factors 0.741-1.790, 130 words qualifying at
+-- **11:00 KST**; society 732 / it 354, factors 0.756-1.563, 3,319 headlines and
+-- **240** words qualifying at **20:24 KST**. Read any of it as a snapshot, never
+-- as a figure a later run should reproduce.
+--
+-- Diagnostic on that day, out of band and label-free, **taken at 2026-08-04
+-- 20:24 KST against section totals 391/710/354/629/732/503** (culture, economy,
+-- it, politics, society, world), alpha 0 against alpha 0.50: four words of
+-- seventy swap, and they swap in the designed direction — 강도살인 and 오토바이
+-- (society, the thickest at 732) and 고려아연 and 근원물가 (economy, 710) leave;
+-- 기아 (culture, 391), 무장해제안, 미일 and 아이디어 (world, 503) enter. The
+-- thinnest section, it at 354, gains nothing. Whether that trade is an
 -- improvement is exactly the question labels answer and this day has none, so it
--- moves nothing here. Recorded so a future round knows the effect is real, small,
--- and correctly directed before it pays for the labels.
+-- moves nothing here. Recorded so a future round knows the effect is real, small
+-- and correctly directed before it pays for the labels — not so that anyone
+-- reproduces these eight words.
 --
 -- 0025 already ships alpha at 0, so this migration moves nothing for it either.
 
@@ -162,7 +178,7 @@ update public.scoring_weights
  where key = 'place_needs_edge';
 
 update public.scoring_weights
-   set note = 'sieve ranking: 0 = raw frequency (identity), 1 = the count under equal collection. Held at 0 by round fourteen (0026) and NOT because it was measured to cost — mean F1 63.70 vs 63.20 at every positive value, but the only day it loses on is 2026-07-31, whose six sections collected 150/149/150/150/150/150 so its balance factors sit within 0.6% of 1. The day the mechanism was built for, 2026-08-04 (society 582, it 241), cannot be in analysis.eval_days while it is still collecting. Alpha is not measurable on this day set; re-measure when 08-04 settles and can be labelled.'
+   set note = 'sieve ranking: 0 = raw frequency (identity), 1 = the count under equal collection. Held at 0 by round fourteen (0026) and NOT because it was measured to cost — mean F1 63.70 vs 63.20 at every positive value, but the only day it loses on is 2026-07-31, whose six sections collected 150/149/150/150/150/150 so its balance factors sit within 0.6% of 1. The day the mechanism was built for, 2026-08-04 (society 582 against it 241 as of 11:00 KST; 732 against 354 by 20:24, which is the point), cannot be in analysis.eval_days while it is still collecting. Alpha is not measurable on this day set; re-measure when 08-04 settles and can be labelled.'
  where key = 'category_balance_alpha';
 
 update public.scoring_weights

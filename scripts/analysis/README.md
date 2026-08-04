@@ -375,8 +375,8 @@ rank at which the screen cleanly stops being worth widening. Bad words on the
 canvas go 3 → 16 on 2026-07-31 and 2 → 23 on 2026-08-03.
 
 The cap is read **per day** and not on a mean, because it can only act where it
-binds. Qualifying words: 07-31 116, 08-01 108, 08-02 **69**, 08-03 260, 08-04
-130. 2026-08-02 is identical in all four rows by construction.
+binds. Qualifying words: 07-31 116, 08-01 108, 08-02 **69**, 08-03 260.
+2026-08-02 is identical in all four rows by construction.
 
 And nothing in this round re-measures the picture, which is what `0006` decided
 on: ranks 71–130 arrived faded at the minimum font size and sat in every gap
@@ -471,7 +471,16 @@ costs 0.5 F1".** It loses on exactly one day, and the balance factors say why:
 | 2026-08-01 | 0.742 | 1.869 | 167/207/102/210/257/201 |
 | 2026-08-02 | 0.773 | 1.294 | 89/114/89/149/149/101 |
 | 2026-08-03 | 0.808 | 1.201 | 313/445/309/372/453/305 |
-| *2026-08-04* | *0.741* | *1.790* | *322/561/241/479/582/403* |
+| *2026-08-04, 11:00 KST* | *0.741* | *1.790* | *322/561/241/479/582/403* |
+| *2026-08-04, 20:24 KST* | *0.756* | *1.563* | *391/710/354/629/732/503* |
+
+**The last two rows are the same day and they are stamped for that reason.** The
+four days above them are settled and reproducible; 2026-08-04 is still being
+collected, and in the nine hours between those two readings it went from 130
+qualifying words to **240** and from 2,4xx headlines to 3,319. Any 08-04 figure
+in this repository is a snapshot. Quoting one without its clock time next to four
+settled days is how it gets read as a measurement, and this table is the one
+place the difference is visible.
 
 2026-07-31 is a single capped collection run, balanced to within 0.6% of 1 — so α
 cannot correct anything there and all it does is break a raw-`df` tie by a
@@ -485,25 +494,28 @@ at 15, 19 and 23 KST, and a day that is still moving cannot carry a label set �
 rule 4's second trigger, which has already fired once on this branch. Adding it
 was considered and declined for exactly that reason.
 
-**Diagnostic, out of band and label-free**, α 0 against α 0.50 on 2026-08-04.
-Four words of seventy swap, in the designed direction:
+**Diagnostic, out of band and label-free**, α 0 against α 0.50 on 2026-08-04,
+**taken at 20:24 KST** against that reading's section totals. Four words of
+seventy swap, in the designed direction:
 
-| move | word | count | top section |
+| move | word | count | top section (total at 20:24) |
 | --- | --- | --- | --- |
-| leaves | 강도살인 | 6 | society (582) |
-| leaves | 오토바이 | 6 | society (582) |
-| leaves | 고려아연 | 5 | economy (561) |
-| leaves | 근원물가 | 5 | economy (561) |
-| enters | 기아 | 5 | culture (322) |
-| enters | 무장해제안 | 5 | world (403) |
-| enters | 미일 | 5 | world (403) |
-| enters | 아이디어 | 5 | world (403) |
+| leaves | 강도살인 | 6 | society (732) |
+| leaves | 오토바이 | 6 | society (732) |
+| leaves | 고려아연 | 5 | economy (710) |
+| leaves | 근원물가 | 5 | economy (710) |
+| enters | 기아 | 5 | culture (391) |
+| enters | 무장해제안 | 5 | world (503) |
+| enters | 미일 | 5 | world (503) |
+| enters | 아이디어 | 5 | world (503) |
 
-The thinnest section, it at 241, gains nothing. Whether the trade is an
-improvement is the question labels answer and this day has none, so **this moves
-nothing** — it is a diagnostic in the sense `30_word_scores.sql` is one. It is
-written down so a future round knows the effect is real, small and correctly
-directed before it pays for the labels.
+The two thickest sections lose four words and two thinner ones gain them; the
+thinnest, it at 354, gains nothing. Whether the trade is an improvement is the
+question labels answer and this day has none, so **this moves nothing** — it is a
+diagnostic in the sense `30_word_scores.sql` is one. It is written down so a
+future round knows the effect is real, small and correctly directed before it
+pays for the labels, **not so that anyone reproduces these eight words**: the day
+is still collecting and the table above shows how far it moved in nine hours.
 
 ### What is left active
 

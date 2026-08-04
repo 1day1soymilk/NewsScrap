@@ -7,9 +7,15 @@
 -- files is the drift 02_sieve_configs.sql's header warns about.
 --
 -- Words clearing the shipped sieve, per day: 07-31 116, 08-01 108, 08-02 69,
--- 08-03 260, 08-04 130. So 08-02 cannot fill 70 places and the cap does nothing
--- there, while 08-03 has 260 to choose 130 from. The sweep has to be read per
--- day rather than on a mean.
+-- 08-03 260. So 08-02 cannot fill 70 places and the cap does nothing there, while
+-- 08-03 has 260 to choose 130 from. The sweep has to be read per day rather than
+-- on a mean.
+--
+-- **2026-08-04 is quoted nowhere in this file without a stamp, and it is not in
+-- analysis.eval_days.** It is the day still being collected: 130 words qualifying
+-- at 11:00 KST and **240 at 20:24 KST** on the same date, from 3,319 headlines.
+-- A number from a day the cron is still writing to is a snapshot, and putting one
+-- in a table beside four settled days is how it gets read as reproducible.
 --
 -- `balance_alpha` joins them as the round's third dimension (migration 0025).
 -- It is the exponent in df_balanced(α) = Σ_c df_c × (N̄/N_c)^α, and 0 is the
@@ -166,7 +172,9 @@ update analysis.sieve_configs
 -- The distinct α count is what the harness pays for, not the configuration
 -- count: 10_sieve_eval.sql evaluates keyword_signals once per (day, α) and
 -- joins the configurations onto that, so ten rows over five α values cost five
--- calls a day rather than ten. With 200 alone there is one α, which is the
--- 4.2s the file cost before this round.
+-- calls a day rather than ten. With 200 alone there is one α, and
+-- 10_sieve_eval.sql measures **6.2s** — not the 4.2s it cost before this round,
+-- since the α machinery is still in the query path even when the α list has one
+-- element.
 select ord, name, render_cap, place_gate, balance_alpha
 from analysis.sieve_configs where active order by ord;
