@@ -523,11 +523,15 @@ is still collecting and the table above shows how far it moved in nine hours.
 sieve alone — the way `19_rounds_ten_to_twelve_configs.sql` narrows at its tail.
 The nine declined rows stay in the file. Keeping them active is not free: the
 four α rows put four more distinct α values into the harness's `alphas` CTE and
-each costs one `keyword_signals` call per day, measured at `10_sieve_eval.sql`
-4.2s → **24.8s** and `20_unlabeled.sql` 4.1s → **23.3s**; and every active row
-carries a permanent rule-4 obligation, since a later collection can promote a
-word onto *its* screen and the worklist will then demand it be labelled before
-any row can be read.
+each costs one `keyword_signals` call per day. **Round thirteen's own sitting**
+measured that as `10_sieve_eval.sql` 4.2s → 24.8s and `20_unlabeled.sql`
+4.1s → 23.3s when the four rows went in; **this round's sitting** measures
+`10_sieve_eval.sql` at **6.2s** with 200 alone. Those are two sittings and the
+pairs are only comparable inside each — the shape they agree on is that the cost
+tracks the distinct α count, not the configuration count. And worse than the
+seconds, every active row carries a permanent rule-4 obligation, since a later
+collection can promote a word onto *its* screen and the worklist will then demand
+it be labelled before any row can be read.
 
 Nothing is deleted from the database either. `place_gate` and `balance_alpha`
 stay as columns, `analysis.day_edges` stays as a table, and re-activating a row

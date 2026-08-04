@@ -146,9 +146,12 @@ on conflict (ord) do update set
 -- the place gate off and α at 0, so 201-203, 210, 211 and 220-223 are all
 -- measured-and-declined and have no further question to answer. What they cost
 -- while active is not nothing: 220-223 put four more distinct α values into
--- `alphas`, and the harness pays one keyword_signals call per (day, α) — measured
--- at 4.2s for 10_sieve_eval.sql before this round's rows and **24.8s** after, with
--- 20_unlabeled.sql going 4.1s to 23.3s. Worse than the seconds, every active row
+-- `alphas`, and the harness pays one keyword_signals call per (day, α). Round
+-- thirteen's sitting measured that as 4.2s → 24.8s for 10_sieve_eval.sql and
+-- 4.1s → 23.3s for 20_unlabeled.sql as the four rows went in; this round's
+-- sitting measures 6.2s with 200 alone. Two sittings, comparable only inside
+-- each — what they agree on is that the cost tracks the distinct α count rather
+-- than the configuration count. Worse than the seconds, every active row
 -- carries a permanent rule-4 obligation: a collection or a dictionary edit can
 -- promote a word onto *its* screen, and the worklist then demands that word be
 -- labelled before any row of the harness can be read.
@@ -173,8 +176,9 @@ update analysis.sieve_configs
 -- count: 10_sieve_eval.sql evaluates keyword_signals once per (day, α) and
 -- joins the configurations onto that, so ten rows over five α values cost five
 -- calls a day rather than ten. With 200 alone there is one α, and
--- 10_sieve_eval.sql measures **6.2s** — not the 4.2s it cost before this round,
--- since the α machinery is still in the query path even when the α list has one
+-- 10_sieve_eval.sql measures **6.2s in this round's sitting**. Do not read that
+-- against the 4.2s the file cost before the α column existed: different sitting,
+-- and the α machinery is in the query path now even when the α list has one
 -- element.
 select ord, name, render_cap, place_gate, balance_alpha
 from analysis.sieve_configs where active order by ord;

@@ -57,14 +57,34 @@
 -- binding cell, which is the same mechanism seen from the other side and is not
 -- enough to carry the other 23.
 --
--- The machinery from 0023 and 0024 stays in place. It costs nothing switched off,
--- and the figures that support that are Task 2's **same-sitting** pair — 0018 at
--- 1,417ms against the gate *on* at 1,342ms on 2026-08-03, so even the expensive
--- path is inside the untouched RPC's own cost. Do **not** read 0024's 1,096ms
--- gate-off figure against it: that is a different sitting, 0024's header carries
--- both numbers for the same query on the same day, and after 0025 the gate-off
--- query runs 1,293-1,299ms. Task 5's report says so explicitly, and quoting
--- across sittings is the defect class this repository keeps re-committing.
+-- The machinery from 0023 and 0024 stays in place, and what it costs is measured.
+-- One sitting, 2026-08-03, all-categories view, `explain (analyze, timing off)`.
+-- These three numbers may be read against each other and nothing else may be read
+-- against them:
+--
+--     0018, the sieve this branch replaced      1,403 ms
+--     0024 gate off — what ships                1,342 ms
+--     0024 gate on                              2,056 ms
+--
+-- **Switched off the restructuring costs nothing: it is 61 ms *faster* than what
+-- it replaced**, because 0018 and the shipped version now both run
+-- `keyword_signals` exactly once and the sieve is no longer re-walked for the
+-- edge query. **Switched on it costs about 1.5x** — 1.53 here, 1.35 on
+-- 2026-08-04. That is a real price and it is not "inside the baseline": 2,056 ms
+-- is half again over 1,403. It is one more thing to weigh if a later round turns
+-- the gate on, on top of the F1 and precision losses above. The residual is two
+-- extra runs of `keyword_graph_pick_edges` at ~145 ms each, bounded by the loop's
+-- iteration count rather than by anything that grows with the data.
+--
+-- **Do not pair any of those three with a number from another sitting.** This
+-- header got that wrong twice before it got it right, so the traps are named:
+-- 1,417 ms is a *pre-restructure* run of 0018; 1,096 ms is 0018's baseline on
+-- **2026-08-04**, not a gate-off figure at all; and re-running the pair after
+-- Task 2's last seven changes gives 1,358 / 1,982 where the triple above reads
+-- 1,342 / 2,056. Every one of those is a true number and none of them belongs
+-- beside the triple. Quoting across sittings is the defect class this repository
+-- keeps re-committing, and this paragraph is where it did it.
+--
 -- `word_overrides` mode 'place' also stays: a labelled fact about 45 words that a
 -- later round can read for something other than a cut.
 --
