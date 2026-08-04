@@ -105,9 +105,220 @@ The two words promoted into the freed slots are 탄도미사일 (69) and 합수�
 every row. That last part is luck rather than design: `0005` excluded 26 and
 promoted 7, all bad. Re-run `20_unlabeled.sql` after every dictionary edit.
 
+## Round eight — the analyser changed underneath everything
+
+ETRI's WiseNLU was replaced by `garu-ko` running inside the Edge Function and
+the whole archive was re-derived from its titles (`scripts/reanalyze/`). **The
+sieve was not touched, the sweep was not widened and no day was added**, and
+rule 4 still fired harder than it ever has: `20_unlabeled.sql` returned 38 words
+and `21_unlabeled_category.sql` returned 232. Both had been empty.
+
+Labelled in `14_labels_after_reanalysis.sql` (38: 14 good, 24 bad) and
+`15_labels_category_after_reanalysis.sql` (234: 75 good, 159 bad, the two extra
+caught by re-running the worklist after the first pass — which is why the
+worklist is a query and not a list anyone keeps).
+
+**The shipped configuration still wins, and that is the whole verdict of the
+round.** Day-wide it beats length-only on all four days (F1 57.3 / 51.6 / 65.8 /
+47.1 against 55.1 / 48.4 / 61.7 / 45.1) and beats every `min_headlines` floor;
+on the 24 category cells it means 57.20 against 48.52 for the pre-`0004` scoped
+count, so migration `0004` survives the analyser change intact. No threshold was
+moved, deliberately: changing the analyser and a threshold in one step would
+leave no way to attribute the difference.
+
+**The absolute numbers fell and mostly not for the reason they look like.**
+Precision went 85.7 / 84.3 / 70.0 / 67.1 to 75.7 / 70.0 / 70.0 / 68.6. But
+2026-08-03 drew none of the newly labelled words and *rose*, while 07-31 and
+08-01 drew 8 and 7 of them and fell hardest — a newly labelled bad word lowers
+precision the instant it is labelled, whatever the analyser did. Rule 4's own
+warning, arriving as data.
+
+Two tells worth carrying forward:
+
+- **A section tag is not a subject.** 뉴시스Pic, 배틀라인, 이슈톺, 손바닥, 종합2,
+  주末머니 and Y녹취록 all reached the screen; every headline carrying one *ends*
+  in it, bracketed. `spec` 1.00 plus a shared bracketed suffix is the signature.
+  Y녹취록 was labelled good first, on the reading that it named one recording in
+  one case; it is a standing column at YTN.
+- **The line, in operational form, is a question**: would this word appear in a
+  randomly chosen other week's news? 압수수색 and 유상증자 and 본회의 would, so
+  they are bad however particular the story behind them; 문자통보 and 미장착 and
+  보릿돌교 would not. That question decided the ~50 cases the prose definition
+  left genuinely open.
+
+## Round nine — the price of `min_word_len`, at last
+
+**The largest single measured gain the sieve has had.** `min_proper` 0.50 shipped
+in migration `0018`: a word is admitted if the analyser tagged it a proper noun
+on more than half its rows, whatever its length.
+
+| | day-wide, 4 days | category, 24 cells |
+| --- | --- | --- |
+| shipped before | mean F1 49.48, precision 71.07 | mean F1 55.07 |
+| `len3 or proper >= .50` | **52.40**, precision **75.00** | **66.44** |
+| `min_word_len 2` (control) | 31.98, precision 45.73 | — |
+
+`unlabeled` 0 on every row and `story_rank` 1 on all four days.
+
+**The question nobody had asked.** This directory and CLAUDE.md both record the
+length clause as *the* sieve — it admits 68 of 70 and its precision is the
+sieve's — and both price it only by what it lets through. What it rejects had
+never been costed: **a two-character word could not reach the canvas at all.**
+Across the archive's entire history exactly two ever did, 폭염 and 양산, both by
+hand in migration `0003`. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구,
+인천, 삼성, 애플, 구글, 기아 — all cut with the noise.
+
+**Length was a proxy; the analyser answers the real question.** Now that it runs
+in-process it can be asked directly, and the reason to expect it to work was
+specific rather than hopeful: garu tags 이란 NNP and **감찰, 윤리, 청문, 초등 and
+순회 NNG** — the five words this repository names as the reason the *specificity*
+clause had to be disabled, each scoring a perfect 1.00 on spec. The
+discrimination spec could not make is sitting in the tagger's output.
+
+**`min_word_len 2` is in the sweep as the control, and it is the finding.**
+Admitting every two-character word scores 31.98 — far *worse* than the shipped
+sieve, not better. So the gain is not "two-character words were being lost"; it
+is that the analyser can say which of them are names. Of the 44 words a blanket
+`min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the tabs,
+**31** are — 포항, 울산, 통영, 경주, 원주, 독일, 칠레, 가자, 유엔, 인텔, 쿠팡,
+퀄컴, 놀런, 룰라.
+
+**It has the opposite signature to head_pos, which is the reusable part.** That
+signal won day-wide and lost 8 of 24 cells while winning none, because it is a
+cut and a tab's cap never binds. This is a rescue: it only adds, a tab has the
+room, and the tabs therefore gain more than the day. *A day-wide win with a
+category loss means the mechanism needs the cap binding; a win on both, larger on
+the tabs, means it does not.*
+
+0.50 is mid-plateau and deliberately not the best cell — .25/.50/.75/1.00 give
+52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs. 1.00
+wins by 0.15 and is the boundary, demanding every row be tagged NNP, so one
+mistagged row in fifty would disqualify a name.
+
+The dictionary is **not** replaced. Rescue-only scores 49.58, about what the
+shipped sieve scored with the dictionary on — so it is not re-catching the same
+words — but it drops the day's biggest story on three of four days, because 폭염
+is two characters and NNG and lives on its `allow` entry.
+
+Cost, accepted on the numbers: 닉스 (from 삼전닉스) and 어스 (from 구글 어스) are
+tagged NNP and arrive as fragments; 유럽, 남미, 중동 and 호남 arrive as regions.
+
+## Round ten — the rescue invalidated the fragment cut's tuning
+
+`min_standalone` 0.10 → **0.50** (migration `0019`), and the interesting part is
+why it was allowed to move at all.
+
+Round four swept .05 to .30, found them identical, recorded 0.10 as mid-plateau
+and concluded the clause cost nothing either way — six words kept off screen by
+it, all six labelled bad. **That measurement was taken when nothing under three
+characters could reach the canvas**, so the cut only ever saw long words, and
+long words are rarely fragments.
+
+Round nine's rescue admits a word on the tagger's say-so at any length, and the
+tagger has no opinion about whether a string is a piece of something bigger.
+닉스 (`삼전닉스`, NNP, standalone 0.14) reached the screen on two of four days.
+So the threshold had to be re-swept:
+
+| min_standalone | day-wide F1 | day-wide precision | category F1 |
+| --- | --- | --- | --- |
+| 0.10 (was) | 52.40 | 75.00 | 66.44 |
+| 0.30 | 52.87 | 75.70 | — |
+| **0.50** | **53.12** | **76.05** | **67.02** |
+| 0.70 | 52.55 | 75.35 | — |
+
+Wins on both surfaces; the peak is interior, which is rule 2. `unlabeled` 0 and
+`story_rank` 1 throughout, and nothing new needed labelling — a tightening
+promotes rank 71, and those were already labelled.
+
+Cost, named: ten words go, seven bad (닉스 ×2, 수도권, 최고위원, 경찰관, 한국 ×2)
+and three good — 우크라, 충청, 해남. Those three are the **조사 blind spot**:
+Korean attaches a particle without a space, so 해남에 scores as a fragment
+exactly as 도체 inside 반도체 does. 오만 is the sharpest loss, a country scoring
+0.00 because every headline writes 오만과. Round four's instruction **not** to
+build a particle-aware variant still stands — this moves a number the harness can
+price rather than adding a rule it cannot.
+
+**The transferable lesson is not the threshold.** A measurement is only valid
+under the circumstance it was taken in, and a clause that admits a *new kind* of
+word invalidates every threshold tuned when that kind could not appear. Round
+nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
+canvas.
+
+## Round thirteen — `min_word_len` 4, and a harness that was scoring the wrong screen
+
+**The lead closed, and closing it turned up a measurement bug worth more than the
+threshold.**
+
+The length bar was doing two jobs: keeping fragments out and keeping names in.
+Round nine's rescue took the second away, so the bar can rise and catch the
+three-character common nouns it had always been set too low to reach.
+
+| min_word_len | day-wide F1 | precision | shown | category F1 |
+| --- | --- | --- | --- | --- |
+| 3 (was) | 62.03 | 90.35 | 70.0 | 73.21 |
+| **4** | **63.70** | **93.53** | 69.8 | **78.58** |
+| 5 | 63.58 | 97.00 | 65.8 | 77.80 |
+
+One label run, both worklists empty, `story_rank` 1 throughout. 5 reaches 97%
+precision and is rejected on `shown` — 65.8 of 70 places is less news on screen,
+and the recall denominator is fixed so F1 already prices it.
+
+**The bug.** At length 4 the tabs first reported `unlab` 30, which should be
+impossible: raising a length bar can only remove words. It is possible, and the
+reason is that **the render cap binds on category tabs** — 2026-08-03 puts 95 to
+163 qualifying words on each of its six tabs against a cap of 70, and
+2026-08-01's society tab 77. Seven of the 24 cells bind. So removing a word
+promotes a deeper one, exactly as day-wide.
+
+That made a second disagreement visible. `11_category_eval.sql` and
+`21_unlabeled_category.sql` ranked by `df desc, word`, while `keyword_graph`
+ranks by the head_pos demotion first. Harmless while a tab draws everything that
+qualifies; on the seven binding cells the harness was scoring a screen the app
+does not draw. Both files now model the demotion, and the shipped tab number
+moved 71.80 → 73.21 — **a measurement error, not an improvement.**
+
+**And it undercuts a standing claim.** head_pos ships as a demotion rather than a
+cut because "a tab draws at most 46 words, the cap never binds, so a cut there is
+loss with nothing to fill the hole". On a fat day the cap binds, so a cut would
+substitute there too. The demotion still wins; its stated reason is now only
+partly right, and the question deserves re-measuring on fat days.
+
+Labels: `22_labels_after_demotion_fix.sql` (26, in two passes — the demotion fix
+promoted 14 and the length bar another 12).
+
+## Round twelve — the dictionary, re-derived against the new screen
+
+36 exclusions (migration `0021`). The largest of the four post-`0018` changes and
+the cheapest: no threshold moves, no signal is added.
+
+| | day-wide F1 | day-wide precision | category F1 |
+| --- | --- | --- | --- |
+| before | 54.10 | 77.85 | 67.02 |
+| after | **62.43** | **90.35** | **71.80** |
+
+Chosen the way `0005` chose its 26 — from the query "labelled bad, drawn by the
+shipped sieve on at least one day, not already in the dictionary", which returned
+44 — and **not** by looking at the canvas.
+
+**The eight left in are the exercise.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
+요양병원, 재선거, 개정안 can each head a real story; excluding them would use the
+dictionary to paper over where the good-word line sits, which is a labelling
+question. Same call `0005` made about 공습, 압박, 배터리, 클라우드, 바이오.
+
+Seven entries exist because of round nine, reaching the canvas through
+`passed_by = 'proper'`: 유럽, 남미, 중동, 한국 as backdrop, and 어스, 모스, 민주 —
+the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls proper nouns.
+
+`20_unlabeled.sql` returned nothing afterwards, which is luck rather than design:
+`0005` excluded 26 and promoted 7, all bad and all unlabelled. Re-run it after
+every dictionary edit regardless.
+
+Labels: `17_labels_two_character.sql` (44) and
+`18_labels_two_character_category.sql` (36). Both worklists empty afterwards.
+
 ## Labels
 
-606 words, covering everything drawn by every **active** configuration in
+891 words, covering everything drawn by every **active** configuration in
 `02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across the
 four days in `analysis.eval_days` — 2026-07-31, 08-01, 08-02 and 08-03.
 `20_unlabeled.sql` and `21_unlabeled_category.sql` both return nothing, so rule 4

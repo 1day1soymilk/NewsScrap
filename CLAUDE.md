@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A personal Naver-news keyword graph. A Supabase Edge Function scrapes six Naver
-news sections daily, extracts Korean nouns via ETRI's morphological-analysis API,
-and stores them in Postgres. A Vite + React frontend reads that data and renders a
+news sections daily, extracts Korean nouns with a morphological analyser running
+inside the function itself, and stores them in Postgres. A Vite + React frontend reads that data and renders a
 d3-force graph filterable by date and category: words that share headlines are
 joined by an edge, size stays proportional to headline count, and clicking a word
 dims everything outside its neighbourhood and lists the headlines it came from.
@@ -54,8 +54,15 @@ with the repo, so a fresh clone needs them recreated.
 | File | Holds | Used by |
 | --- | --- | --- |
 | `.env` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | the frontend, at build time, and `e2e/smoke.spec.ts` |
-| `.env.functions` | `ETRI_API_KEY` | uploaded wholesale as the Edge Function environment |
+| `.env.functions` | **nothing** — see below | uploaded wholesale as the Edge Function environment |
 | `.env.supabase` | CLI access token, project ref, DB password | the Supabase CLI |
+
+`.env.functions` sets **no variables at all** now. It held `ETRI_API_KEY` until
+the analyser moved inside the function, and the key is kept there commented out
+because that file is the only copy of it there has ever been — it was once lost
+with a deleted worktree and recovered by luck. The deployed secret was removed
+with `supabase secrets unset`, which is not what `secrets set --env-file` on an
+emptied file does: setting nothing removes nothing.
 
 Never put `SUPABASE_*` variables in `.env.functions`: that file becomes the
 function's environment and Supabase reserves the prefix. The DB password is not
@@ -189,6 +196,156 @@ the *data* moves and not only when the sweep widens: collecting a date twice put
 13 unlabelled words on screen and silently invalidated a run. Two findings that cost real
 time and should not be rediscovered:
 
+- **A word is rescued for being a proper noun** (`min_proper` 0.50, migration
+  `0018`), and this is the largest single measured gain the sieve has had:
+  **+2.9 mean F1 and +3.9 precision day-wide, +11.4 mean F1 across the 24
+  category cells**, winning on all four days and never dropping the day's
+  biggest story. `proper` is the share of a word's rows the analyser tagged NNP.
+
+  **What it buys is the price of `min_word_len`, which had only ever been priced
+  in one direction.** The length clause was measured as the sieve — it admits
+  most of what is drawn and its precision is the whole sieve's — but nobody had
+  costed what it *rejects*: a two-character word could not reach the canvas at
+  all, and in the archive's whole history exactly two ever had, 폭염 and 양산,
+  both by hand. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
+  애플, 구글 and 기아 were all cut with the noise. 13 to 21 words a day come in
+  through this clause now.
+
+  **Length was always a proxy, and the analyser answers the real question.**
+  garu tags 이란 NNP and 감찰 NNG — and 감찰, 윤리, 청문, 초등 and 순회 are
+  precisely the five words named just below as the reason the specificity clause
+  had to be turned off, every one scoring a perfect 1.00 on spec. The
+  discrimination `spec` could not make is in the tagger's output.
+
+  **`min_word_len 2` is the control and it is why this is the tagger's win, not
+  length's**: admitting every two-character word scores mean F1 **31.98** against
+  the shipped sieve's 49.48 — far worse, not better. Of the 44 words a blanket
+  `min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the
+  tabs, **31** are.
+
+  **It has the opposite signature to `head_pos`, and that is the general
+  lesson.** head_pos won day-wide and lost 8 of 24 category cells while winning
+  none, because it is a *cut* and a tab's render cap never binds, so there was
+  nothing to promote into the hole. This is a *rescue*: it only ever adds words,
+  a tab has the room, and so the tabs gain more than the day does. **A day-wide
+  win with a category loss means the mechanism needs the cap to be binding; a
+  win on both, larger on the tabs, means it does not.**
+
+  0.50 is **mid-plateau and deliberately not the best cell** — .25/.50/.75/1.00
+  give 52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs.
+  1.00 scores 0.15 higher and is the boundary: it demands every row be tagged
+  NNP, so one mistagged row in fifty disqualifies a name.
+
+  It does **not** replace the dictionary. With `word_overrides` off the rescue
+  alone scores about what the shipped sieve scores with it on — so it is not
+  merely re-catching the same words — but that configuration still drops the
+  day's biggest story on three of four days, because 폭염 is two characters and
+  **NNG**, and lives on its `allow` entry.
+
+  The cost is visible and was accepted on the numbers: 닉스 (from 삼전닉스) and
+  어스 (from 구글 어스) are tagged NNP and come in as fragments, and 유럽, 남미,
+  중동, 호남 come in as regions.
+- **The rescue gave the fragment cut new work, and `min_standalone` moved from
+  0.10 to 0.50 because of it** (migration `0019`). Round four had swept .05 to
+  .30, found them identical and recorded 0.10 as mid-plateau — a measurement
+  taken when **nothing under three characters could reach the canvas**, so the
+  cut only ever saw long words, which are rarely fragments. The rescue admits on
+  the tagger's say-so at any length, and the tagger has no opinion about whether
+  a string is part of something bigger. Re-swept: 52.40 / 52.87 / **53.12** /
+  52.55 day-wide at .10 / .30 / .50 / .70 and 66.44 → **67.02** on the tabs.
+  Wins on both, and the peak is interior.
+
+  Ten words leave the screen: seven bad (닉스 twice, 수도권, 최고위원, 경찰관,
+  한국 twice) and three good — 우크라, 충청, 해남, which are the **조사 blind
+  spot**, Korean attaching a particle with no space so 해남에 scores as a
+  fragment. Round four's instruction not to build a particle-aware variant still
+  stands; this moves a number, which the harness can price, rather than adding a
+  rule it cannot.
+
+  **The general point is worth more than the threshold**: a measurement is only
+  valid under the circumstance it was taken in, and adding a clause that admits
+  a *new kind* of word invalidates every threshold that was tuned when that kind
+  could not appear.
+- **`demote_head_pos` moved 0.70 → 0.60 for the same reason** (migration
+  `0020`), which is the third threshold the rescue invalidated and the point at
+  which the pattern became the finding rather than any one number. Re-swept:
+  53.30 / 54.12 / 54.10 / **54.18** / 53.02 / 51.40 at .50 / .55 / .60 / .65 /
+  .70 / off. 0.55–0.65 are one plateau, flat to within 0.08 and all about a
+  point of F1 and two of precision above 0.70.
+
+  **0.50 scores well and is rejected outright**, because it sinks 폭염 off
+  2026-07-31's screen — the cliff round six had already recorded, still exactly
+  where it was. What moved was the plateau, down onto the edge of it. 0.60 is
+  taken over 0.65's marginally better F1 because it is mid-plateau and a full
+  0.10 clear of that cliff: rule 5 is not a tie-break to be spent, and a
+  threshold one step from dropping the day's biggest story is not worth 0.08.
+
+  No category measurement accompanies it and that is correct rather than
+  missing. A demotion reorders and removes nothing, so it can only act where the
+  render cap binds, and a tab draws at most 46 against a cap of 70.
+
+- **The dictionary was re-derived against the new screen** (migration `0021`,
+  36 exclusions) and it is the largest and cheapest of the four: day-wide F1
+  54.10 → **62.43** and precision 77.85 → **90.35**, tabs 67.02 → **71.80**, with
+  no threshold moved and no signal added. Chosen the way `0005` chose its 26 —
+  from the query "labelled bad, drawn by the shipped sieve, not already
+  excluded", which returned 44.
+
+  **The eight left in are the point.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
+  요양병원, 재선거 and 개정안 can each head a real story, and excluding them
+  would be using the dictionary to paper over where the good-word line sits —
+  a labelling question, not a dictionary one. Same judgement `0005` made about
+  공습, 압박, 배터리 and 클라우드.
+
+  Seven entries exist *because* of the rescue, arriving through
+  `passed_by = 'proper'`: 유럽, 남미, 중동 and 한국 as backdrop, and 어스, 모스
+  and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
+  proper nouns.
+
+- **`min_word_len` rose 3 → 4** (migration `0022`), which is where the sequence
+  closes: the rescue was built to pay the length clause's price and ended up
+  changing what the clause should charge. **The bar was doing two jobs** — keeping
+  fragments out and keeping names in — and the rescue took the second away, so it
+  can now catch the three-character common nouns it had always been set too low
+  to reach. Day-wide 62.03 → **63.70** and precision 90.35 → **93.53**; tabs
+  73.21 → **78.58**. 5 reaches 97% precision and is **rejected on `shown`**: at
+  65.8 of 70 places it cannot fill the canvas, which is round seven's cost.
+
+**The render cap binds on category tabs after all, and the harness had been
+scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
+`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
+disagreement that is invisible only while a tab draws everything that qualifies.
+**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a
+cap of 70**, and 2026-08-01's society tab 77; seven of the 24 cells bind. Fixed,
+and it moved the shipped tab number from 71.80 to 73.21 — a measurement error,
+not an improvement.
+
+**That undercuts the stated reason head_pos ships as a demotion rather than a
+cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
+cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
+so a cut there would substitute too. The demotion is not thereby wrong — it still
+wins — but its reason is now only partly right, and the cut-versus-demotion
+question deserves re-measuring on fat days rather than being treated as settled.
+
+**Where the five changes leave the sieve**: day-wide mean F1 **49.48 → 63.70**
+and mean precision **71.07 → 93.53**; the 24 category cells **55.07 → 78.58**.
+
+**The decomposition matters more than the total, and it is measurable because
+`19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row.** Run
+against the *same* dictionary, the pre-`0018` sieve scores 54.52 / 78.57 and the
+shipped one 62.43 / 90.35, so the three sieve changes are worth **+7.9 F1 and
++11.8 precision** and the dictionary the remaining **+5.0**. Neither figure is
+the one you get by reading the commits in order, because each was measured
+against the dictionary of its moment.
+
+**The dictionary is still load-bearing after all of it**: turn it off and the
+shipped sieve falls to 50.97 / 73.22 *and drops the day's biggest story on three
+of four days*, because 폭염 is two characters, tagged NNG, and lives on its
+`allow` entry from `0003`.
+
+All of it is downstream of the analyser being in-process — one new signal, two
+thresholds it invalidated, and a dictionary re-derived against the screen it
+produced.
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
@@ -254,15 +411,34 @@ time and should not be rediscovered:
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-Measured precision of the top 70 words, four days, as of 2026-08-03 night:
-**85.7 / 84.3 / 70.0 / 67.1**, mean F1 63.2. The drawn set is 215 good and 65
-bad.
+Measured precision of the top 70 words, four days, as of 2026-08-04 — **the
+first run on an archive analysed end to end by one analyser**:
+**75.7 / 70.0 / 70.0 / 68.6**, mean F1 55.45. The drawn set is 199 good and 81
+bad. On the 24 category cells the shipped configuration means **57.20**.
 
-**Do not read the 2026-08-03 column against the one this file used to carry**
-(71.4, mean F1 67.3). Only that day moved, and it moved because the collector
-went to six runs and the day went from 900 headlines to 2,197 — not because
-anything about the sieve changed. The other three days reproduce to the decimal,
-which is what identifies the cause.
+**Every one of those numbers is lower than the ones this file used to carry
+(85.7 / 84.3 / 70.0 / 67.1, mean F1 63.2, 215 good and 65 bad), and the drop is
+mostly not a quality drop.** The archive was re-analysed when ETRI was replaced
+by garu-ko (`scripts/reanalyze/`), which put words on screen that had never been
+near it, so `20_unlabeled.sql` returned 38 and `21_unlabeled_category.sql`
+returned 232 — the sixth and largest firing of rule 4. Twenty-four of the 38 were
+labelled bad, and a newly labelled bad word lowers precision the moment it is
+labelled, whatever the analyser did.
+
+**The per-day split is what shows this rather than argues it.** 2026-08-03 drew
+no newly labelled word at all and its precision *rose*, 67.1 to 68.6, while
+07-31 and 08-01 drew 8 and 7 of them and fell hardest. The days that moved are
+the days whose screens changed.
+
+What the run does establish, because it is internal to itself: **the shipped
+configuration still wins.** It beats length-only on all four days day-wide
+(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
+floor, and on the tabs it leads at 57.20 against 48.52 for the pre-`0004` scoped
+count — so migration `0004`'s finding survives the analyser change intact.
+
+**Do not read the 2026-08-03 column against the one this file carried before
+that** (71.4, mean F1 67.3). That move was the collector going to six runs and
+the day going from 900 headlines to 2,197 — not the sieve, and not the analyser.
 
 **F1 is not comparable across days of different thickness, and this is the
 mechanism.** Recall is the drawn good words over every good word with `df >= 3`,
@@ -275,10 +451,27 @@ sets applies to collection depth too, and this is the first time it has bitten.
 Those figures come from
 `analysis.word_labels` and are **not comparable to any percentage quoted
 elsewhere, or to any earlier figure in this file's history** — the label set has
-been extended six times and each extension moves them, most recently by
-`09_labels_four_days.sql` (139 words, and five of those reversed on review).
+been extended eight times and each extension moves them, most recently by
+`14_labels_after_reanalysis.sql` (38 words) and
+`15_labels_category_after_reanalysis.sql` (234, the largest pass there has been).
 Compare configurations against each other inside one run, never against a number
 someone wrote down.
+
+Two tells came out of that pass and both are reusable, because both name a kind
+of word rather than a word:
+
+- **A section tag is not a subject.** 북리뷰, 주末머니, Y녹취록, 뉴시스Pic,
+  배틀라인, 이슈톺, 손바닥, 종합2 all reached the screen and all are the
+  newspaper's own furniture — every headline carrying one *ends* in it, in
+  brackets. The signature is `spec` 1.00 together with a shared bracketed
+  suffix, and it is worth checking before labelling a confident-looking 1.00.
+  Y녹취록 was written down as good first, on the reading that it named one
+  recording in one case; it names a standing column at YTN.
+- **The operational form of the good/bad line is a question**, and it settled
+  the hard cases where the prose definition did not: *would this word appear in
+  a randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would,
+  every week, so they are bad however particular the story that produced them.
+  문자통보, 미장착 and 보릿돌교 would not.
 
 That claim has now been measured three times. Reversing 윤리위, 반도체 and
 李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
@@ -532,8 +725,30 @@ events and every edge had to cross somebody else's story.
   price must be a condition of entry: applied to the winner instead, the
   candidate that removes the most crossings wins and is then disqualified,
   taking the affordable one with it (08-02 went back from 5 to 15 that way).
-  Measured: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0 throughout, events
-  drawing a crossing 6 → 3 against a floor of 2. **The price is height** —
+  Measured at the time: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0
+  throughout, events drawing a crossing 6 → 3 against a floor of 2.
+
+  **Those figures are from the canvas of 2026-08-03 and the canvas has moved
+  twice since** — once when the analyser changed and again when migrations
+  `0018`–`0021` retuned the sieve. `scripts/layout/README.md` carries the
+  current table. The short version: `overlap` is still 0 everywhere and `xBr` is
+  down to 4 with `brOther` 0 in every cell, while `xIn` is 34 and **all of the
+  rise is one event** — 2026-08-02's 김민석·정청래·민주당, 12 words and 26 edges,
+  the archive's only non-planar event, drawing 11 against a floor of 2. The
+  better sieve brought the 전당대회 story back to the screen. Every other event
+  is planar.
+
+  `PLANAR_AREA_PER_CROSSING` was re-swept on the new canvas and is **still a
+  staircase**: 0.5 gives `xIn` 34, 1.0 and 2.0 both give 24 for 11% more height
+  with no other column moving, 4.0 gives 12 for 47% more height and pushes `xBr`
+  back to 7. **Raised to 1.0.** The price is a cliff, so it is a judgement about
+  the picture rather than something the harness settles, and the judgement went
+  this way because the crossings it removes are all inside **the day's biggest
+  story** — the place a reader is most likely to be tracing a line — while
+  `overlap`, `xBr` and `crowded` do not move at all, so there is no regression
+  surface. Only 2026-08-02 changes: `xIn` 13 → 8, height 1285 → 2100 desktop.
+  `lenMax` goes 823 → 1769 on that day and is accepted knowingly: the event's
+  region grows, so the edges crossing it grow with it. **The price is height** —
   08-02 desktop 651 → 1544px — **and the per-crossing price is a cliff, not a
   dial**: 0.15, 0.25 and 0.35 draw the four days identically to having no planar
   path at all, and 0.5 buys the whole move. There is no middle setting, so this
@@ -822,29 +1037,58 @@ route. Two details that are easy to get wrong:
 ### Edge Function run budget
 
 The function paginates each section's "더보기" endpoint to 150 headlines, six
-sections per run. Every headline costs an ETRI round trip plus a few DB calls, so
-the work runs `ANALYSIS_CONCURRENCY` items in flight off a shared cursor, and two
-deadlines keep a slow run from being killed mid-flight: `RUN_BUDGET_MS` overall,
-divided into a per-category slice so the last sections in the list are not the
-ones starved on every slow run. Unprocessed headlines are picked up by the next
-run, since duplicates skip ETRI entirely.
+sections per run.
+
+**The limit that kills this function is CPU time, not the wall clock, and every
+number in this section used to be written against the wrong one.** The platform
+allows roughly **3 seconds of accumulated CPU per worker** and says so in the
+logs — `CPU Time exceeded` — before returning 546 WORKER_RESOURCE_LIMIT with no
+body at all. A 45s run has died where a 64.6s run passed.
+
+Analysis is not what spends it. Measured on the platform: **0.88ms a headline,
+900 of them for 0.8s, heap flat at 9MB.** What spent it was the round trips
+around them — a lookup, a count, and two inserts per headline, about 2,700 of
+them. Under ETRI every one of those sat behind a ~500ms wait, so the worker
+idled through ~98% of a 64s run and its cumulative CPU stayed small. **Removing
+the wait did not add CPU; it removed the idling**, and the function died the
+first time it was deployed with the analyser inside it.
+
+So storage is **batched per category** (`processHeadlines`): one lookup per 50
+links, carrying an embedded `headline_nouns(count)` so "does this exist" and
+"does it already have nouns" are answered in the same request; one upsert with
+`onConflict` so an overlapping cron cannot fail the batch; a few noun inserts.
+Five or six requests where there were ~450. A full 900-headline run now takes
+**4-5 seconds** — 5.0s measured on the heavy path where 755 headlines all needed
+analysing — against 44.9s before, when it returned a summary at all.
+
+`ANALYSIS_CONCURRENCY` is **deleted**, not merely unreasoned: eight in flight
+existed to hide ETRI's wait, and with sequential batches there is no wait to
+hide. `RUN_BUDGET_MS` (50_000, divided into a per-category slice so the last
+sections are not the ones starved) survives, but it is wall clock and therefore
+**cannot see the limit that does the killing** — what keeps the run inside the
+CPU budget is the batching. It now has ten times the slack it needs and may be
+able to go away.
+
+A killed run returns no body, so the `summary` this file calls `index.ts`'s only
+check is exactly what is missing when it is most needed. The function logs
+`CHK <category> scraped/processed` lines for that case.
 
 **It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
-pg_cron jobs, all calling the same function). It used to run once, and going
-wider was tried first and failed: raising the cap to 300 over 12 pages returned
-**546 WORKER_RESOURCE_LIMIT at 63s**, against a successful 150-per-section run of
-64.6s the same morning. The wall on this plan is near 63s, not the 150s the docs
-quote, so a bigger cap buys a run that returns nothing. `RUN_BUDGET_MS` was
-110_000 and therefore never once fired; it is now 50_000, below the observed
-wall, because a killed run reports no summary and the summary is the only check
-`index.ts` has.
+pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
+is not a health signal**: `succeeded` means `net.http_post` queued a request and
+returned a row, and all six jobs read `succeeded` throughout the days when ETRI
+was blocked and nothing was collected. Check `max(created_at)` on `headlines`.
 
-Running more often is also the better instrument on its own terms: **a deeper
-page is older news, a later run is newer news.** Measured on 2026-08-03, one run
-some hours after the 07:00 cron found 404 new headlines inside the same
+Running more often is the better instrument on its own terms: **a deeper page is
+older news, a later run is newer news.** Measured on 2026-08-03, one run some
+hours after the 07:00 cron found 404 new headlines inside the same
 150-per-section window — the sections churn all day. The day went from 900
-headlines to 2,197, and ETRI's 5,000-call limit is not close to binding, since a
-duplicate costs a lookup and no call.
+headlines to 2,197. There is no external call limit any more.
+
+**Raising `MAX_HEADLINES_PER_CATEGORY` deserves re-testing rather than the
+refusal that used to stand here.** The 300-over-12-pages failure was read as a
+wall near 63s; it was CPU, spent on ETRI-paced round trips that no longer exist.
+Deeper paging may now fit, and nobody has tried.
 
 That change is what settled the `min_headlines` question — see the round-seven
 section of `scripts/analysis/README.md`. The short version: on a thin day the
@@ -862,10 +1106,31 @@ backfills headlines that somehow have no nouns.
 - **Naver RSS is discontinued. Never use it.** Headlines come from parsing
   `news.naver.com/section/{id}` HTML plus its `SECTION_ARTICLE_LIST` pagination
   endpoint, which returns the same markup wrapped in JSON.
-- **ETRI's old portal `aiopen.etri.re.kr` shut down on 2025-06-30** (its
-  certificate has since expired). The successor is
-  `http://epretx.etri.re.kr:8000/api/WiseNLU`, same request/response schema,
-  5,000 calls/day.
+- **There is no morphological-analysis service any more.** `npm:garu-ko@0.9.12`
+  (MIT, a 1.4MB model and a WASM binary) runs inside the Edge Function. No
+  account, no key, no call limit, and `.env.functions` sets nothing.
+
+  **It was measured against ETRI before it was adopted**, on 2,197 real
+  headlines: **0.79ms a headline against ETRI's ~500ms**, 96% of noun rows
+  identical, and 68 of the drawn 70 the same — 삼전닉스 and 오늘 the only movers.
+  The analyser boundary the swap was expected to introduce is mostly not there,
+  which is what made re-analysing the whole archive worth doing rather than
+  merely possible: the table now comes from one analyser, which it never had.
+
+  **Loading is the part that needs care, and only one path works.** The node
+  entry (`import { Garu } from 'npm:garu-ko@0.9.12'`, then `Garu.load()`) reads
+  the wasm and the model off disk through `fs/promises`, and npm packages sit on
+  disk under Deno, so it simply works — measured at 91ms. Supplying the bytes by
+  hand is **not** a fallback: the package's `exports` map defines no subpath
+  beyond `.`, `./browser` and `./node`, so `garu-ko/models/base.gmdl` cannot be
+  resolved and `./pkg/garu_wasm.js` is refused outright.
+
+  ETRI's own history, kept because it is why this file used to say otherwise:
+  the old portal `aiopen.etri.re.kr` shut down on 2025-06-30 and its successor
+  `http://epretx.etri.re.kr:8000/api/WiseNLU` served 5,000 calls/day. The key
+  went dead on 2026-08-03 and is **blocked rather than throttled** — probed again
+  after the quota day rolled over and it still answers
+  `{"success":false,"reason":"Blocked KEY"}`.
 
 - **One article, one link.** The section's first page and its `SECTION_ARTICLE_LIST`
   pagination hand back different URLs for the same article —
@@ -900,8 +1165,8 @@ backfills headlines that somehow have no nouns.
   would be worse than leaving it: `keyword_signals`' `standalone` matches the
   word against the title with a regex, so an NFC word against a raw title scores
   0.00 and the word is cut as a fragment. The title is also what is handed to
-  ETRI, so the lemmas come back already folded; `filterNouns` does it again
-  rather than depend on ETRI echoing its input's code points.
+  the analyser, so the tokens come back already folded; `filterNouns` does it
+  again rather than depend on the analyser echoing its input's code points.
 
   **NFC, never NFKC.** NFKC would also rewrite ￦, ①, ㈜ and the halfwidth forms
   these headlines genuinely use — different characters, not two spellings of one.
@@ -1015,10 +1280,15 @@ script is wrong, not the sieve.
 
 Two things they found on the first run, both recorded in
 `scripts/analysis/README.md`. The compound merge did not restore 반도체, 무인기,
-상한가 or 유조선, because it named the tags allowed to join a run and ETRI tags
+상한가 or 유조선, because it named the tags allowed to join a run and ETRI tagged
 those words' prefixes `XPN` and suffixes `XSN`. **Fixed by inverting the rule:**
 the headline's own spacing already says what belongs together, so an eojeol is
 kept whole and the run breaks only on what is not part of the word.
+
+**The rule outlived the analyser that motivated it, which is the argument for
+it.** garu returns 반도체 and 무인기 whole, so an allowlist would not fail here in
+the same way — and that is exactly why the denylist stays: it does not depend on
+which splits any particular analyser happens to make.
 
 The `standalone` cut's blind spot was the other, and it is now **measured and
 closed with no code change** (2026-08-03, round four, four days). The signal is
