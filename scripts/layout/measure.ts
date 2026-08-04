@@ -34,11 +34,16 @@ type Fixture = Record<string, { nodes: FixtureNode[]; edges: GraphEdge[] }>
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture: Fixture = JSON.parse(readFileSync(join(here, 'graphDays.json'), 'utf8'))
 
-// max-w-5xl은 64rem이므로 데스크톱에서 캔버스가 실제로 받는 폭이다. 좁은 쪽은
-// 아이폰 SE 세로에 해당한다.
+// `desktop` 1024는 캔버스가 `max-w-5xl` 안에 있을 때 실제로 받던 폭이고, 그 상한이
+// 풀린 지금도 **그대로 둔다** — 이 README의 모든 옛 표가 그 폭 위에서 쟀으므로,
+// 바꾸면 비교할 수 있는 것이 오늘 잰 것뿐이 된다. 좁은 쪽은 아이폰 SE 세로.
+//
+// `wide` 1600은 그래프 상자의 새 상한이다. 넓은 창에서 캔버스가 실제로 받는 폭이라
+// 세로가 얼마나 줄고 겹침이 여전히 0인지는 이 줄로 재야 답이 나온다.
 const VIEWS = [
   { name: 'desktop', width: 1024 },
   { name: 'phone', width: 358 },
+  { name: 'wide', width: 1600 },
 ]
 
 function measuredWords(nodes: FixtureNode[]): MeasuredWord[] {

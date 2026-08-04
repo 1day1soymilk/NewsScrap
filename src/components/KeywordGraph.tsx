@@ -247,7 +247,11 @@ export function KeywordGraph({
   }
 
   return (
-    <div ref={containerRef} className="mx-auto w-full max-w-5xl">
+    // 폭 상한이 없다 — 부모(App의 그래프 상자)가 정한다. 캔버스는 넓을수록
+    // 선반이 한 줄에 더 들어가 세로가 짧아지고 축소율도 덜 먹는다. 대신 **글줄은
+    // 같이 넓히지 않는다**: 사건 목록은 이 안의 header 슬롯을 타고 오므로 그
+    // 블록에서 예전 폭(max-w-5xl)을 그대로 지킨다.
+    <div ref={containerRef} className="mx-auto w-full">
       {/* One rule of caption above the canvas rather than two centred lines
           floating in the gap between the toolbar and the first word — that gap
           was most of what made the top of the page read as empty.
@@ -255,7 +259,7 @@ export function KeywordGraph({
           own reason: the mark is small and sits off the side of a word, so
           without a key it reads as a rendering artefact. */}
       {(header || marked) && (
-        <div className="mb-4 border-b border-line pb-2">
+        <div className="mx-auto mb-4 max-w-5xl border-b border-line pb-2">
           {header}
           {marked && (
             <p className="mt-1 text-right text-xs text-ink-faint">

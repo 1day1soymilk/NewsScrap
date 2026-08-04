@@ -417,20 +417,31 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pt-6 pb-8 sm:px-6">
-        <Masthead
-          date={selectedDate}
-          minDate={availableDates[availableDates.length - 1]}
-          maxDate={availableDates[0]}
-          previousDate={previousDate}
-          nextDate={nextDate}
-          onDateChange={setSelectedDate}
-          words={!error && !loading ? graph.nodes.length : null}
-          links={!error && !loading ? graph.edges.length : null}
-        />
+      {/* **가로 폭이 여기서 갈린다.** 산문은 자기 자로 재고 캔버스는 자기 자로
+          잰다: 읽는 글줄은 길어져서 좋을 것이 없고, 그림은 넓을수록 선반이 한 줄에
+          더 들어가 세로가 짧아진다. 그래서 `max-w-6xl`이 <main>에서 내려와 매스트헤드와
+          오류 블록에 각각 붙고, 그래프만 자기 상자를 따로 받는다.
+
+          CLAUDE.md의 "넓혀도 얻는 것이 없다"는 이 경우가 **아니다**. 그 기록은 고정된
+          상자 **안에서** 단어를 옆으로 벌리는 것에 대한 것이고 — svg는 자기 크롭 크기로
+          그려진 뒤 `max-w-full`로 축소되므로 벌린 만큼 그대로 작아진다 — 여기서는 상자
+          자체가 커진다. 배치가 더 넓은 폭에서 돌므로 축소되는 몫이 줄고 선반이 더 들어간다. */}
+      <main className="px-4 pt-6 pb-8 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <Masthead
+            date={selectedDate}
+            minDate={availableDates[availableDates.length - 1]}
+            maxDate={availableDates[0]}
+            previousDate={previousDate}
+            nextDate={nextDate}
+            onDateChange={setSelectedDate}
+            words={!error && !loading ? graph.nodes.length : null}
+            links={!error && !loading ? graph.edges.length : null}
+          />
+        </div>
 
         {error && (
-          <div className="text-center">
+          <div className="mx-auto max-w-6xl text-center">
             <p className="mb-2 text-danger">{error}</p>
             <button
               onClick={() => loadGraph()}
@@ -448,7 +459,7 @@ function App() {
           // contentRect, so the ResizeObserver inside the graph never fires and
           // the picture slides intact out from under the panel.
           <div
-            className={`origin-top transition-transform duration-300 motion-reduce:transition-none ${
+            className={`mx-auto w-full max-w-[1600px] origin-top transition-transform duration-300 motion-reduce:transition-none ${
               selectedWord || selectedEvent ? 'sm:-translate-x-24 sm:scale-90' : ''
             }`}
           >
