@@ -655,7 +655,7 @@ function untangle(members: LayoutNode[], links: LayoutLink[], padding: number): 
  * 상자를 내놓고, 평면 그림은 그보다 다섯 배가 넘게 필요했다. 23개를 없애는 데
  * 그만큼도 못 쓴다는 것은 말이 안 된다. 얻는 만큼 낸다.
  */
-const PLANAR_AREA_PER_CROSSING = 0.5
+const PLANAR_AREA_PER_CROSSING = 1.0
 
 /**
  * 덩어리 사건 하나를 배치한다 — 힘으로 한 번, 되면 평면으로 한 번, 나은 쪽.

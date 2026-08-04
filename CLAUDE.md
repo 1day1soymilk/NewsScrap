@@ -716,10 +716,14 @@ events and every edge had to cross somebody else's story.
   `PLANAR_AREA_PER_CROSSING` was re-swept on the new canvas and is **still a
   staircase**: 0.5 gives `xIn` 34, 1.0 and 2.0 both give 24 for 11% more height
   with no other column moving, 4.0 gives 12 for 47% more height and pushes `xBr`
-  back to 7. Left at 0.5 — the price is a cliff, so this is a judgement about the
-  picture rather than something the harness settles, and whether 11% more
-  scrolling buys ten straightened lines inside one story is not a measured
-  question. **The price is height** —
+  back to 7. **Raised to 1.0.** The price is a cliff, so it is a judgement about
+  the picture rather than something the harness settles, and the judgement went
+  this way because the crossings it removes are all inside **the day's biggest
+  story** — the place a reader is most likely to be tracing a line — while
+  `overlap`, `xBr` and `crowded` do not move at all, so there is no regression
+  surface. Only 2026-08-02 changes: `xIn` 13 → 8, height 1285 → 2100 desktop.
+  `lenMax` goes 823 → 1769 on that day and is accepted knowingly: the event's
+  region grows, so the edges crossing it grow with it. **The price is height** —
   08-02 desktop 651 → 1544px — **and the per-crossing price is a cliff, not a
   dial**: 0.15, 0.25 and 0.35 draw the four days identically to having no planar
   path at all, and 0.5 buys the whole move. There is no middle setting, so this
