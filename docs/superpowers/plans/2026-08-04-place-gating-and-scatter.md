@@ -84,6 +84,16 @@ insert into public.word_overrides (word, mode, note) values
   ('여수', 'place', 'si'), ('목포', 'place', 'si'), ('순천', 'place', 'si'),
   ('해남', 'place', 'gun'), ('양산', 'place', 'si — also holds an allow entry from 0003')
 on conflict (word) do nothing;
+
+-- The collector's per-section per-run cap, moved out of the Edge Function so
+-- that the two things which have to agree about it can read one number. Task 8
+-- re-tests the value and `daily_category_counts.capped` reports whether a
+-- section hit it; a literal in each place is two copies of one fact, and the
+-- second one goes stale silently the moment the first is retuned.
+insert into public.scoring_weights (key, value, note) values
+  ('collect_cap', 150,
+   'collect-headlines: headlines scraped per section per run. Read by the Edge Function and by daily_category_counts.capped.')
+on conflict (key) do update set value = excluded.value, note = excluded.note;
 ```
 
 - [ ] **Step 2: Apply it**
@@ -730,11 +740,32 @@ curl -sS -X POST "https://<ref>.supabase.co/functions/v1/collect-headlines" \
 ```
 Note `elapsedMs` and each section's `collected` figure.
 
-- [ ] **Step 2: Raise both constants**
+- [ ] **Step 2: Read the cap from the database and raise it there**
+
+The cap has two readers — this function and `daily_category_counts.capped` — so
+it lives in `scoring_weights.collect_cap` (seeded by migration `0023`) rather
+than in a literal here. Replace the constant with a read at the top of
+`Deno.serve`, defaulting to 150 if the row is missing so a failed read cannot
+silently collect nothing:
 
 ```ts
-const MAX_HEADLINES_PER_CATEGORY = 300
+const { data: capRow } = await supabase
+  .from('scoring_weights').select('value').eq('key', 'collect_cap').single()
+const headlineCap = Number(capRow?.value ?? 150)
+```
+
+and pass `headlineCap` to `fetchSectionHeadlines` in place of
+`MAX_HEADLINES_PER_CATEGORY`. `MAX_LIST_PAGES` stays a constant — nothing else
+reads it.
+
+```ts
 const MAX_LIST_PAGES = 12
+```
+
+Then raise the cap without a redeploy:
+
+```bash
+scripts/analysis/run.sh -c "update public.scoring_weights set value = 300 where key = 'collect_cap'"
 ```
 
 - [ ] **Step 3: Deploy and measure**
@@ -1189,7 +1220,11 @@ with per_run as (
 )
 select date, slug,
        sum(n)::int as headlines,
-       bool_or(n >= 150) as capped
+       -- The cap is read rather than written down. Task 8 retunes it in
+       -- scoring_weights and the Edge Function reads the same row, so this
+       -- cannot drift out of agreement with what the collector actually did.
+       bool_or(n >= coalesce(
+         (select value from public.scoring_weights where key = 'collect_cap'), 150)) as capped
 from per_run
 group by date, slug;
 
