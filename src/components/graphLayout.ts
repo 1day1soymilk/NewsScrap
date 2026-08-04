@@ -1515,8 +1515,8 @@ export function scatterLoose(
   // 곡선은 라우팅이 이미 쓰는 32구간 샘플 그대로 찍는다. 두 번째 사본을 만들지
   // 않으려는 것이고, 그래야 여기서 피한 점과 저기서 센 점이 같은 점이 된다.
   for (const curve of curves) {
-    for (let i = 0; i <= 32; i++) {
-      const t = i / 32
+    for (let i = 0; i <= CURVE_STEPS; i++) {
+      const t = i / CURVE_STEPS
       const m = 1 - t
       markBox(
         m * m * curve.x1 + 2 * m * t * curve.cx + t * t * curve.x2,
@@ -1620,18 +1620,17 @@ export function scatterLoose(
   for (const node of order) {
     const halfWidth = node.halfWidth + padding / 2
     const halfHeight = node.halfHeight + padding / 2
-    const at = (i: number) => ({
-      x: nudge(
-        bounds.x + (i % cols) * SCATTER_CELL + SCATTER_CELL / 2,
-        bounds.x + halfWidth,
-        bounds.x + bounds.width - halfWidth,
-      ),
-      y: nudge(
-        bounds.y + ((i / cols) | 0) * SCATTER_CELL + SCATTER_CELL / 2,
-        bounds.y + halfHeight,
-        bounds.y + bounds.height - halfHeight,
-      ),
-    })
+    // 후보 칸의 자리를 좌표 둘로 푼다. 칸마다 객체를 하나씩 만들면 넓은 뷰에서
+    // 단어당 5만 개가 되고, 그 할당이 배치 시간에서 **캔버스 넓이에 비례해**
+    // 자란다 — 상자를 1600으로 키운 지금 새로 생긴 민감도라 없애 둔다.
+    const minX = bounds.x + halfWidth
+    const maxX = bounds.x + bounds.width - halfWidth
+    const minY = bounds.y + halfHeight
+    const maxY = bounds.y + bounds.height - halfHeight
+    const spotX = (i: number) =>
+      nudge(bounds.x + (i % cols) * SCATTER_CELL + SCATTER_CELL / 2, minX, maxX)
+    const spotY = (i: number) =>
+      nudge(bounds.y + ((i / cols) | 0) * SCATTER_CELL + SCATTER_CELL / 2, minY, maxY)
 
     rebuildPrefix()
     distance()
@@ -1639,8 +1638,7 @@ export function scatterLoose(
     let bestScore = -1
     for (let i = 0; i < d.length; i++) {
       if (d[i] <= 0 || d[i] <= bestScore) continue
-      const spot = at(i)
-      if (!fits(node, spot.x, spot.y)) continue
+      if (!fits(node, spotX(i), spotY(i))) continue
       bestScore = d[i]
       best = i
     }
@@ -1648,9 +1646,8 @@ export function scatterLoose(
       leftover.push(node)
       continue
     }
-    const spot = at(best)
-    node.x = spot.x
-    node.y = spot.y
+    node.x = spotX(best)
+    node.y = spotY(best)
     markBox(node.x, node.y, halfWidth, halfHeight)
   }
 
@@ -1698,6 +1695,16 @@ function toPlaced(n: LayoutNode): PlacedNode {
 }
 
 // --- 선 ---------------------------------------------------------------------
+
+/**
+ * 곡선 하나를 몇 구간으로 나눠 표본을 뜰지.
+ *
+ * **한 군데에만 적는다.** 라우팅이 "선이 라벨을 밟았는가"를 세는 점과
+ * `scatterLoose`가 "여기는 선이 지나간 자리인가"를 찍는 점이 **같은 점이어야**
+ * 흩뿌리기의 불변식이 성립한다. 세 곳에 32를 손으로 적어 두면 불변식의 성립이
+ * 세 리터럴이 서로 같기를 바라는 일이 된다. 단위 시험도 이 값을 읽는다.
+ */
+export const CURVE_STEPS = 32
 
 // Gap left between a line and the label it passes. Also what pulls an edge back
 // off its own endpoints, since a node's centre is inside its own box.
@@ -1839,10 +1846,9 @@ function bowedCurve(
 // quadratic against an axis-aligned box has no closed form worth the arithmetic
 // here, and a count ranks routes where a boolean could only reject them.
 function intrusion(curve: EdgeCurve, boxes: PlacedNode[], margin: number): number {
-  const steps = 32
   let hits = 0
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
+  for (let i = 0; i <= CURVE_STEPS; i++) {
+    const t = i / CURVE_STEPS
     const m = 1 - t
     const x = m * m * curve.x1 + 2 * m * t * curve.cx + t * t * curve.x2
     const y = m * m * curve.y1 + 2 * m * t * curve.cy + t * t * curve.y2
