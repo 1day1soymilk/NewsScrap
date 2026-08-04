@@ -10,8 +10,8 @@
 -- after sorting each edge array by its own text.
 --
 -- **The edge *ordering* did move, and that is the one thing here not lifted
--- verbatim.** It moved on 7 of the first 10 cells hashed, and every difference
--- was a permutation of exactly-tied edges and nothing else: on 2026-07-31,
+-- verbatim.** It moved on 18 of the 35 cells, and every difference was a
+-- permutation of exactly-tied edges and nothing else: on 2026-07-31,
 -- 박지원·한동훈 / 세우타·스페인 / 머스크·중간선거 all carry cooc 3 and npmi
 -- 0.80097396756174372838 — equal to the last digit, not merely equal once
 -- rounded to the three places the JSON ships.
@@ -21,25 +21,52 @@
 -- answer was decided by the query plan; lifting the edge query into a function of
 -- its own changed the plan, and the tied pairs came back permuted. That is not a
 -- property to chase back into place. It is a latent bug that was invisible only
--- while the plan happened to be stable, and it is load-bearing rather than
--- cosmetic: `detectCommunities` in `src/components/graphLayout.ts` builds its
--- adjacency lists by walking the edge array in the order it arrives and keeps the
--- first-seen best move, so **a permutation of tied edges can move the Louvain
--- partition between two runs over identical data** — and the partition decides
--- which box a word is laid out in and which stories the event list names.
--- CLAUDE.md already claims the picture is reproducible because ties are "broken
--- on the word server side, so the same day always renders the same picture and
--- the e2e suite can assert on it". That was true of the nodes and quietly untrue
--- of the edges. The tie-break below is that stated constraint being enforced for
--- the first time, not a new rule.
+-- while the plan happened to be stable, and CLAUDE.md already claims the picture
+-- is reproducible because ties are "broken on the word server side, so the same
+-- day always renders the same picture and the e2e suite can assert on it". That
+-- was true of the nodes and quietly untrue of the edges. So the ordering gains
+-- `, a, b`, the same tie-break the node ranking already uses — the stated
+-- constraint being enforced for the first time rather than a new rule.
 --
--- So the ordering gains `, a, b`, the same tie-break the node ranking already
--- uses, and the gate was then re-run against 0018's own body **with that same
--- tie-break applied to it**: byte-identical on all 35 cells. The two statements
--- together are the real gate — the edge sets match the untouched 0018 exactly,
--- and the bytes match a 0018 whose only change is the tie-break. The hashes that
--- moved are a total ordering replacing an accidental one, and the baseline tasks
--- 3 to 15 measure against is the one recorded after this migration.
+-- **What the reorder actually moved was measured, not assumed**, by running both
+-- edge arrays through the frontend's own code on all 18 cells
+-- (`scripts/layout/edgeOrderPartition.ts`):
+--
+--     Louvain partition   0 of 18 moved
+--     merged events       0 of 18 moved
+--     drawn geometry      7 of 18 moved
+--
+-- **The partition does not move, and the reason first written here for why it
+-- might was wrong.** `detectCommunities` does not keep the first-seen best move:
+-- `graphLayout.ts` breaks a gain tie with `candidate < best`, the lowest
+-- community id, which is order-independent. Neighbour-list order cannot decide a
+-- move. Anyone later wondering whether this tie-break can be removed should start
+-- from that fact rather than from the Louvain story.
+--
+-- **The geometry does move, by a different route**, and it is the reason the
+-- tie-break stays: d3's `forceLink` applies its velocity updates walking the link
+-- array in order, so a permutation changes the floating-point accumulation and
+-- the simulation lands somewhere slightly different. Six of the seven are
+-- sub-pixel (0.06 to 0.54px) and invisible. **The seventh is not**: 2026-08-02's
+-- all-categories view rearranges one event internally — 강릉·돌핀·서울·열대야·
+-- 전남·초열대야·폭염 — moving 전남 137.6px and 서울 131.6px, 4 words past 10px
+-- and 11 past 1px, with the region 149.9x155.5 → 148.5x159.2 and every box to its
+-- right shifted about a pixel by the repacking. Same partition, same event
+-- membership, different picture.
+--
+-- So `scripts/layout/README.md`'s table is stale for exactly one cell, 2026-08-02
+-- desktop, and re-measuring it is cheap. That it is *that* cell is not a
+-- coincidence worth ignoring: CLAUDE.md records 2026-08-02 as holding the
+-- archive's only non-planar event and sitting on the `PLANAR_AREA_PER_CROSSING`
+-- cliff, and a cliff is exactly where a last-bit difference gets amplified into
+-- 137px. Everywhere else the day was flat enough that nothing moved at all.
+--
+-- The gate was then re-run against 0018's own body **with that same tie-break
+-- applied to it**: byte-identical on all 35 cells. The two statements together
+-- are the real gate — the edge sets match the untouched 0018 exactly, and the
+-- bytes match a 0018 whose only change is the tie-break. The hashes that moved
+-- are a total ordering replacing an accidental one, and the baseline tasks 3 to
+-- 15 measure against is the one recorded after this migration.
 --
 -- **Why plpgsql, when every other function here is `language sql`.** The rule is
 -- a fixed point, not a filter. Dropping a place promotes the word ranked 71 onto
@@ -50,14 +77,30 @@
 -- the ranking is `row_number()`. Hence a loop, and hence plpgsql.
 --
 -- **Termination is by monotonicity, not by the guard.** `banned` only ever grows,
--- and it can only ever hold words carrying a `word_overrides` 'place' entry, of
--- which there are 45. So the loop ends. `guard > 50` is a backstop against a bug
--- in that reasoning, not the mechanism — do not replace it with a fixed number of
--- passes. Measured with the gate switched on across all 35 cells: the fixed point
--- is reached after a **single** productive pass everywhere, so `guard` exits at 2
--- where anything was dropped and at 1 where nothing was, against a bound of 45.
--- That the second pass has never yet found a word is not a licence to drop it —
--- it is the check that the first pass was a fixed point, and it costs one query.
+-- and it can only ever hold words carrying a `word_overrides` 'place' entry, so
+-- the loop ends after at most one pass per place plus the pass that confirms it.
+-- The guard is a backstop against a bug in that reasoning, not the mechanism — do
+-- not replace it with a fixed number of passes. It is **derived from the place
+-- count rather than hardcoded**, because a hardcoded 50 against 45 places is a
+-- margin of four: grow the dictionary past ~49 places and the backstop becomes
+-- reachable, at which point the function would quietly return a set that is not a
+-- fixed point. And when it does fire it now `raise`s, because a silently wrong
+-- graph is the one outcome worse than an error.
+--
+-- Measured with the gate switched on across all 35 cells: the fixed point is
+-- reached after a **single** productive pass everywhere, so the loop runs twice
+-- where anything was dropped and once where nothing was. That the second pass has
+-- never yet found a word is not a licence to drop it — it is the check that the
+-- first pass was a fixed point, and it costs one query.
+--
+-- **It is *a* fixed point, not *the* fixed point**, and the difference is worth
+-- stating. Each pass bans every unsupported place at once, so a place dropped in
+-- pass 1 is never reconsidered even though the promotions that drop causes only
+-- ever add words and edges — a later pass could in principle have handed it a
+-- non-place partner. Dropping them one at a time, cheapest first, would find a
+-- different and larger surviving set. The batch drop is what the task specified
+-- and it cannot bite while one productive pass suffices, but if a day ever needs
+-- three passes this is the assumption to re-examine first.
 --
 -- **It is a fixed point that really does substitute.** On 2026-08-03 the gate
 -- drops 서울, 인천, 포항, 울산, 강원, 광주 and pulls 한반도, 고속도로, 김동관,
@@ -196,6 +239,12 @@ sig as (
 ),
 -- What the viewer is actually looking at. Counts come from here; the signals
 -- above deliberately do not.
+--
+-- `scoped` and `scoped_df` are also spelled out in keyword_graph_pick_edges, and
+-- the two must agree about which of the day's rows are on screen. 0018 had this
+-- predicate once; splitting the node and edge halves made it twice. No threshold
+-- or formula is duplicated — this is a selection — but a change to the scoping
+-- rule has to be made in both places.
 scoped as (
   select distinct h.id as headline_id, n.word
   from public.headline_nouns n
@@ -353,6 +402,8 @@ with w as (
     coalesce(max(value) filter (where key = 'edge_limit'), 150)    as edge_limit
   from public.scoring_weights
 ),
+-- The same `scoped` / `scoped_df` pair keyword_graph_candidates defines. Two
+-- copies of the scoping predicate, one selection — see the note there.
 scoped as (
   select distinct h.id as headline_id, n.word
   from public.headline_nouns n
@@ -429,7 +480,10 @@ as $fn$
     r.passed_by, r.category_slug, r.is_place, r.faded, r.rank
   from public.keyword_graph_rank(
     array(select c from public.keyword_graph_candidates(p_date, p_category) c),
-    p_banned) r;
+    p_banned) r
+  -- Row order out of a function scan is not contractual, so it is stated. This
+  -- is the order keyword_graph's own json_agg uses.
+  order by r.rank;
 $fn$;
 
 create or replace function public.keyword_graph_edges(
@@ -451,7 +505,9 @@ as $fn$
   select e.a, e.b, e.cooc, e.npmi
   from public.keyword_graph_pick_edges(
     p_date, p_category,
-    array(select n.word from public.keyword_graph_nodes(p_date, p_category, p_banned) n)) e;
+    array(select n.word from public.keyword_graph_nodes(p_date, p_category, p_banned) n)) e
+  -- As above: stated rather than inherited, and the same keys the JSON uses.
+  order by e.npmi desc, e.cooc desc, e.a, e.b;
 $fn$;
 
 create or replace function public.keyword_graph(p_date date, p_category text default null)
@@ -467,10 +523,17 @@ declare
   dropped text[];
   gate    boolean;
   guard   int := 0;
+  max_passes int;
   result  json;
 begin
   select coalesce(max(value), 0) = 1 into gate
   from public.scoring_weights where key = 'place_needs_edge';
+
+  -- The bound, derived rather than guessed: at most one pass per place, plus the
+  -- pass that finds nothing and stops. `+ 2` rather than `+ 1` so the confirming
+  -- pass is never itself what trips the backstop.
+  select count(*)::int + 2 into max_passes
+  from public.word_overrides where mode = 'place';
 
   -- The expensive half, once. Everything below is arithmetic over a few hundred
   -- rows, so the loop is affordable however many times it goes round.
@@ -502,9 +565,15 @@ begin
         );
       -- Dropping a place promotes the next-ranked word, which can rescue or
       -- strand another place, so this runs to a fixed point. `banned` only
-      -- grows and is bounded by the size of the place list; the guard is a
-      -- backstop against a bug in that argument, not the reason it stops.
-      exit when cardinality(dropped) = 0 or guard > 50;
+      -- grows and is bounded by the size of the place list, which is where
+      -- `max_passes` comes from; reaching it means that argument is broken, and
+      -- a graph that is not a fixed point must not be returned as if it were.
+      exit when cardinality(dropped) = 0;
+      if guard >= max_passes then
+        raise exception
+          'keyword_graph: place gate failed to converge in % passes for % / %',
+          max_passes, p_date, coalesce(p_category, '(all)');
+      end if;
       banned := banned || dropped;
     end loop;
   end if;
@@ -557,22 +626,29 @@ insert into public.scoring_weights (key, value, note) values
    'sieve 6: DISABLED. 1 draws a word_overrides place only when a line joins it to a non-place. 0 draws every place. Turned on by 0025 after measurement.')
 on conflict (key) do update set value = excluded.value, note = excluded.note;
 
--- The functions were dropped above, so these grants are load-bearing rather than
--- a restatement: a drop discards them.
+-- The functions were dropped above, so a grant here is not a restatement the way
+-- 0018's was: a drop discards grants.
 --
--- **`anon` and nothing else**, which is a change from 0018's `anon, authenticated`
--- and matches `keyword_signals` in 0017. There is no login in this project:
--- `src/lib/supabaseClient.ts` builds a `PostgrestClient` by hand with the anon key
--- in both the `apikey` and `Authorization` headers, and there is no auth-js in the
--- bundle at all, so `authenticated` is a role nothing can ever arrive as. One
--- grantee list across the whole chain is worth more than a role that cannot occur.
+-- **These grants document intent; they are not what confers access, and the live
+-- ACLs say so.** All six functions come out carrying
 --
--- Naming one role here cannot half-break the chain, which is the thing worth
--- checking before writing a grant for a SECURITY INVOKER call tree. Postgres
--- grants EXECUTE on a new function to PUBLIC by default, and `keyword_signals`'
--- ACL shows it — `=X/postgres` alongside the explicit `anon=X`. So every grant in
--- this file states intent rather than conferring access, and dropping
--- `authenticated` takes nothing away from anyone.
+--     =X/postgres  postgres=X/postgres  anon=X/postgres
+--     authenticated=X/postgres  service_role=X/postgres
+--
+-- of which this file wrote only `anon=X`. The rest arrives on its own: Postgres
+-- grants EXECUTE on a new function to PUBLIC (`=X/postgres`), and Supabase's
+-- default privileges add `anon`, `authenticated` and `service_role` to every
+-- function created in `public`. So naming one role here cannot half-break the
+-- SECURITY INVOKER chain — which is the thing worth checking before writing a
+-- grant for a call tree — and equally, naming one role cannot *narrow* anything.
+-- `authenticated` keeps its explicit grant whatever this file says.
+--
+-- `anon` is named alone because it is the only role this project can ever arrive
+-- as: there is no login, `src/lib/supabaseClient.ts` builds a `PostgrestClient` by
+-- hand with the anon key in both the `apikey` and `Authorization` headers, and
+-- there is no auth-js in the bundle. Narrowing the ACL for real would take a
+-- `revoke`, and that is not done here — it would fight the platform's defaults to
+-- close a door nothing can reach.
 grant execute on function public.keyword_graph_candidates(date, text) to anon;
 grant execute on function public.keyword_graph_rank(public.keyword_candidate[], text[]) to anon;
 grant execute on function public.keyword_graph_pick_edges(date, text, text[]) to anon;
