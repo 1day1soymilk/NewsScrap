@@ -32,14 +32,22 @@ sig as (
 -- it is a knob here rather than a change. With it at its default (9.9) this
 -- expression is exactly `order by s.df desc, s.word` and every earlier round's
 -- numbers reproduce. Ties break on the word so a rerun gives the same answer.
-passed as (
+--
+-- Sieve 6 is deliberately not applied here. It judges a place against the set
+-- that is actually drawn, and "drawn" cannot be known until sieves 1-5 have
+-- already produced a ranking against the render cap — that is what drawn0 and
+-- gate_fail below are for. passed0 carries head_pos, demote_head_pos,
+-- render_cap and place_gate through so the later CTEs, and the final re-rank,
+-- do not have to rejoin sieve_configs or keyword_signals.
+passed0 as (
   select
-    c.ord, c.name, s.d, s.word, s.df,
+    c.ord, c.name, s.d, s.word, s.df, s.head_pos, c.demote_head_pos,
+    c.render_cap, c.place_gate,
     row_number() over (partition by c.ord, s.d
       -- 강등: 제목 뒤에 앉는 단어를 자르지 않고 상한 아래로 밀어낸다.
       -- 자르면 카테고리 탭에서 24셀 중 8셀을 지고 한 셀도 못 이긴다 —
       -- 탭에는 상한이 걸리지 않아 잘린 자리를 메울 단어가 없기 때문이다.
-      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank
+      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
   cross join sig s
   left join word_overrides ov on ov.word = s.word
@@ -60,20 +68,77 @@ passed as (
       or s.neighbors_per_doc <= c.max_npd
       or (c.use_dict and ov.mode = 'allow')
     )
-    -- Sieve 6, as a cut inside the harness's own copy. Unlike keyword_graph this
-    -- is a single pass rather than a fixed point: the harness ranks a fixed
-    -- candidate list, so there is no promotion to destabilise. Where the two
-    -- disagree, keyword_graph is right and 30_word_scores.sql's `chk` says so.
-    and (
-      not c.place_gate
-      or ov.mode is distinct from 'place'
-      or exists (
-        select 1 from analysis.day_edges de
-        where de.d = s.d and de.npmi >= 0.3
-          and ((de.a = s.word and de.b_is_place_false)
-            or (de.b = s.word and de.a_is_place_false))
-      )
+),
+
+-- The set sieve 6 judges places against: rank <= render_cap *without* the
+-- gate. keyword_graph faces the same circularity — the gate changes the drawn
+-- set, and "drawn" is exactly what the gate reads — and resolves it by
+-- iterating to a fixed point. The harness ranks one fixed candidate list, so a
+-- single pass stands in for the loop: this is that pass's reference set, not
+-- its output. A word promoted into a gap a dropped place leaves is not itself
+-- re-checked against drawn0.
+drawn0 as (
+  select p0.* from passed0 p0 where p0.rank0 <= p0.render_cap
+),
+
+-- Sieve 6, as a cut inside the harness's own copy. A place in drawn0 survives
+-- only if it holds a line — cooc and npmi already filtered into
+-- analysis.day_edges, npmi checked here — to a partner that is *also* in
+-- drawn0 and is not itself a place. Testing against day_edges alone (any
+-- co-occurring non-place word, drawn or not) was this file's bug: 부산 on
+-- 2026-08-02 survived through 경기, a word that clears no sieve-4 clause and
+-- was never itself on screen. Migration 0024's header is explicit that "has an
+-- edge" means "has a line on screen" — the partner has to be a member of the
+-- same drawn set the place is being judged against, not merely a word that
+-- shares a headline with it somewhere in the day's data.
+--
+-- This is a second copy of sieve 6 and it can drift the way every second copy
+-- here can. `30_word_scores.sql`'s `chk` does not cover it — `is_place` is
+-- deliberately absent from keyword_graph's JSON (see migration 0024's tail
+-- comment), so that file cannot see a place-gate disagreement at all. What
+-- actually checks this copy: flip `scoring_weights.place_needs_edge` to 1,
+-- diff keyword_graph(d, null)'s node words against config 210's drawn set
+-- (the CTEs above, unmodified) on every day in analysis.eval_days, then flip
+-- it back to 0. Task 3's report records the result — 0 words different in
+-- either direction, all four days — and any later change to this clause
+-- should re-run that comparison rather than trust this comment on its own.
+gate_fail as (
+  select d0.ord, d0.d, d0.word
+  from drawn0 d0
+  join word_overrides ov on ov.word = d0.word and ov.mode = 'place'
+  where d0.place_gate
+    and not exists (
+      select 1
+      from analysis.day_edges de
+      where de.d = d0.d and de.npmi >= 0.3
+        and (
+          (de.a = d0.word and de.b_is_place_false
+            and exists (select 1 from drawn0 p2
+                        where p2.ord = d0.ord and p2.d = d0.d and p2.word = de.b))
+          or (de.b = d0.word and de.a_is_place_false
+            and exists (select 1 from drawn0 p2
+                        where p2.ord = d0.ord and p2.d = d0.d and p2.word = de.a))
+        )
     )
+),
+
+-- The final ranking: passed0 minus the places gate_fail names, re-ranked by
+-- the same order passed0 used. Removing rows before row_number() runs is what
+-- lets the cap refill from whatever ranked next, exactly as it already did
+-- before sieve 6 existed — the mechanism is unchanged, only what feeds it.
+-- When place_gate is false, gate_fail is empty by construction (its own WHERE
+-- requires d0.place_gate), so passed is byte-identical to passed0 and every
+-- non-gated configuration's numbers are unaffected by any of this.
+passed as (
+  select
+    p0.ord, p0.name, p0.d, p0.word, p0.df,
+    row_number() over (partition by p0.ord, p0.d
+      order by (p0.head_pos > p0.demote_head_pos) asc, p0.df desc, p0.word) as rank
+  from passed0 p0
+  where not exists (
+    select 1 from gate_fail gf
+    where gf.ord = p0.ord and gf.d = p0.d and gf.word = p0.word
+  )
 ),
 
 -- The render cap is now a column rather than the literal that used to sit

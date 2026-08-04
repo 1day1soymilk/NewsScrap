@@ -34,14 +34,21 @@ sig as (
   cross join lateral keyword_signals(p.d) s
 ),
 
-passed as (
+-- Sieve 6 is deliberately not applied here. It judges a place against the set
+-- that is actually drawn, and "drawn" cannot be known until sieves 1-5 have
+-- already produced a ranking against the render cap — that is what drawn0 and
+-- gate_fail below are for. passed0 carries the columns the later CTEs and the
+-- final re-rank need (head_pos, demote_head_pos, render_cap, place_gate)
+-- alongside the signal columns this file reports (spec, standalone, npd).
+passed0 as (
   select
     c.ord, s.d, s.word, s.df, s.spec, s.standalone, s.neighbors_per_doc,
+    s.head_pos, c.demote_head_pos, c.render_cap, c.place_gate,
     row_number() over (partition by c.ord, s.d
       -- 강등: 제목 뒤에 앉는 단어를 자르지 않고 상한 아래로 밀어낸다.
       -- 자르면 카테고리 탭에서 24셀 중 8셀을 지고 한 셀도 못 이긴다 —
       -- 탭에는 상한이 걸리지 않아 잘린 자리를 메울 단어가 없기 때문이다.
-      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank
+      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
   cross join sig s
   left join word_overrides ov on ov.word = s.word
@@ -59,20 +66,62 @@ passed as (
       or s.neighbors_per_doc <= c.max_npd
       or (c.use_dict and ov.mode = 'allow')
     )
-    -- Sieve 6, as a cut inside the harness's own copy. Unlike keyword_graph this
-    -- is a single pass rather than a fixed point: the harness ranks a fixed
-    -- candidate list, so there is no promotion to destabilise. Where the two
-    -- disagree, keyword_graph is right and 30_word_scores.sql's `chk` says so.
-    and (
-      not c.place_gate
-      or ov.mode is distinct from 'place'
-      or exists (
-        select 1 from analysis.day_edges de
-        where de.d = s.d and de.npmi >= 0.3
-          and ((de.a = s.word and de.b_is_place_false)
-            or (de.b = s.word and de.a_is_place_false))
-      )
+),
+
+-- The set sieve 6 judges places against: rank <= render_cap *without* the
+-- gate. See 10_sieve_eval.sql for why — this file has to match it clause for
+-- clause or the two worklists can disagree about which words need labelling.
+drawn0 as (
+  select p0.* from passed0 p0 where p0.rank0 <= p0.render_cap
+),
+
+-- Sieve 6, as a cut inside the harness's own copy. A place in drawn0 survives
+-- only if it holds a line — cooc and npmi already filtered into
+-- analysis.day_edges, npmi checked here — to a partner that is *also* in
+-- drawn0 and is not itself a place. Testing against day_edges alone (any
+-- co-occurring non-place word, drawn or not) was this file's bug, matching
+-- 10_sieve_eval.sql's: 부산 on 2026-08-02 survived through 경기, a word that
+-- clears no sieve-4 clause and was never itself on screen. Migration 0024's
+-- header is explicit that "has an edge" means "has a line on screen".
+--
+-- See 10_sieve_eval.sql for what actually checks this second copy against
+-- keyword_graph — 30_word_scores.sql's `chk` does not reach it, since
+-- `is_place` is deliberately absent from keyword_graph's JSON.
+gate_fail as (
+  select d0.ord, d0.d, d0.word
+  from drawn0 d0
+  join word_overrides ov on ov.word = d0.word and ov.mode = 'place'
+  where d0.place_gate
+    and not exists (
+      select 1
+      from analysis.day_edges de
+      where de.d = d0.d and de.npmi >= 0.3
+        and (
+          (de.a = d0.word and de.b_is_place_false
+            and exists (select 1 from drawn0 p2
+                        where p2.ord = d0.ord and p2.d = d0.d and p2.word = de.b))
+          or (de.b = d0.word and de.a_is_place_false
+            and exists (select 1 from drawn0 p2
+                        where p2.ord = d0.ord and p2.d = d0.d and p2.word = de.a))
+        )
     )
+),
+
+-- The final ranking: passed0 minus the places gate_fail names, re-ranked by
+-- the same order passed0 used, so the cap refills from whatever ranked next —
+-- unchanged from how promotion already worked before sieve 6 existed. When
+-- place_gate is false, gate_fail is empty by construction, so passed is
+-- byte-identical to passed0.
+passed as (
+  select
+    p0.ord, p0.d, p0.word, p0.df, p0.spec, p0.standalone, p0.neighbors_per_doc,
+    row_number() over (partition by p0.ord, p0.d
+      order by (p0.head_pos > p0.demote_head_pos) asc, p0.df desc, p0.word) as rank
+  from passed0 p0
+  where not exists (
+    select 1 from gate_fail gf
+    where gf.ord = p0.ord and gf.d = p0.d and gf.word = p0.word
+  )
 ),
 
 -- The render cap is now a column rather than the literal that used to sit
