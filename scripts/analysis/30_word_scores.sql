@@ -43,6 +43,9 @@ w as (
     coalesce(max(value) filter (where key = 'min_word_len'), 3)            as min_word_len,
     coalesce(max(value) filter (where key = 'min_spec'), 0.80)             as min_spec,
     coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_neighbors_per_doc,
+    -- Sieve 4d, migration 0018. 9.9 disables it, the convention min_spec uses,
+    -- since the signal maxes at 1.
+    coalesce(max(value) filter (where key = 'min_proper'), 9.90)           as min_proper,
     coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90)      as demote_head_pos,
     coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit,
     coalesce(max(value) filter (where key = 'render_cap'), 130)            as render_cap
@@ -86,7 +89,15 @@ annotated as (
     -- word cut by sieve 4 as merely outranked. Same trap as the `faded` flag in
     -- migration 0003, and it was walked into here before the cross-check found
     -- it — which is what the cross-check is for.
+    -- Sieve 4d belongs in this disjunction and was missing from it from the day
+    -- migration 0018 shipped until round fourteen ran this file and read `chk`.
+    -- It is exactly the drift the cross-check exists to catch, and it caught it:
+    -- 12 of the day's 70 drawn words reach the canvas through `proper` alone, so
+    -- every one of them was reported `!` — 대구, 송영길, 돌핀, 인천, 정성호,
+    -- 해남, 쌍방울, 전남, 한반도, 김용범, 북한, 영남. Nothing about the sieve was
+    -- wrong; this copy of it was, which is what a `!` always means.
     (char_length(s.word) >= w.min_word_len
+      or s.proper >= w.min_proper
       or s.spec >= w.min_spec
       or s.neighbors_per_doc <= w.max_neighbors_per_doc
       or ov.mode is not distinct from 'allow')               as ok_sieve4

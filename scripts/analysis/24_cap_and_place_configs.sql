@@ -131,12 +131,42 @@ on conflict (ord) do update set
   use_dict = excluded.use_dict, render_cap = excluded.render_cap,
   place_gate = excluded.place_gate, balance_alpha = excluded.balance_alpha;
 
+-- The round under comparison, narrowed now that round fourteen has reported —
+-- the same move 19_rounds_ten_to_twelve_configs.sql makes at its own tail, and
+-- for the same reason: an inactive row costs nothing and a deleted one loses the
+-- history of what was already ruled out.
+--
+-- **200 alone, and it is the shipped sieve.** Migration 0026 kept the cap at 70,
+-- the place gate off and α at 0, so 201-203, 210, 211 and 220-223 are all
+-- measured-and-declined and have no further question to answer. What they cost
+-- while active is not nothing: 220-223 put four more distinct α values into
+-- `alphas`, and the harness pays one keyword_signals call per (day, α) — measured
+-- at 4.2s for 10_sieve_eval.sql before this round's rows and **24.8s** after, with
+-- 20_unlabeled.sql going 4.1s to 23.3s. Worse than the seconds, every active row
+-- carries a permanent rule-4 obligation: a collection or a dictionary edit can
+-- promote a word onto *its* screen, and the worklist then demands that word be
+-- labelled before any row of the harness can be read.
+--
+-- **A round that wants a control adds one back**, the way 19 keeps 181
+-- (dictionary off) and 182 (pre-0018) beside its shipped row. None is activated
+-- here, because 180-182 carry min_word_len 3 and min_standalone 0.10 — the sieve
+-- as it stood before round thirteen — so switching one on is a label question
+-- under rule 4 rather than a free comparison. Whoever needs it should flip the
+-- flag and re-run 20_unlabeled.sql, as ever.
+--
+-- The two mechanisms 0026 declined are not deleted from the database either:
+-- `place_gate` and `balance_alpha` stay as columns and `analysis.day_edges` stays
+-- as a table, so re-activating 210 or 220-223 is one UPDATE. In particular, the
+-- α arm is expected to be re-run once 2026-08-04 stops collecting and can be
+-- labelled — that is the day the exponent was built for and the day this round
+-- could not see.
 update analysis.sieve_configs
-  set active = (ord in (200, 201, 202, 203, 210, 211, 220, 221, 222, 223));
+  set active = (ord in (200));
 
 -- The distinct α count is what the harness pays for, not the configuration
 -- count: 10_sieve_eval.sql evaluates keyword_signals once per (day, α) and
 -- joins the configurations onto that, so ten rows over five α values cost five
--- calls a day rather than ten.
+-- calls a day rather than ten. With 200 alone there is one α, which is the
+-- 4.2s the file cost before this round.
 select ord, name, render_cap, place_gate, balance_alpha
 from analysis.sieve_configs where active order by ord;
