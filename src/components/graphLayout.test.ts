@@ -659,6 +659,27 @@ describe('흩뿌리기', () => {
     expect(loose.some((n) => n.y < lowestRegion)).toBe(true)
   })
 
+  it('남의 사건 구역 안에는 앉지 않는다', () => {
+    // 구역은 그려지지 않고 여백으로만 읽힌다. 그 여백에 무관한 단어가 앉으면
+    // 구분이 사라지고, 재보니 하필 그 날의 제일 큰 이야기에 몰렸다(12단어 사건
+    // 하나에 7개). 막는 값은 여덟 칸 전부에서 0이었다 — 높이도 교차도 안 움직이고
+    // 무연결 단어도 여전히 전부 놓인다.
+    const layout = computeGraphLayout(scattered.words, scattered.edges, { width: 900 })
+    const inRegions = new Set(layout.regions.flatMap((r) => r.words))
+
+    for (const node of layout.nodes) {
+      if (inRegions.has(node.word)) continue
+      for (const region of layout.regions) {
+        const inside =
+          node.x + node.halfWidth > region.x &&
+          node.x - node.halfWidth < region.x + region.width &&
+          node.y + node.halfHeight > region.y &&
+          node.y - node.halfHeight < region.y + region.height
+        expect(inside, `${node.word} in ${region.words.join('·')}`).toBe(false)
+      }
+    }
+  })
+
   it('흩뿌린 뒤에도 어떤 라벨도 겹치지 않는다', () => {
     // 격자는 보수적으로 거절할 뿐이므로, 겹침 불변식은 흩뿌리기가 도는 캔버스에서
     // 다시 확인해야 의미가 있다.

@@ -153,6 +153,16 @@ interface Row {
   bridges: number
   lenMed: number
   lenMax: number
+  /**
+   * 선을 하나도 안 가진 단어 중, 중심이 **어떤 사건 구역 안**에 떨어진 것의 수.
+   *
+   * 흩뿌리기가 구역 안쪽 자리까지 후보로 두기 때문에 생기는 열이다. 그 허용은
+   * 잠정적이었고 판단은 숫자를 보고 하기로 했으므로, 그 숫자가 여기다. 구역은
+   * 그려지지 않으므로 "남의 이야기 안에 앉았다"는 것은 겹침도 관통도 아니지만,
+   * 같은 이야기의 단어들 사이에 무관한 단어가 끼면 여백으로 읽히던 구분이
+   * 흐려진다 — 예전 안쪽 고리 배치가 실패한 이유가 그것이었다.
+   */
+  inRegion: number
   overlap: number
   height: number
   /**
@@ -198,6 +208,17 @@ for (const view of VIEWS) {
     )
     const all = crossings(drawn)
 
+    // 선을 가진 단어는 반드시 구역을 받으므로, 구역에 안 든 단어가 곧 무연결
+    // 단어다. 중심으로 재는 것은 구역이 그려지지 않아 경계가 눈에 없기 때문이다 —
+    // 라벨 귀퉁이가 걸친 것과 단어가 그 이야기 한가운데 앉은 것은 다른 일이다.
+    const inRegion = layout.nodes.filter(
+      (n) =>
+        !regionOf.has(n.word) &&
+        layout.regions.some(
+          (r) => n.x >= r.x && n.x <= r.x + r.width && n.y >= r.y && n.y <= r.y + r.height,
+        ),
+    ).length
+
     rows.push({
       view: view.name,
       day,
@@ -211,6 +232,7 @@ for (const view of VIEWS) {
       bridges: drawn.length - inner.length,
       lenMed: Math.round(median(lengths)),
       lenMax: Math.round(Math.max(0, ...lengths)),
+      inRegion,
       overlap: overlaps(layout.nodes),
       height: layout.bounds.height,
       ms: Math.round(fastest * 10) / 10,
@@ -220,7 +242,7 @@ for (const view of VIEWS) {
 
 const columns: (keyof Row)[] = [
   'view', 'day', 'nodes', 'edges', 'drawn', 'crowded', 'crossings', 'xIn', 'xBr',
-  'bridges', 'lenMed', 'lenMax', 'overlap', 'height', 'ms',
+  'bridges', 'lenMed', 'lenMax', 'inRegion', 'overlap', 'height', 'ms',
 ]
 const widths = columns.map((c) =>
   Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)),

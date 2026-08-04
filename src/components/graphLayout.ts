@@ -438,7 +438,7 @@ export function computeGraphLayout(
     loose,
     anchoredPlaced,
     routed.filter((c): c is EdgeCurve => c !== null),
-    { padding, bounds: { x: 0, y: 0, width: canvas, height: packed.height } },
+    { padding, bounds: { x: 0, y: 0, width: canvas, height: packed.height }, keepOut: regions },
   )
 
   // 못 놓은 것은 아래 띠로. 자리가 없으면 그리로 가는 것이 이 설계의 저하 방식이고,
@@ -1462,14 +1462,36 @@ const SCATTER_CELL = 8
  * 반드시 진짜로 비어 있다. 안전한 방향의 근사이고, 단위 시험은 그 뒤에
  * `intrusion`이 세는 바로 그 32개 표본으로 정확히 확인한다.
  *
- * 못 놓은 단어는 돌려준다. 부르는 쪽이 아래 띠로 흘린다 — 폰에서는 빈틈이
- * 거의 없어 대부분 그리로 가는데, 그건 특별 취급이 아니라 자연스러운 저하다.
+ * 사건 구역은 통째로 막는다 — `keepOut`의 주석이 그 이유와 값이다.
+ *
+ * 못 놓은 단어는 돌려준다. 부르는 쪽이 아래 띠로 흘린다 — 그것이 이 설계의
+ * 저하 방식이지 실패가 아니다. 다만 재보니 **네 날 여덟 칸 어디서도 한 단어도
+ * 그리로 가지 않았다.** 폰조차 그렇다: 좁은 폭에서는 구역이 세로로 길게
+ * 쌓이고, 선반 사이의 gutter(48px)가 제일 작은 라벨(35px)보다 넓다.
  */
 export function scatterLoose(
   loose: LayoutNode[],
   placed: PlacedNode[],
   curves: EdgeCurve[],
-  options: { padding: number; bounds: { x: number; y: number; width: number; height: number } },
+  options: {
+    padding: number
+    bounds: { x: number; y: number; width: number; height: number }
+    /**
+     * 자리로 치지 않을 사각형 — 사건 구역이다.
+     *
+     * 처음에는 구역 안쪽도 후보로 뒀고, 재보니 **strangers가 하필 그 날의 제일 큰
+     * 이야기에 몰렸다**: 8단어 사건에 4개, 10단어에 6개, 12단어에 7개, 13단어에
+     * 5개. 큰 사건일수록 크롭 상자 안의 빈 자리가 많으니 당연한 결과이고, hull을
+     * 걷어낸 이유("멤버들 사이에 우연히 놓인 남의 단어까지 삼킨다")가 반대 방향으로
+     * 되풀이된 것이다. 구역은 그려지지 않고 여백으로만 읽히므로, 그 여백에 무관한
+     * 단어가 앉으면 구분이 사라진다.
+     *
+     * **막는 값이 0이라서 고민할 것이 없었다.** 여덟 칸 전부에서 `crowded`·`xIn`·
+     * `xBr`·`height`가 한 자리도 안 움직이고, 무연결 단어 14~26개가 여전히 전부
+     * 놓인다. 캔버스에는 선반 사이와 구역 밖에 그만큼의 자리가 있다.
+     */
+    keepOut: { x: number; y: number; width: number; height: number }[]
+  },
 ): LayoutNode[] {
   const { padding, bounds } = options
   const cols = Math.max(1, Math.ceil(bounds.width / SCATTER_CELL))
@@ -1484,6 +1506,9 @@ export function scatterLoose(
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) solid[r * cols + c] = 1
   }
 
+  for (const box of options.keepOut) {
+    markBox(box.x + box.width / 2, box.y + box.height / 2, box.width / 2, box.height / 2)
+  }
   for (const node of placed) {
     markBox(node.x, node.y, node.halfWidth + padding / 2, node.halfHeight + padding / 2)
   }
