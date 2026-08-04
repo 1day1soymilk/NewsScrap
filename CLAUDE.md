@@ -1036,14 +1036,36 @@ route. Two details that are easy to get wrong:
 
 ### Edge Function run budget
 
-The function paginates each section's "더보기" endpoint to 150 headlines, six
-sections per run.
+The function paginates each section's "더보기" endpoint to
+**`scoring_weights.collect_cap`** headlines (150), six sections per run. The cap
+is a database value rather than a constant because two things have to agree
+about it — the collector, which enforces it, and the reporting that says whether
+a section hit it — and because it can then be retuned with an `update` and no
+redeploy. `index.ts` reads it once at the top of `Deno.serve` and puts it in the
+response as `cap`, so a run's own summary says what it ran with.
+
+The coercion is `lib/collectCap.ts`, on the runtime-agnostic side, and it is not
+ceremony: `Number(row?.value ?? 150)` — the obvious one-liner — turns a row whose
+`value` is null into a cap of **0**, a run that scrapes nothing and reports six
+successful categories. A default exists so a failed read cannot silently collect
+nothing, which means it has to cover every shape a failed read takes.
 
 **The limit that kills this function is CPU time, not the wall clock, and every
 number in this section used to be written against the wrong one.** The platform
 allows roughly **3 seconds of accumulated CPU per worker** and says so in the
 logs — `CPU Time exceeded` — before returning 546 WORKER_RESOURCE_LIMIT with no
 body at all. A 45s run has died where a 64.6s run passed.
+
+**"Per worker" is load-bearing and had been read as "per request" every time it
+mattered.** The budget is *cumulative across the requests one worker serves*, so
+the same call can pass and fail with nothing about the call changing. Measured on
+2026-08-04: a cap-441 scrape-and-analyse of 2,630 headlines returns 200 on a
+fresh worker and 546 as a later call on a warm one, and the analyser probe's
+ladder from earlier the same day — `reps=1` 200, then `reps=2,3,5,7,10,40` all
+546, in call order rather than in order of work — is the same artefact rather
+than a size limit. **The practical consequence is that a 546 is evidence about
+the worker, not about the run**, and that a collect-now button is exactly the
+shape that trips it.
 
 Analysis is not what spends it. Measured on the platform: **0.88ms a headline,
 900 of them for 0.8s, heap flat at 9MB.** What spent it was the round trips
@@ -1071,7 +1093,13 @@ able to go away.
 
 A killed run returns no body, so the `summary` this file calls `index.ts`'s only
 check is exactly what is missing when it is most needed. The function logs
-`CHK <category> scraped/processed` lines for that case.
+`CHK <category> scraped/processed` lines for that case — **but those are
+dashboard-only.** The Management API's log endpoint answers 403 for
+`function_logs`, and the MCP `get_logs` tool returns the request-level rows
+(`execution_time_ms`, status) without the console output, so nothing an agent can
+reach shows a `CHK` line. That is why the two phase timings are in the response
+body as well: `(scrape Xms, process Yms)` per category is the only machine-
+readable statement of where a run's time went.
 
 **It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
 pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
@@ -1085,13 +1113,53 @@ hours after the 07:00 cron found 404 new headlines inside the same
 150-per-section window — the sections churn all day. The day went from 900
 headlines to 2,197. There is no external call limit any more.
 
-**Raising `MAX_HEADLINES_PER_CATEGORY` deserves re-testing rather than the
-refusal that used to stand here.** The 300-over-12-pages failure was read as a
-wall near 63s; it was CPU, spent on ETRI-paced round trips that no longer exist.
-Deeper paging may now fit, and nobody has tried.
+**Raising the cap was re-tested, and CPU is not what stops it.** The
+300-over-12-pages failure was diagnosed twice and wrong twice — first as a wall
+near 63s, then as this function's own CPU cost. A throwaway probe that scrapes
+and analyses exactly as `index.ts` does and writes nothing, run on 2026-08-04,
+gives the **all-new** case a live run cannot be made to take on demand:
 
-That change is what settled the `min_headlines` question — see the round-seven
-section of `scripts/analysis/README.md`. The short version: on a thin day the
+| cap | headlines | analysis | wall | result |
+| --- | --- | --- | --- | --- |
+| 150 | 900 | 816ms | 2.0s | 200 |
+| 300 | 1,800 | 1,481ms | 4.2s | 200 |
+| 441 | 2,630 | 2,082ms | 5.3s | 200 |
+
+**What stops it is the date stamp.** `collected_date` is the day of collection
+and a deeper page is an older article, so paging past midnight files yesterday's
+news under today. Measured at 20:10 KST over 441 scraped per section: the fast
+sections never leave today — society reaches only 3.8 hours back at 441 — while
+culture and `it` cross into 2026-08-03 at about rank 290, and one cap-300 run
+stored 7 such rows, all in `it`.
+
+Two things keep that small, and both have to be read before the 7 is used as an
+argument either way. `UNIQUE (category_id, link)` is **global rather than
+per-date**, so only an article that fell in a coverage hole can be re-stamped at
+all. And **the effect is already here at 150**: the 02:29 and 07:00 runs of
+2026-08-04 stored 89 culture, 64 `it` and 43 world articles published on 08-03,
+because at 02:29 the day holds 2.5 hours of news and a 150-headline window has to
+reach past midnight to fill itself. So a raise makes an existing property of the
+design larger; it does not introduce one. **Deciding what `collected_date` should
+mean comes before deciding the cap**, and `extractListCursor` already returns the
+YYYYMMDDHHMMSS stamp a day-boundary stop would need.
+
+**The cap does bind, and what is behind it is today's news.** society stored
+exactly 150 on the 11:00, 15:00 and 19:00 runs of 2026-08-04 and publishes about
+75 headlines an hour, so a 150 window covers under half of a 4-hour cron gap and
+the remainder is lost for good — of the 140 society links sitting at ranks
+301-441 at 20:10, **139 are absent from the archive** and every one is from that
+day, a permanent hole between the 15:00 and 19:00 runs. At 20:10 a cap of 300
+would have taken
+478 new links against 150's 278. The gain is concentrated: politics +50, economy
++98, society +36 against culture +1, world +4, `it` +11, so **deeper paging
+widens the section gap rather than closing it**, which is Task 7's finding
+reproduced from the collector's side.
+
+The cap therefore **stays at 150**, and the value being in the database is what
+makes that a decision rather than a deployment.
+
+The move to six runs a day is what settled the `min_headlines` question — see the
+round-seven section of `scripts/analysis/README.md`. The short version: on a thin day the
 word at rank 70 has three headlines, so a floor is the screen; on a fat day it
 already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion floor
 is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a safety
