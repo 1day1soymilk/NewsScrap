@@ -1,9 +1,11 @@
 -- 0025: df_balanced — what the count would have been under equal collection.
 --
--- 2026-08-04 collected society 453 and it 309, and that gap is not a cap doing
--- its job: no section reached the 150-per-run window on every run, so paging
--- deeper returns articles already held. The sections publish at different rates,
--- so **balance cannot be had at collection time** and is taken here instead.
+-- 2026-08-04 collected society 582 and it 241, and that gap is not a cap doing
+-- its job. Counted per run that day (rows inserted, by KST hour): society took
+-- the whole 150-headline window on both the 11:00 and the 15:00 run, while it
+-- never passed 98 on any of the five. The thin section is not being truncated —
+-- it publishes less — so **paging deeper would widen the gap rather than close
+-- it**. Balance cannot be had at collection time, and is taken here instead.
 --
 --   df_balanced(α) = Σ_c  df_c × (N̄ / N_c)^α
 --
@@ -121,7 +123,16 @@ cross join cat_mean cm
 cross join alpha al;
 $fn$;
 
-grant execute on function public.category_balance_factors(date, numeric) to anon;
+-- Both roles, explicitly, and this differs from 0024 on purpose. That file
+-- granted its six to `anon` alone and defended it on the ground that a grant
+-- there documents intent rather than confers access — which is true, because
+-- Postgres leaves `=X` for PUBLIC on a newly created function. But both
+-- functions in this file sit on a SECURITY INVOKER chain that `keyword_graph`
+-- reaches, so it is the *calling* role's privilege that is checked, and a chain
+-- whose last link works only through the PUBLIC default is a chain nobody has
+-- actually granted. Naming both roles costs nothing and cannot narrow anything.
+-- 0024's six are left as they are; this is not a re-litigation of them.
+grant execute on function public.category_balance_factors(date, numeric) to anon, authenticated;
 
 -- The return type gains a column and the signature gains a parameter, so the
 -- function has to be dropped rather than replaced. Postgres does not track the
@@ -282,7 +293,9 @@ left join head_pos on head_pos.word = df.word
 left join proper on proper.word = df.word;
 $function$;
 
-grant execute on function public.keyword_signals(date, numeric) to anon;
+-- The drop above discarded 0017's grant, so this re-issues it — to both roles,
+-- for the reason given over category_balance_factors. Same chain, same argument.
+grant execute on function public.keyword_signals(date, numeric) to anon, authenticated;
 
 -- The ranking key has to ride on the candidate row, because keyword_graph_rank
 -- sees nothing but the array — that is the price migration 0024 accepted for
