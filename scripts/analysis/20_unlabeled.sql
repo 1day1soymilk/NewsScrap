@@ -8,7 +8,8 @@
 -- Taking only the extreme configurations is not enough, which is why this reads
 -- the same table the harness does, active rows and all — the two must agree on
 -- which configurations are in play or this list is short exactly where it
--- matters. A tighter sieve removes words from the top 70
+-- matters. A tighter sieve removes words from the render cap's cutoff — now a
+-- column, `render_cap`, rather than the literal 70 this file used to carry —
 -- and pulls deeper-ranked ones up to fill the gap, so each configuration puts a
 -- slightly different set on screen — and those promoted words are precisely the
 -- ones rule 4 exists to catch.
@@ -26,7 +27,6 @@
 
 with
 params as (select d from analysis.eval_days),
-top_n (n) as (values (70)),
 
 sig as (
   select p.d, s.*
@@ -59,10 +59,30 @@ passed as (
       or s.neighbors_per_doc <= c.max_npd
       or (c.use_dict and ov.mode = 'allow')
     )
+    -- Sieve 6, as a cut inside the harness's own copy. Unlike keyword_graph this
+    -- is a single pass rather than a fixed point: the harness ranks a fixed
+    -- candidate list, so there is no promotion to destabilise. Where the two
+    -- disagree, keyword_graph is right and 30_word_scores.sql's `chk` says so.
+    and (
+      not c.place_gate
+      or ov.mode is distinct from 'place'
+      or exists (
+        select 1 from analysis.day_edges de
+        where de.d = s.d and de.npmi >= 0.3
+          and ((de.a = s.word and de.b_is_place_false)
+            or (de.b = s.word and de.a_is_place_false))
+      )
+    )
 ),
 
+-- The render cap is now a column rather than the literal that used to sit
+-- here, so 20_unlabeled.sql cannot silently score a different screen than
+-- 10_sieve_eval.sql does — see that file and 24_cap_and_place_configs.sql.
 shown as (
-  select p.* from passed p cross join top_n where p.rank <= top_n.n
+  select p.*
+  from passed p
+  join analysis.sieve_configs c on c.ord = p.ord
+  where p.rank <= c.render_cap
 )
 
 select
