@@ -45,17 +45,20 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // the ladder in the 2026-08-04 analyser probe (reps=1 → 200, reps=2,3,5,7,10,40
 // → 546, in that order and not in order of work) is the same artefact: once a
 // worker's budget is spent every later request in it dies whatever its size.
-// A cron four hours apart never shares a worker. **Rapid repeated invocation is
-// the thing that trips this, so a collect-now button has to expect a 546 that
-// says nothing about the run it killed.**
+// By the same logic a cron four hours apart should never share a worker — but
+// that is reasoning about the schedule, not a measurement: nothing here
+// observed how long a worker survives, only that rapid repeated invocation
+// trips this. **A collect-now button has to expect a 546 that says nothing
+// about the run it killed.**
 //
 // **What stops a raise is the date stamp, not the budget.** `collected_date` is
 // the day of collection and a deeper page is an older article, so paging past
 // the day boundary files yesterday's news under today. Measured at 20:10 KST on
-// 2026-08-04, per section, over 441 scraped: the fast sections never leave
-// today — society reaches only 3.8 hours back at 441 — while culture and it
-// cross into 2026-08-03 at about rank 290. Raising the cap to 300 for one run
-// stored 7 such rows, all in it.
+// 2026-08-04, per section, at rank #400 — the deepest depth the measurement's
+// table covers: the fast sections never leave today, and society reaches only
+// 4 hours back at that depth — while culture and it cross into 2026-08-03 at
+// about rank 290 (ranks 278-296 for the 7 rows a cap-300 run actually stored,
+// all in it).
 //
 // Two things keep that small and both are worth knowing before anyone reads the
 // 7 as an argument either way. `UNIQUE (category_id, link)` is global rather
@@ -110,6 +113,14 @@ const MAX_LIST_PAGES = 12
 //    what the early runs collect today, at 150, and so has to be measured
 //    against the sieve rather than assumed. Until that is decided the cap is a
 //    number in `scoring_weights`, one `update` away, with no redeploy.
+//
+//    **If the cap is ever raised, the check to run is the pre-today count on
+//    the 03:00 and 07:00 runs, not on an evening one.** The whole of the
+//    20:10–21:10 KST measurement above is the regime least likely to reach past
+//    midnight — the fast sections already had most of a day's news between them
+//    and the day boundary. The 03:00 and 07:00 runs are the opposite regime, the
+//    one where a deeper page reaches furthest into yesterday, and they were not
+//    measured because they cannot be provoked on demand.
 // 2. **A collect-now button** in the frontend, so a collection can be taken on
 //    demand instead of waiting for the next of six crons. Note the worker budget
 //    is cumulative: pressing it repeatedly is exactly the shape that returns 546
@@ -357,15 +368,37 @@ Deno.serve(async () => {
   // depth — reading it per category would let a mid-run edit split the run.
   // A failed read is a fallback rather than an abort: see lib/collectCap.ts for
   // why the coercion is a function and not `Number(value ?? 150)`.
-  const { data: capRow, error: capError } = await supabase
-    .from('scoring_weights')
-    .select('value')
-    .eq('key', 'collect_cap')
-    .maybeSingle()
-  if (capError) console.error('collect_cap read failed, using the default:', capError)
+  //
+  // The request itself is also wrapped, not just its `error` field. postgrest-js
+  // resolves an ordinary failed fetch into `{ data: null, error }` rather than
+  // rejecting, which the `capError` check below already covers — but a thrown
+  // rejection (a network error the client itself raises, a client bug) is not
+  // that shape, and an unguarded `await` would abort the handler before the
+  // category loop instead of falling back, which is exactly the "a failed read
+  // silently collects nothing" case the default exists to prevent.
+  let capRow: { value: unknown } | null = null
+  try {
+    const { data, error: capError } = await supabase
+      .from('scoring_weights')
+      .select('value')
+      .eq('key', 'collect_cap')
+      .maybeSingle()
+    if (capError) console.error('collect_cap read failed, using the default:', capError)
+    else capRow = data
+  } catch (capThrow) {
+    console.error('collect_cap read threw, using the default:', capThrow)
+  }
   const headlineCap = resolveCollectCap(capRow?.value)
   if (headlineCap === DEFAULT_COLLECT_CAP && capRow?.value == null) {
     console.error(`CHK collect_cap unreadable — falling back to ${DEFAULT_COLLECT_CAP}`)
+  } else if (capRow?.value != null && headlineCap !== Number(capRow.value)) {
+    // The row exists and holds something, but not a shape resolveCollectCap can
+    // use — 'many', 0, a negative number, an object. The branch above only ever
+    // caught a missing row or a null value, so this is the only signal an
+    // operator gets when an `update` did not take the shape it needed to.
+    console.error(
+      `CHK collect_cap unusable (${JSON.stringify(capRow.value)}) — falling back to ${headlineCap}`,
+    )
   }
 
   // Each category gets its own slice of the budget rather than racing for one

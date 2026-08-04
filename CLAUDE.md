@@ -1127,10 +1127,19 @@ gives the **all-new** case a live run cannot be made to take on demand:
 
 **What stops it is the date stamp.** `collected_date` is the day of collection
 and a deeper page is an older article, so paging past midnight files yesterday's
-news under today. Measured at 20:10 KST over 441 scraped per section: the fast
-sections never leave today — society reaches only 3.8 hours back at 441 — while
-culture and `it` cross into 2026-08-03 at about rank 290, and one cap-300 run
-stored 7 such rows, all in `it`.
+news under today. Measured at 20:10 KST at rank #400 — the deepest depth the
+measurement's table covers: the fast sections never leave today — society
+reaches only 4 hours back at that depth — while culture and `it` cross into
+2026-08-03 at about rank 290, and one cap-300 run stored 7 such rows, all in
+`it`, at ranks 278-296.
+
+**That measurement covers one time of day, and raising the cap needs the
+opposite one.** The whole of it is 20:10–21:10 KST, the regime least likely to
+reach past midnight — the fast sections already had most of a day's news ahead
+of the boundary. If the cap is ever raised, the check to run is the pre-today
+count on the 03:00 and 07:00 runs, not on an evening one; those runs are the
+regime where a deeper page reaches furthest into yesterday, and they were not
+measured because they cannot be provoked on demand.
 
 Two things keep that small, and both have to be read before the 7 is used as an
 argument either way. `UNIQUE (category_id, link)` is **global rather than
