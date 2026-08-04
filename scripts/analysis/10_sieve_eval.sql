@@ -21,10 +21,21 @@
 with
 params as (select d from analysis.eval_days),
 
+-- The α values in play, not the configurations. keyword_signals costs ~950ms a
+-- day and α is a parameter on it (migration 0025), so putting the column
+-- straight into passed0's lateral would evaluate it once per (day,
+-- configuration) — ten calls a day where five distinct α values are being
+-- asked about. Every signal except df_balanced is α-independent, so the
+-- configurations join onto this instead and each α is paid for once.
+alphas as (
+  select distinct balance_alpha as a from analysis.sieve_configs where active
+),
+
 sig as (
-  select p.d, s.*
+  select p.d, a.a as balance_alpha, s.*
   from params p
-  cross join lateral keyword_signals(p.d) s
+  cross join alphas a
+  cross join lateral keyword_signals(p.d, a.a) s
 ),
 
 -- Selection is by frequency, and `demote_head_pos` is the one thing that has
@@ -32,6 +43,15 @@ sig as (
 -- it is a knob here rather than a change. With it at its default (9.9) this
 -- expression is exactly `order by s.df desc, s.word` and every earlier round's
 -- numbers reproduce. Ties break on the word so a rerun gives the same answer.
+--
+-- Round fourteen adds `df_balanced` ahead of `df`, matching
+-- keyword_graph_rank's `count_balanced desc, count desc, word` exactly. At
+-- α = 0 every balance factor is numeric 1, so df_balanced *is* df and the two
+-- keys are the same key twice — which is why configurations 200-211 reproduce
+-- their pre-α numbers to the digit rather than merely closely. Note the
+-- harness compares df_balanced (day-wide) where the RPC compares
+-- count_balanced (scoped); on the all-categories view this file measures, the
+-- scope is the whole day and the two are the same number.
 --
 -- Sieve 6 is deliberately not applied here. It judges a place against the set
 -- that is actually drawn, and "drawn" cannot be known until sieves 1-5 have
@@ -41,15 +61,18 @@ sig as (
 -- do not have to rejoin sieve_configs or keyword_signals.
 passed0 as (
   select
-    c.ord, c.name, s.d, s.word, s.df, s.head_pos, c.demote_head_pos,
-    c.render_cap, c.place_gate,
+    c.ord, c.name, s.d, s.word, s.df, s.df_balanced, s.head_pos,
+    c.demote_head_pos, c.render_cap, c.place_gate,
     row_number() over (partition by c.ord, s.d
       -- 강등: 제목 뒤에 앉는 단어를 자르지 않고 상한 아래로 밀어낸다.
       -- 자르면 카테고리 탭에서 24셀 중 8셀을 지고 한 셀도 못 이긴다 —
       -- 탭에는 상한이 걸리지 않아 잘린 자리를 메울 단어가 없기 때문이다.
-      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank0
+      order by (s.head_pos > c.demote_head_pos) asc,
+               s.df_balanced desc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
-  cross join sig s
+  -- The α slice this configuration asked for, rather than a cross join: sig
+  -- holds one row per (day, α, word) and a configuration reads exactly one α.
+  join sig s on s.balance_alpha = c.balance_alpha
   left join word_overrides ov on ov.word = s.word
   where c.active
     and s.df >= c.min_headlines
@@ -133,7 +156,8 @@ passed as (
   select
     p0.ord, p0.name, p0.d, p0.word, p0.df,
     row_number() over (partition by p0.ord, p0.d
-      order by (p0.head_pos > p0.demote_head_pos) asc, p0.df desc, p0.word) as rank
+      order by (p0.head_pos > p0.demote_head_pos) asc,
+               p0.df_balanced desc, p0.df desc, p0.word) as rank
   from passed0 p0
   where not exists (
     select 1 from gate_fail gf
@@ -154,12 +178,32 @@ shown as (
 -- Recall denominator: every labelled-good word the day could plausibly have
 -- shown. Held at df >= 3 rather than at each configuration's own min_headlines,
 -- so the denominator stays fixed and the configurations stay comparable.
+--
+-- α must not reach it either, and does not: this reads `df` and the word, both
+-- of which are α-independent — the exponent only ever produces `df_balanced`,
+-- a second column beside `df` rather than a replacement for it. So the plain
+-- one-argument call is right here whatever scoring_weights holds.
+--
+-- **It deliberately does not read `sig`, and that is a plan decision rather
+-- than a stylistic one.** Reading a single α slice out of sig is the same four
+-- numbers and was written that way first; it also gives sig a second consumer,
+-- which forces the CTE to materialise, and neither analysis.eval_days nor a
+-- set-returning function carries row statistics — the planner estimated sig at
+-- 5,080,000 rows (4 days read as 1,270, keyword_signals as its 1,000-row
+-- default, times the α list), collapsed every filter above it to 1, and joined
+-- pool to metrics with an unmaterialised nested loop that re-ran the whole
+-- aggregate per metrics row. 24s became a statement timeout at 120s. Same
+-- class of failure 24_cap_and_place_configs.sql's header records, and the same
+-- cause: a CTE the planner has no counts for. The cost of the fix is four
+-- extra keyword_signals calls a run, one per day, which is what the α sweep
+-- pays to keep the recall denominator fixed.
 pool as (
-  select s.d, count(*)::int as good_pool
-  from sig s
+  select p.d, count(*)::int as good_pool
+  from params p
+  cross join lateral keyword_signals(p.d) s
   join analysis.word_labels l on l.word = s.word
   where l.label = 'good' and s.df >= 3
-  group by s.d
+  group by p.d
 ),
 
 metrics as (

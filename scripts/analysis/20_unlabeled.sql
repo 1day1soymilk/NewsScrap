@@ -28,10 +28,21 @@
 with
 params as (select d from analysis.eval_days),
 
+-- The α values in play, not the configurations — see 10_sieve_eval.sql for why
+-- keyword_signals is evaluated once per (day, α) rather than once per (day,
+-- configuration). This file has to make the same choice for the same reason it
+-- has to make every other choice the harness makes: a worklist that ranks a
+-- different screen than the harness scores is short exactly where rule 4 needs
+-- it to be long.
+alphas as (
+  select distinct balance_alpha as a from analysis.sieve_configs where active
+),
+
 sig as (
-  select p.d, s.*
+  select p.d, a.a as balance_alpha, s.*
   from params p
-  cross join lateral keyword_signals(p.d) s
+  cross join alphas a
+  cross join lateral keyword_signals(p.d, a.a) s
 ),
 
 -- Sieve 6 is deliberately not applied here. It judges a place against the set
@@ -42,15 +53,21 @@ sig as (
 -- alongside the signal columns this file reports (spec, standalone, npd).
 passed0 as (
   select
-    c.ord, s.d, s.word, s.df, s.spec, s.standalone, s.neighbors_per_doc,
+    c.ord, s.d, s.word, s.df, s.df_balanced, s.spec, s.standalone,
+    s.neighbors_per_doc,
     s.head_pos, c.demote_head_pos, c.render_cap, c.place_gate,
     row_number() over (partition by c.ord, s.d
       -- 강등: 제목 뒤에 앉는 단어를 자르지 않고 상한 아래로 밀어낸다.
       -- 자르면 카테고리 탭에서 24셀 중 8셀을 지고 한 셀도 못 이긴다 —
       -- 탭에는 상한이 걸리지 않아 잘린 자리를 메울 단어가 없기 때문이다.
-      order by (s.head_pos > c.demote_head_pos) asc, s.df desc, s.word) as rank0
+      --
+      -- df_balanced ahead of df is round fourteen's balance exponent, and at
+      -- α = 0 it is df, so the α-0 configurations rank exactly as before.
+      order by (s.head_pos > c.demote_head_pos) asc,
+               s.df_balanced desc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
-  cross join sig s
+  -- The α slice this configuration asked for, rather than a cross join.
+  join sig s on s.balance_alpha = c.balance_alpha
   left join word_overrides ov on ov.word = s.word
   where c.active
     and s.df >= c.min_headlines
@@ -116,7 +133,8 @@ passed as (
   select
     p0.ord, p0.d, p0.word, p0.df, p0.spec, p0.standalone, p0.neighbors_per_doc,
     row_number() over (partition by p0.ord, p0.d
-      order by (p0.head_pos > p0.demote_head_pos) asc, p0.df desc, p0.word) as rank
+      order by (p0.head_pos > p0.demote_head_pos) asc,
+               p0.df_balanced desc, p0.df desc, p0.word) as rank
   from passed0 p0
   where not exists (
     select 1 from gate_fail gf

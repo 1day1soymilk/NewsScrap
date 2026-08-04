@@ -10,9 +10,18 @@
 -- 08-03 260, 08-04 130. So 08-02 cannot fill 70 places and the cap does nothing
 -- there, while 08-03 has 260 to choose 130 from. The sweep has to be read per
 -- day rather than on a mean.
+--
+-- `balance_alpha` joins them as the round's third dimension (migration 0025).
+-- It is the exponent in df_balanced(α) = Σ_c df_c × (N̄/N_c)^α, and 0 is the
+-- identity, so every row added above enters the α sweep as its own control
+-- without being restated. The formula itself is **not** copied into the
+-- harness: 10_sieve_eval.sql passes this column to keyword_signals(d, α) and
+-- reads the df_balanced that comes back, the same way it refuses to
+-- reimplement the other five signals.
 alter table analysis.sieve_configs
   add column if not exists render_cap numeric not null default 70,
-  add column if not exists place_gate boolean not null default false;
+  add column if not exists place_gate boolean not null default false,
+  add column if not exists balance_alpha numeric not null default 0;
 
 -- The harness's own copy of "does this word have a line to something that is
 -- not a place" — the same question migration 0024's fixed-point loop asks
@@ -89,25 +98,45 @@ drop table t24_doc, t24_pairs, t24_df, t24_corpus;
 -- (min_word_len 4, min_standalone .50, min_proper .50, demote_head_pos .60 —
 -- round thirteen's sieve), which is the row this round's cap and place-gate
 -- sweeps are actually measured against.
+-- 220/221/222/223 sweep the balance exponent alone — cap 70, gate off, every
+-- other threshold identical to 200 — so α is read against the row it would
+-- replace and nothing else moves underneath it. 200 is α 0 and is therefore
+-- this arm's control as well as the cap arm's; a fifth row for it would be the
+-- same configuration twice.
+--
+-- The named sweep is 0 / .25 / .50 / .75 / 1.00. Rule 2 wants the optimum
+-- interior, so if 1.00 wins this list has to grow upward before the answer
+-- counts — α is an exponent, not a probability, and nothing caps it at 1.
+-- Extending it costs a re-run of 20_unlabeled.sql, because a new α reorders
+-- the ranking and can promote a word that has never been on screen.
 insert into analysis.sieve_configs
   (ord, name, min_headlines, min_standalone, min_word_len, min_spec, max_npd,
-   demote_head_pos, min_proper, use_dict, render_cap, place_gate)
+   demote_head_pos, min_proper, use_dict, render_cap, place_gate, balance_alpha)
 values
-  (200, 'r14: SHIPPED (cap 70)',      3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false),
-  (201, 'r14: cap 85',                3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  85, false),
-  (202, 'r14: cap 100',               3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 100, false),
-  (203, 'r14: cap 130',               3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 130, false),
-  (210, 'r14: place gate, cap 70',    3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, true),
-  (211, 'r14: place gate, cap 100',   3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 100, true)
+  (200, 'r14: SHIPPED (cap 70)',      3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false, 0.00),
+  (201, 'r14: cap 85',                3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  85, false, 0.00),
+  (202, 'r14: cap 100',               3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 100, false, 0.00),
+  (203, 'r14: cap 130',               3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 130, false, 0.00),
+  (210, 'r14: place gate, cap 70',    3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, true,  0.00),
+  (211, 'r14: place gate, cap 100',   3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 100, true,  0.00),
+  (220, 'r14: alpha .25',             3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false, 0.25),
+  (221, 'r14: alpha .50',             3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false, 0.50),
+  (222, 'r14: alpha .75',             3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false, 0.75),
+  (223, 'r14: alpha 1.00',            3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true,  70, false, 1.00)
 on conflict (ord) do update set
   name = excluded.name, min_headlines = excluded.min_headlines,
   min_standalone = excluded.min_standalone, min_word_len = excluded.min_word_len,
   min_spec = excluded.min_spec, max_npd = excluded.max_npd,
   demote_head_pos = excluded.demote_head_pos, min_proper = excluded.min_proper,
   use_dict = excluded.use_dict, render_cap = excluded.render_cap,
-  place_gate = excluded.place_gate;
+  place_gate = excluded.place_gate, balance_alpha = excluded.balance_alpha;
 
-update analysis.sieve_configs set active = (ord in (200, 201, 202, 203, 210, 211));
+update analysis.sieve_configs
+  set active = (ord in (200, 201, 202, 203, 210, 211, 220, 221, 222, 223));
 
-select ord, name, render_cap, place_gate from analysis.sieve_configs
-where active order by ord;
+-- The distinct α count is what the harness pays for, not the configuration
+-- count: 10_sieve_eval.sql evaluates keyword_signals once per (day, α) and
+-- joins the configurations onto that, so ten rows over five α values cost five
+-- calls a day rather than ten.
+select ord, name, render_cap, place_gate, balance_alpha
+from analysis.sieve_configs where active order by ord;

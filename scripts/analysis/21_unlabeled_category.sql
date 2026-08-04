@@ -15,6 +15,14 @@
 -- 20_unlabeled.sql mirrors the harness: a variant present in one and missing
 -- from the other reopens the blind spot rule 4 exists to close. The days are
 -- not duplicated — both read analysis.eval_days (12_eval_days.sql).
+--
+-- Round fourteen's balance exponent α is absent here because it is absent from
+-- 11_category_eval.sql — that file's header records why, and the short version
+-- is that a tab's ranking is the identity at every α (measured: all 30 tab
+-- hashes byte-identical with α flipped to 1). An α variant here would draw the
+-- same words as row 3 and put nothing new in front of anyone to label. The
+-- all-categories worklist, 20_unlabeled.sql, does carry α and must be re-run
+-- whenever an α value is added to analysis.sieve_configs.
 
 with
 params as (select d from analysis.eval_days),

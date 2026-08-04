@@ -40,6 +40,24 @@
 -- Signals come from keyword_signals() for the same reason. The days come from
 -- analysis.eval_days (12_eval_days.sql), so this file and its worklist
 -- 21_unlabeled_category.sql cannot drift apart on which days they cover.
+--
+-- **The category-balance exponent α is deliberately absent, and this file is
+-- the control that says α did not leak into the category path.** Round
+-- fourteen sweeps α in 10_sieve_eval.sql (migration 0025); it is not swept
+-- here, because inside one section every drawn row carries the same balance
+-- factor, so count_balanced is count times a constant and the order cannot
+-- move at any α. That is not only the argument — it is measured: with α
+-- flipped to 1 on the live database, all 30 category-tab keyword_graph hashes
+-- (five collected days × six sections) stayed byte-identical and only the five
+-- all-categories hashes moved. So α variants here would be five more rows
+-- reproducing row 3 exactly, at the price of a keyword_signals call each and
+-- of a worklist run under rule 4.
+--
+-- What this file is for in this round is the other direction: it must still
+-- mean 78.58 over the 24 cells. A move would say the balance had been applied
+-- to a scoped count somewhere it should not have been, or a day-wide one where
+-- the tab's ranking reads it — migration 0025's header states which is which.
+-- 21_unlabeled_category.sql carries no α for the same reason.
 
 with
 params as (select d from analysis.eval_days),
