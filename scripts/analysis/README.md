@@ -244,6 +244,42 @@ word invalidates every threshold tuned when that kind could not appear. Round
 nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
 canvas.
 
+## Open lead — `min_word_len` 4 (measured day-wide, **not** finished)
+
+Left here rather than shipped, because rule 4 is not satisfied on the tabs.
+
+Day-wide, four days, `unlabeled` 0, `story_rank` 1 throughout:
+
+| min_word_len | mean F1 | mean precision | mean shown |
+| --- | --- | --- | --- |
+| 2 | 38.38 | 56.00 | 70.0 (and `unlabeled` 7 — row invalid) |
+| **3 (ships)** | 62.43 | 90.35 | 70.0 |
+| 4 | **64.12** | **93.53** | 69.8 |
+| 5 | 64.00 | 97.00 | 65.8 |
+
+**The reason it is plausible is mechanical rather than lucky.** The length bar
+was doing two jobs — keeping fragments out *and* keeping names in — and the
+proper-noun rescue took the second job away from it. Freed of that, it can rise:
+three-character common nouns were what it had always been too low to catch. If
+this holds it is the same finding as rounds ten to twelve, arriving at the clause
+that started them.
+
+5 reaches 97% precision and is rejected on `shown`: it cannot fill the canvas
+(65.8 of 70), which is round seven's cost exactly.
+
+**What is missing.** On the category tabs `min_word_len` 4 reads mean F1 78.46
+against 71.80, but `21_unlabeled_category.sql` returns **25 words** there and
+`11_category_eval.sql` prints `unlab` 30 — so by rule 1 that number is
+meaningless and must not be quoted. Worse, it should not be possible: raising a
+length bar can only remove words, so a tightening that *adds* unlabelled ones
+means the worklist and the harness disagree about something. **Find out which
+before labelling anything** — a worklist that does not cover what the harness
+scores is the exact failure `02_sieve_configs.sql`'s header describes, and
+labelling first would paper over it.
+
+Also unswept alongside it: `min_headlines` 4 and 5 both lose (60.68 and 57.07
+against 62.43), so round seven's conclusion survives all of this intact.
+
 ## Round twelve — the dictionary, re-derived against the new screen
 
 36 exclusions (migration `0021`). The largest of the four post-`0018` changes and
