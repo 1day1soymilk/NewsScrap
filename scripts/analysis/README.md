@@ -244,41 +244,47 @@ word invalidates every threshold tuned when that kind could not appear. Round
 nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
 canvas.
 
-## Open lead — `min_word_len` 4 (measured day-wide, **not** finished)
+## Round thirteen — `min_word_len` 4, and a harness that was scoring the wrong screen
 
-Left here rather than shipped, because rule 4 is not satisfied on the tabs.
+**The lead closed, and closing it turned up a measurement bug worth more than the
+threshold.**
 
-Day-wide, four days, `unlabeled` 0, `story_rank` 1 throughout:
+The length bar was doing two jobs: keeping fragments out and keeping names in.
+Round nine's rescue took the second away, so the bar can rise and catch the
+three-character common nouns it had always been set too low to reach.
 
-| min_word_len | mean F1 | mean precision | mean shown |
-| --- | --- | --- | --- |
-| 2 | 38.38 | 56.00 | 70.0 (and `unlabeled` 7 — row invalid) |
-| **3 (ships)** | 62.43 | 90.35 | 70.0 |
-| 4 | **64.12** | **93.53** | 69.8 |
-| 5 | 64.00 | 97.00 | 65.8 |
+| min_word_len | day-wide F1 | precision | shown | category F1 |
+| --- | --- | --- | --- | --- |
+| 3 (was) | 62.03 | 90.35 | 70.0 | 73.21 |
+| **4** | **63.70** | **93.53** | 69.8 | **78.58** |
+| 5 | 63.58 | 97.00 | 65.8 | 77.80 |
 
-**The reason it is plausible is mechanical rather than lucky.** The length bar
-was doing two jobs — keeping fragments out *and* keeping names in — and the
-proper-noun rescue took the second job away from it. Freed of that, it can rise:
-three-character common nouns were what it had always been too low to catch. If
-this holds it is the same finding as rounds ten to twelve, arriving at the clause
-that started them.
+One label run, both worklists empty, `story_rank` 1 throughout. 5 reaches 97%
+precision and is rejected on `shown` — 65.8 of 70 places is less news on screen,
+and the recall denominator is fixed so F1 already prices it.
 
-5 reaches 97% precision and is rejected on `shown`: it cannot fill the canvas
-(65.8 of 70), which is round seven's cost exactly.
+**The bug.** At length 4 the tabs first reported `unlab` 30, which should be
+impossible: raising a length bar can only remove words. It is possible, and the
+reason is that **the render cap binds on category tabs** — 2026-08-03 puts 95 to
+163 qualifying words on each of its six tabs against a cap of 70, and
+2026-08-01's society tab 77. Seven of the 24 cells bind. So removing a word
+promotes a deeper one, exactly as day-wide.
 
-**What is missing.** On the category tabs `min_word_len` 4 reads mean F1 78.46
-against 71.80, but `21_unlabeled_category.sql` returns **25 words** there and
-`11_category_eval.sql` prints `unlab` 30 — so by rule 1 that number is
-meaningless and must not be quoted. Worse, it should not be possible: raising a
-length bar can only remove words, so a tightening that *adds* unlabelled ones
-means the worklist and the harness disagree about something. **Find out which
-before labelling anything** — a worklist that does not cover what the harness
-scores is the exact failure `02_sieve_configs.sql`'s header describes, and
-labelling first would paper over it.
+That made a second disagreement visible. `11_category_eval.sql` and
+`21_unlabeled_category.sql` ranked by `df desc, word`, while `keyword_graph`
+ranks by the head_pos demotion first. Harmless while a tab draws everything that
+qualifies; on the seven binding cells the harness was scoring a screen the app
+does not draw. Both files now model the demotion, and the shipped tab number
+moved 71.80 → 73.21 — **a measurement error, not an improvement.**
 
-Also unswept alongside it: `min_headlines` 4 and 5 both lose (60.68 and 57.07
-against 62.43), so round seven's conclusion survives all of this intact.
+**And it undercuts a standing claim.** head_pos ships as a demotion rather than a
+cut because "a tab draws at most 46 words, the cap never binds, so a cut there is
+loss with nothing to fill the hole". On a fat day the cap binds, so a cut would
+substitute there too. The demotion still wins; its stated reason is now only
+partly right, and the question deserves re-measuring on fat days.
+
+Labels: `22_labels_after_demotion_fix.sql` (26, in two passes — the demotion fix
+promoted 14 and the length bar another 12).
 
 ## Round twelve — the dictionary, re-derived against the new screen
 

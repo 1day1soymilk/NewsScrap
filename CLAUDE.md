@@ -302,8 +302,33 @@ time and should not be rediscovered:
   and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
   proper nouns.
 
-**Where the four changes leave the sieve**: day-wide mean F1 **49.48 → 62.43**
-and mean precision **71.07 → 90.35**; the 24 category cells **55.07 → 71.80**.
+- **`min_word_len` rose 3 → 4** (migration `0022`), which is where the sequence
+  closes: the rescue was built to pay the length clause's price and ended up
+  changing what the clause should charge. **The bar was doing two jobs** — keeping
+  fragments out and keeping names in — and the rescue took the second away, so it
+  can now catch the three-character common nouns it had always been set too low
+  to reach. Day-wide 62.03 → **63.70** and precision 90.35 → **93.53**; tabs
+  73.21 → **78.58**. 5 reaches 97% precision and is **rejected on `shown`**: at
+  65.8 of 70 places it cannot fill the canvas, which is round seven's cost.
+
+**The render cap binds on category tabs after all, and the harness had been
+scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
+`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
+disagreement that is invisible only while a tab draws everything that qualifies.
+**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a
+cap of 70**, and 2026-08-01's society tab 77; seven of the 24 cells bind. Fixed,
+and it moved the shipped tab number from 71.80 to 73.21 — a measurement error,
+not an improvement.
+
+**That undercuts the stated reason head_pos ships as a demotion rather than a
+cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
+cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
+so a cut there would substitute too. The demotion is not thereby wrong — it still
+wins — but its reason is now only partly right, and the cut-versus-demotion
+question deserves re-measuring on fat days rather than being treated as settled.
+
+**Where the five changes leave the sieve**: day-wide mean F1 **49.48 → 63.70**
+and mean precision **71.07 → 93.53**; the 24 category cells **55.07 → 78.58**.
 
 **The decomposition matters more than the total, and it is measurable because
 `19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row.** Run

@@ -29,7 +29,10 @@ w as (
     -- 이전과 정확히 같은 것을 잰다 — max_head_pos가 쓰던 방식 그대로.
     coalesce(max(value) filter (where key = 'min_proper'), 9.90)           as min_proper,
     coalesce(max(value) filter (where key = 'max_head_pos'), 9.90)         as max_head_pos,
-    coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit
+    coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit,
+    -- 강등. keyword_graph가 카테고리에서도 이것으로 정렬하므로 여기서도 해야 한다 —
+    -- 안 하면 상한이 걸리는 셀에서 하니스가 앱과 다른 화면을 잰다.
+    coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90)      as demote_head_pos
   from scoring_weights
 ),
 
@@ -54,7 +57,7 @@ scoped_df as (
 ),
 
 day_pass as (
-  select s.d, s.word, s.df as day_df, s.standalone
+  select s.d, s.word, s.df as day_df, s.standalone, s.head_pos
   from sig s
   cross join w
   left join word_overrides ov on ov.word = s.word
@@ -86,7 +89,10 @@ shown as (
   select
     v.ord, sd.d, sd.cat, sd.word, sd.df, dp.day_df,
     row_number() over (
-      partition by v.ord, sd.d, sd.cat order by sd.df desc, sd.word
+      partition by v.ord, sd.d, sd.cat
+      -- 강등이 첫 키인 것은 keyword_graph와 같다. 상한이 안 걸리는 셀에서는
+      -- 아무것도 바꾸지 않고, 걸리는 셀에서만 자리를 갈아 끼운다.
+      order by (dp.head_pos > w.demote_head_pos) asc, sd.df desc, sd.word
     ) as rank
   from variants v
   cross join scoped_df sd
