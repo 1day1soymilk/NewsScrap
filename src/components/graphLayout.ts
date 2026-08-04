@@ -165,7 +165,7 @@ const LOCAL_ASPECT = 1.5
 // 아니라 crop이 정하므로, 남는 여백은 그냥 잘려 나간다.
 const LOCAL_SLACK = 3.5
 
-interface LayoutNode extends SimulationNodeDatum, MeasuredWord {
+export interface LayoutNode extends SimulationNodeDatum, MeasuredWord {
   halfWidth: number
   halfHeight: number
 }
@@ -399,38 +399,59 @@ export function computeGraphLayout(
 
   faceBridges(packOrder, packed.spots, links, eventOf)
 
-  // --- 무연결 단어는 구역 **바깥**으로 ---------------------------------------
+  // 선반을 캔버스 폭 안에서 가운데로 민다. **흩뿌리기보다 먼저** 해야 한다:
+  // 아래에서 놓이는 단어들은 이미 놓인 라벨과 이미 그려진 곡선의 **절대 좌표**를
+  // 보고 자리를 고르므로, 나중에 미는 것은 곧 피해 놓은 것을 도로 건드리는 일이다.
   //
-  // 이 단어들이 가운데를 붐비게 만드는 주범이었다: 70개 중 23~28개가 아무 선도
-  // 갖지 않는데, 예전에는 캔버스 안쪽 고리(반지름 0.36~0.52)로 보내져 사건들
-  // 사이사이에 끼었다. 안쪽 고리가 아니라 아래 띠라서 가운데가 완전히 빈다.
+  // 가운데로 미는 폭이 `packed.width`가 아니라 캔버스 폭인 것은 흩뿌리기가 쓸 수
+  // 있는 자리가 캔버스 전체이기 때문이다. 선반과 아래 띠를 **같은** 폭 안에서
+  // 가운데로 미는 한 그 폭이 무엇이든 그림은 평행이동만 달라지고, 뷰포트는 어차피
+  // 라벨에 맞춰 잘린다.
+  const canvas = Math.max(width, packed.width)
+  centerShelves(regions, packOrder, packed, canvas)
+
+  // --- 무연결 단어를 선 사이로 흩뿌린다 --------------------------------------
+  //
+  // 70개 중 14~26개가 아무 선도 갖지 않는다. 예전에는 캔버스 안쪽 고리로 보내져
+  // 사건들 사이사이에 끼었고(모든 선이 남의 이야기를 관통했다), 그다음에는 통째로
+  // 아래 띠로 내려갔다 — 가운데는 비었지만 화면이 "위는 도표, 아래는 목록"으로
+  // 읽혀 낱말 구름이기를 그만두었다.
+  //
+  // **순서가 설계다.** 엣지를 먼저 라우팅하고 그 곡선을 장애물로 삼는다. 곡선을
+  // 다시 계산하지 않으므로 `clear` 판정이 그대로 유효하고, 여기서 놓는 단어는
+  // 이미 그려진 선을 건드릴 수 없다 — `crowded`가 오를 수 **없다**는 것이 튜닝이
+  // 아니라 불변식이 된다. (오히려 내려갈 수는 있다: 예전에는 아래 띠의 단어들도
+  // 라우팅의 장애물이었다.)
   const loose = nodes.filter((n) => !eventOf.has(n.word))
-  const looseTop = packed.height > 0 && loose.length > 0 ? packed.height + gutter : packed.height
-  const looseSize = flowRows(loose, width, padding, looseTop)
+  const anchored = nodes.filter((n) => eventOf.has(n.word))
+  const anchoredPlaced = anchored.map(toPlaced)
+  const anchoredByWord = new Map(anchoredPlaced.map((n) => [n.word, n]))
 
-  const placed: PlacedNode[] = nodes.map((n) => ({
-    word: n.word,
-    count: n.count,
-    fontSize: n.fontSize,
-    textWidth: n.textWidth,
-    faded: n.faded,
-    halfWidth: n.halfWidth,
-    halfHeight: n.halfHeight,
-    x: round(n.x ?? 0),
-    y: round(n.y ?? 0),
-  }))
+  // 선을 가진 단어는 반드시 사건을 받으므로(혼자면 혼자짜리 구역) 양 끝은 언제나
+  // 여기 있다. 흩뿌려진 단어를 장애물로 넘기지 않는 것은 대칭이라서다 — 그 단어들이
+  // 곡선을 피해 놓였으므로 곡선도 그 단어들을 피해 있다.
+  const routed = links.map((l) =>
+    routeEdge(anchoredByWord.get(l.a)!, anchoredByWord.get(l.b)!, anchoredPlaced),
+  )
 
-  // 사건 구역들과 무연결 띠의 폭이 서로 다르므로, 둘 다 실제로 쓰인 폭 안에서
-  // 가운데로 민다. 왼쪽에 맞추면 아래위가 어긋난 채로 남아 배치가 의도된 것이
-  // 아니라 흘러넘친 것처럼 보인다.
-  const content = Math.max(packed.width, looseSize.width)
-  centerRows(placed, regions, packed, packOrder, looseSize, content)
+  const stranded = scatterLoose(
+    loose,
+    anchoredPlaced,
+    routed.filter((c): c is EdgeCurve => c !== null),
+    { padding, bounds: { x: 0, y: 0, width: canvas, height: packed.height } },
+  )
 
-  const placedByWord = new Map(placed.map((n) => [n.word, n]))
+  // 못 놓은 것은 아래 띠로. 자리가 없으면 그리로 가는 것이 이 설계의 저하 방식이고,
+  // 폰에서는 빈틈이 거의 없어 대부분 그리로 간다.
+  const looseTop = packed.height > 0 && stranded.length > 0 ? packed.height + gutter : packed.height
+  const looseSize = flowRows(stranded, width, padding, looseTop)
+  centerFlowRows(looseSize, canvas)
 
-  const placedEdges: PlacedEdge[] = links.map((l) => {
-    const a = placedByWord.get(l.a)!
-    const b = placedByWord.get(l.b)!
+  const placed: PlacedNode[] = nodes.map(toPlaced)
+
+  const placedEdges: PlacedEdge[] = links.map((l, i) => {
+    const a = anchoredByWord.get(l.a)!
+    const b = anchoredByWord.get(l.b)!
     return {
       a: l.a,
       b: l.b,
@@ -440,7 +461,7 @@ export function computeGraphLayout(
       y1: a.y,
       x2: b.x,
       y2: b.y,
-      curve: routeEdge(a, b, placed),
+      curve: routed[i],
     }
   })
 
@@ -1420,34 +1441,234 @@ function flowRows(
   }
 }
 
-/** 선반과 줄을 각각 실제로 쓰인 전체 폭 안에서 가운데로 민다. */
-function centerRows(
+// 흩뿌리기용 점유 격자의 한 칸. 작을수록 촘촘하지만 O(cells)가 두 번 든다 —
+// 라벨 최소 높이(14 * 1.2)의 절반쯤이면 한 칸이 글자보다 작아 보수적으로 안전하다.
+const SCATTER_CELL = 8
+
+/**
+ * 선을 장애물로 삼아 무연결 단어를 그림 전체에 흩뿌린다.
+ *
+ * **순서가 설계다.** 엣지를 먼저 라우팅하고 그 곡선을 장애물로 쓰므로, 여기서
+ * 놓은 단어가 이미 그려진 선을 건드릴 수 없다. 곡선을 다시 계산하지 않으니
+ * `clear` 판정이 그대로 유효하고, `crowded`는 오를 수 없다 — 예전에 무연결
+ * 단어를 캔버스 안쪽 고리로 보냈다가 모든 선이 남의 사건을 관통했던 바로 그
+ * 지점이 여기서는 불변식이 된다.
+ *
+ * 자리는 격자를 훑어 고른다. 통과한 후보 중 **이미 놓인 것들로부터 제일 먼**
+ * 곳을 고르는데, 그게 "고르게 흩뿌린다"의 산술적 정의이기 때문이다. 거리는
+ * 점유 칸에서 시작한 다중 출발 BFS로 한 번에 구하므로 후보당 O(1)이다.
+ *
+ * 격자로 재는 것은 **보수적**이다 — 칸 단위로 과하게 거절하므로 통과한 자리는
+ * 반드시 진짜로 비어 있다. 안전한 방향의 근사이고, 단위 시험은 그 뒤에
+ * `intrusion`이 세는 바로 그 32개 표본으로 정확히 확인한다.
+ *
+ * 못 놓은 단어는 돌려준다. 부르는 쪽이 아래 띠로 흘린다 — 폰에서는 빈틈이
+ * 거의 없어 대부분 그리로 가는데, 그건 특별 취급이 아니라 자연스러운 저하다.
+ */
+export function scatterLoose(
+  loose: LayoutNode[],
   placed: PlacedNode[],
+  curves: EdgeCurve[],
+  options: { padding: number; bounds: { x: number; y: number; width: number; height: number } },
+): LayoutNode[] {
+  const { padding, bounds } = options
+  const cols = Math.max(1, Math.ceil(bounds.width / SCATTER_CELL))
+  const rows = Math.max(1, Math.ceil(bounds.height / SCATTER_CELL))
+  const solid = new Uint8Array(cols * rows)
+
+  const markBox = (x: number, y: number, halfWidth: number, halfHeight: number) => {
+    const c0 = Math.max(0, Math.floor((x - halfWidth - bounds.x) / SCATTER_CELL))
+    const c1 = Math.min(cols - 1, Math.floor((x + halfWidth - bounds.x) / SCATTER_CELL))
+    const r0 = Math.max(0, Math.floor((y - halfHeight - bounds.y) / SCATTER_CELL))
+    const r1 = Math.min(rows - 1, Math.floor((y + halfHeight - bounds.y) / SCATTER_CELL))
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) solid[r * cols + c] = 1
+  }
+
+  for (const node of placed) {
+    markBox(node.x, node.y, node.halfWidth + padding / 2, node.halfHeight + padding / 2)
+  }
+  // 곡선은 라우팅이 이미 쓰는 32구간 샘플 그대로 찍는다. 두 번째 사본을 만들지
+  // 않으려는 것이고, 그래야 여기서 피한 점과 저기서 센 점이 같은 점이 된다.
+  for (const curve of curves) {
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32
+      const m = 1 - t
+      markBox(
+        m * m * curve.x1 + 2 * m * t * curve.cx + t * t * curve.x2,
+        m * m * curve.y1 + 2 * m * t * curve.cy + t * t * curve.y2,
+        LABEL_CLEARANCE,
+        LABEL_CLEARANCE,
+      )
+    }
+  }
+
+  // 점유 격자의 2차원 누적합. `fits`는 후보 칸마다 불리고 후보가 수만 개라,
+  // 상자를 칸칸이 훑으면(폭 넓은 라벨은 쉰 칸이 넘는다) 그 곱이 배치 한 번의
+  // 시간을 좌우한다. 누적합을 두면 상자 하나가 네 번 읽기로 끝난다. 근사가
+  // 아니라 같은 답이다 — 합이 0이라는 것과 한 칸도 안 찼다는 것은 같은 말이다.
+  const stride = cols + 1
+  const prefix = new Int32Array(stride * (rows + 1))
+  const rebuildPrefix = () => {
+    for (let r = 0; r < rows; r++) {
+      let run = 0
+      for (let c = 0; c < cols; c++) {
+        run += solid[r * cols + c]
+        prefix[(r + 1) * stride + c + 1] = prefix[r * stride + c + 1] + run
+      }
+    }
+  }
+
+  const fits = (node: LayoutNode, x: number, y: number) => {
+    const halfWidth = node.halfWidth + padding / 2
+    const halfHeight = node.halfHeight + padding / 2
+    if (x - halfWidth < bounds.x || x + halfWidth > bounds.x + bounds.width) return false
+    if (y - halfHeight < bounds.y || y + halfHeight > bounds.y + bounds.height) return false
+    const c0 = Math.max(0, Math.floor((x - halfWidth - bounds.x) / SCATTER_CELL))
+    const c1 = Math.min(cols - 1, Math.floor((x + halfWidth - bounds.x) / SCATTER_CELL))
+    const r0 = Math.max(0, Math.floor((y - halfHeight - bounds.y) / SCATTER_CELL))
+    const r1 = Math.min(rows - 1, Math.floor((y + halfHeight - bounds.y) / SCATTER_CELL))
+    return (
+      prefix[(r1 + 1) * stride + c1 + 1] -
+        prefix[r0 * stride + c1 + 1] -
+        prefix[(r1 + 1) * stride + c0] +
+        prefix[r0 * stride + c0] ===
+      0
+    )
+  }
+
+  // 점유 칸에서 출발하는 다중 출발 BFS. 각 칸이 제일 가까운 장애물까지 몇 칸인지.
+  // 큐를 배열 하나로 두고 자리만 옮기는 것은 취향이 아니라 값이다 — 단어마다 한
+  // 번씩 도는데 칸이 수만 개라, 층마다 배열을 새로 만들면 그 할당이 배치 한 번의
+  // 시간에서 눈에 보인다.
+  const d = new Int32Array(cols * rows)
+  const queue = new Int32Array(cols * rows)
+  const distance = () => {
+    d.fill(-1)
+    let tail = 0
+    for (let i = 0; i < solid.length; i++) {
+      if (solid[i]) {
+        d[i] = 0
+        queue[tail++] = i
+      }
+    }
+    for (let head = 0; head < tail; head++) {
+      const i = queue[head]
+      const step = d[i] + 1
+      const r = (i / cols) | 0
+      const c = i % cols
+      if (r > 0 && d[i - cols] === -1) {
+        d[i - cols] = step
+        queue[tail++] = i - cols
+      }
+      if (r + 1 < rows && d[i + cols] === -1) {
+        d[i + cols] = step
+        queue[tail++] = i + cols
+      }
+      if (c > 0 && d[i - 1] === -1) {
+        d[i - 1] = step
+        queue[tail++] = i - 1
+      }
+      if (c + 1 < cols && d[i + 1] === -1) {
+        d[i + 1] = step
+        queue[tail++] = i + 1
+      }
+    }
+  }
+
+  // 후보는 칸의 한가운데인데, 남은 자리가 한 칸보다 좁으면 그 한가운데가 경계
+  // 밖에 떨어져 **실제로 들어가는 자리를 격자가 통째로 못 본다** — 구역이 딱 그
+  // 라벨만큼만 높은 얇은 날이 그 경우다. 반 칸까지만 경계 쪽으로 당긴다. 들어가는지는
+  // 어차피 `fits`가 그 자리에서 다시 판정하므로 안전은 이 당김에 기대지 않는다.
+  const nudge = (value: number, min: number, max: number) =>
+    value < min
+      ? Math.min(min, value + SCATTER_CELL / 2)
+      : value > max
+        ? Math.max(max, value - SCATTER_CELL / 2)
+        : value
+
+  // 큰 단어부터. 큰 것이 나중에 오면 들어갈 구멍이 이미 없다.
+  const order = [...loose].sort(
+    (a, b) => b.halfWidth * b.halfHeight - a.halfWidth * a.halfHeight || a.word.localeCompare(b.word),
+  )
+  const leftover: LayoutNode[] = []
+
+  for (const node of order) {
+    const halfWidth = node.halfWidth + padding / 2
+    const halfHeight = node.halfHeight + padding / 2
+    const at = (i: number) => ({
+      x: nudge(
+        bounds.x + (i % cols) * SCATTER_CELL + SCATTER_CELL / 2,
+        bounds.x + halfWidth,
+        bounds.x + bounds.width - halfWidth,
+      ),
+      y: nudge(
+        bounds.y + ((i / cols) | 0) * SCATTER_CELL + SCATTER_CELL / 2,
+        bounds.y + halfHeight,
+        bounds.y + bounds.height - halfHeight,
+      ),
+    })
+
+    rebuildPrefix()
+    distance()
+    let best = -1
+    let bestScore = -1
+    for (let i = 0; i < d.length; i++) {
+      if (d[i] <= 0 || d[i] <= bestScore) continue
+      const spot = at(i)
+      if (!fits(node, spot.x, spot.y)) continue
+      bestScore = d[i]
+      best = i
+    }
+    if (best < 0) {
+      leftover.push(node)
+      continue
+    }
+    const spot = at(best)
+    node.x = spot.x
+    node.y = spot.y
+    markBox(node.x, node.y, halfWidth, halfHeight)
+  }
+
+  // 입력 순서로 돌려준다 — 아래 띠의 줄 배치가 빈도순을 기대한다.
+  const stranded = new Set(leftover.map((n) => n.word))
+  return loose.filter((n) => stranded.has(n.word))
+}
+
+/** 선반을 캔버스 폭 안에서 가운데로 민다. 구역 사각형도 같이 움직인다. */
+function centerShelves(
   regions: EventRegion[],
-  packed: Packing,
   boxes: LaidOutEvent[],
-  loose: FlowSize,
+  packed: Packing,
   content: number,
 ): void {
-  const byWord = new Map(placed.map((n) => [n.word, n]))
-
   for (let i = 0; i < boxes.length; i++) {
     const shift = round((content - packed.shelfWidths[packed.spots[i].shelf]) / 2)
     if (shift === 0) continue
     regions[i].x = round(regions[i].x + shift)
-    for (const member of boxes[i].members) {
-      const node = byWord.get(member.word)
-      if (node) node.x = round(node.x + shift)
-    }
+    for (const member of boxes[i].members) member.x = round(round(member.x ?? 0) + shift)
   }
+}
 
+/** 아래 띠의 줄들을 같은 폭 안에서 가운데로. 선반과 같은 폭을 써야 어긋나지 않는다. */
+function centerFlowRows(loose: FlowSize, content: number): void {
   for (const row of loose.rows) {
     const shift = round((content - row.width) / 2)
     if (shift === 0) continue
-    for (const member of row.nodes) {
-      const node = byWord.get(member.word)
-      if (node) node.x = round(node.x + shift)
-    }
+    for (const member of row.nodes) member.x = round(round(member.x ?? 0) + shift)
+  }
+}
+
+function toPlaced(n: LayoutNode): PlacedNode {
+  return {
+    word: n.word,
+    count: n.count,
+    fontSize: n.fontSize,
+    textWidth: n.textWidth,
+    faded: n.faded,
+    halfWidth: n.halfWidth,
+    halfHeight: n.halfHeight,
+    x: round(n.x ?? 0),
+    y: round(n.y ?? 0),
   }
 }
 

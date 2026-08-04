@@ -569,6 +569,123 @@ describe('사건 구역', () => {
   })
 })
 
+describe('흩뿌리기', () => {
+  // 32 samples is what routeEdge's own intrusion() walks; the same points are
+  // what scatterLoose treats as solid.
+  function curvePoints(c: EdgeCurve) {
+    return Array.from({ length: 33 }, (_, i) => {
+      const t = i / 32
+      const m = 1 - t
+      return {
+        x: m * m * c.x1 + 2 * m * t * c.cx + t * t * c.x2,
+        y: m * m * c.y1 + 2 * m * t * c.cy + t * t * c.y2,
+      }
+    })
+  }
+
+  const scattered = {
+    words: [
+      ...['트럼프', '이스라엘', '하마스', '압박', '휴전', '가자'].map((text, i) => ({
+        word: text,
+        count: 20 - i,
+        fontSize: 30,
+        textWidth: text.length * 28,
+        faded: false,
+      })),
+      ...['월요일', '가능성', '변동성', '막바지', '무방비', '시험대'].map((text) => ({
+        word: text,
+        count: 4,
+        fontSize: 16,
+        textWidth: text.length * 15,
+        faded: false,
+      })),
+    ] as MeasuredWord[],
+    edges: [
+      edge('트럼프', '이스라엘', 0.8),
+      edge('이스라엘', '하마스', 0.7),
+      edge('하마스', '압박', 0.6),
+      edge('압박', '휴전', 0.5),
+      edge('휴전', '가자', 0.5),
+    ],
+  }
+
+  it('never puts a scattered word on top of an edge', () => {
+    // 이 설계의 중심 불변식. 엣지를 먼저 라우팅하고 그 32개 표본을 장애물로 삼기
+    // 때문에 성립하며, 성립하지 않으면 순서가 뒤바뀐 것이다.
+    const layout = computeGraphLayout(scattered.words, scattered.edges, { width: 900 })
+    const linked = new Set(scattered.edges.flatMap((e) => [e.a, e.b]))
+    const loose = layout.nodes.filter((n) => !linked.has(n.word))
+
+    expect(loose).toHaveLength(6)
+    for (const node of loose) {
+      for (const e of layout.edges) {
+        if (!e.curve) continue
+        for (const p of curvePoints(e.curve)) {
+          const onLabel =
+            Math.abs(p.x - node.x) < node.halfWidth && Math.abs(p.y - node.y) < node.halfHeight
+          expect(onLabel, `${node.word} sits on ${e.a}—${e.b}`).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('places at least one edgeless word above the packed regions', () => {
+    // The band used to hold all of them, so every edgeless word was below every
+    // region. Scattering means at least one is not.
+    const words = [
+      ...['트럼프', '이스라엘', '하마스', '압박'].map((text, i) => ({
+        word: text,
+        count: 20 - i,
+        fontSize: 30,
+        textWidth: text.length * 28,
+        faded: false,
+      })),
+      ...['월요일', '가능성', '변동성'].map((text) => ({
+        word: text,
+        count: 4,
+        fontSize: 16,
+        textWidth: text.length * 15,
+        faded: false,
+      })),
+    ] as MeasuredWord[]
+    const edges = [
+      edge('트럼프', '이스라엘', 0.8),
+      edge('이스라엘', '하마스', 0.7),
+      edge('하마스', '압박', 0.6),
+    ]
+    const layout = computeGraphLayout(words, edges, { width: 900 })
+    const lowestRegion = Math.max(...layout.regions.map((r) => r.y + r.height))
+    const loose = layout.nodes.filter((n) => ['월요일', '가능성', '변동성'].includes(n.word))
+    expect(loose.some((n) => n.y < lowestRegion)).toBe(true)
+  })
+
+  it('흩뿌린 뒤에도 어떤 라벨도 겹치지 않는다', () => {
+    // 격자는 보수적으로 거절할 뿐이므로, 겹침 불변식은 흩뿌리기가 도는 캔버스에서
+    // 다시 확인해야 의미가 있다.
+    const layout = computeGraphLayout(scattered.words, scattered.edges, { width: 900 })
+    for (let i = 0; i < layout.nodes.length; i++) {
+      for (let j = i + 1; j < layout.nodes.length; j++) {
+        expect(
+          overlaps(layout.nodes[i], layout.nodes[j]),
+          `${layout.nodes[i].word} / ${layout.nodes[j].word}`,
+        ).toBe(false)
+      }
+    }
+  })
+
+  it('자리가 없으면 아래 띠로 흘린다 — 그것이 저하 방식이다', () => {
+    // 폭이 좁으면 구역이 캔버스를 가득 채우고 빈틈이 남지 않는다. 그런 날에도
+    // 단어가 사라지지는 않는다: 예전처럼 구역 아래로 내려갈 뿐이다.
+    const layout = computeGraphLayout(scattered.words, scattered.edges, { width: 200 })
+    const linked = new Set(scattered.edges.flatMap((e) => [e.a, e.b]))
+    const loose = layout.nodes.filter((n) => !linked.has(n.word))
+    const lowestRegion = Math.max(...layout.regions.map((r) => r.y + r.height))
+
+    expect(loose).toHaveLength(6)
+    expect(loose.some((n) => n.y > lowestRegion)).toBe(true)
+  })
+})
+
 describe('nextLayoutWidth', () => {
   // 레이아웃 한 번은 루뱅 분할 + 300틱 + 엣지마다 도는 곡선 탐색이고, 그것이
   // 렌더 경로 안에서 동기로 돈다. 창 가장자리를 끄는 동안 프레임마다 한 번씩
