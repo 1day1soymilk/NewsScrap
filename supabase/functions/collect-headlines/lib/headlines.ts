@@ -15,10 +15,14 @@ export interface ScrapedHeadline {
    * date literally, so reading it is a pure function of the HTML, which is also
    * what keeps this file testable without a clock.
    *
-   * Checked against the page cursor before it was relied on: over 30 pages of
-   * three sections, **not one article carried a thumbnail date older than its
-   * own page's cursor stamp**, and every page whose cursor had crossed midnight
-   * held exactly the mixture of the two days that implies.
+   * Checked twice before it was relied on, and the second check is the one that
+   * matters. Against the page cursor: over 30 pages of three sections, **not one
+   * article carried a thumbnail date older than its own page's cursor stamp**.
+   * And against the articles themselves, which is the only thing that can say
+   * this is a *publication* date rather than merely a consistent one — the
+   * twelve politics articles straddling the 2026-08-05 boundary, six each side,
+   * were fetched and their own timestamps read: **12 agree, 0 disagree**, with
+   * the flip in the list falling exactly where the articles put it.
    */
   published: string | null
 }

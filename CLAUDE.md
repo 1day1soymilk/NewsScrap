@@ -1597,10 +1597,15 @@ stopped at the first old article would have cut that page off at rank 3. So
 `cursorIsBefore` stops the *paging* once a whole page's oldest article predates
 the day, and `published` filters *within* every page, including that one.
 
-The pairing was checked before it was relied on: over 30 pages of three sections,
-**not one article carried a thumbnail date older than its own page's cursor
-stamp**, and every page whose cursor had crossed midnight held exactly the
-mixture of two days that implies.
+**It was checked twice, and the second check is the one that matters.** Against
+the page cursor: over 30 pages of three sections, not one article carried a
+thumbnail date older than its own page's cursor stamp. And **against the articles
+themselves**, which is the only thing that can establish this is a *publication*
+date rather than merely a self-consistent one — the twelve politics articles
+straddling the 2026-08-05 boundary, six each side, were fetched and their own
+timestamps read: **12 agree, 0 disagree**, with the flip in the list falling
+exactly where the articles put it. Agreeing with the cursor would have been
+satisfied by any date the same pipeline stamped on both.
 
 **Note that deeper paging widens the section gap rather than closing it**: the
 recovery above is 359 economy and 285 society against 11 culture, 9 world and 11
