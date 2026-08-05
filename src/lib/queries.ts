@@ -57,6 +57,44 @@ export async function fetchCollectedDates(): Promise<CollectedDate[]> {
   return rows.map((row) => ({ date: row.collected_date, headlines: Number(row.headline_count) }))
 }
 
+export interface CategoryShare {
+  slug: string
+  /** Headlines that section produced that day, all runs summed. */
+  headlines: number
+  /**
+   * Did any single run store a full `collect_cap` window? If so this section's
+   * share is a lower bound rather than the whole of what it published.
+   */
+  capped: boolean
+}
+
+// What each section actually produced on a day — the proportions the ranking
+// deliberately stops showing.
+//
+// 하루 여섯 행이므로 **날짜로 반드시 거른다.** 거르지 않으면 166일 만에
+// PostgREST의 1,000행 상한에 닿고, 잘린 응답으로 계산한 비율은 아무 말도 없이
+// 틀린다 — 이 저장소가 이미 한 번 값을 치른 실패다.
+//
+// Cached for the reason the rest are: the date is stepped there and back, and
+// what matters is that the same array comes back so the donut is not rebuilt.
+export const fetchCategoryShare = cachedQuery(
+  (date: string) => `category-share|${date}`,
+  async (date: string): Promise<CategoryShare[]> => {
+    const { data, error } = await supabase
+      .from('daily_category_counts')
+      .select('slug, headlines, capped')
+      .eq('date', date)
+    if (error) throw queryError(error)
+
+    const rows = (data ?? []) as { slug: string; headlines: number | string; capped: boolean }[]
+    return rows.map((row) => ({
+      slug: row.slug,
+      headlines: Number(row.headlines),
+      capped: row.capped,
+    }))
+  },
+)
+
 export async function fetchWordCounts(
   date: string,
   categorySlug: string | null,

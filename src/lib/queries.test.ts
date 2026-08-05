@@ -9,6 +9,7 @@ const mockSupabase = {
 vi.mock('./supabaseClient', () => ({ supabase: mockSupabase }))
 
 const {
+  fetchCategoryShare,
   fetchCollectedDates,
   fetchEventHeadlineCounts,
   fetchHeadlineCount,
@@ -132,6 +133,68 @@ describe('fetchCollectedDates', () => {
 
     await expect(fetchCollectedDates()).rejects.toThrow(
       'permission denied for view collected_dates (42501)',
+    )
+  })
+})
+
+describe('fetchCategoryShare', () => {
+  it('returns one row per section, filtered by date server side', async () => {
+    const chain = makeQueryChain({
+      data: [
+        { slug: 'society', headlines: 282, capped: false },
+        { slug: 'it', headlines: 96, capped: false },
+      ],
+      error: null,
+    })
+    mockSupabase.from.mockReturnValue(chain)
+
+    const share = await fetchCategoryShare('2026-08-04')
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('daily_category_counts')
+    // 하루 여섯 행이라 안 거르면 166일 만에 1,000행 상한에 닿는다. 잘린 응답으로
+    // 만든 분모는 아무 말 없이 틀린다.
+    expect(chain.eq).toHaveBeenCalledWith('date', '2026-08-04')
+    expect(share).toEqual([
+      { slug: 'society', headlines: 282, capped: false },
+      { slug: 'it', headlines: 96, capped: false },
+    ])
+  })
+
+  it('coerces a count arriving as a string', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({ data: [{ slug: 'it', headlines: '96', capped: false }], error: null }),
+    )
+
+    const share = await fetchCategoryShare('2026-08-04')
+
+    expect(share[0].headlines).toBe(96)
+  })
+
+  it('serves a repeated read from the cache, as the same object', async () => {
+    const chain = makeQueryChain({
+      data: [{ slug: 'it', headlines: 96, capped: false }],
+      error: null,
+    })
+    mockSupabase.from.mockClear()
+    mockSupabase.from.mockReturnValue(chain)
+
+    const first = fetchCategoryShare('2026-08-04')
+    const second = fetchCategoryShare('2026-08-04')
+
+    expect(await first).toBe(await second)
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws a real Error carrying the PostgREST message', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({
+        data: null,
+        error: { message: 'permission denied for view daily_category_counts', code: '42501' },
+      }),
+    )
+
+    await expect(fetchCategoryShare('2026-08-04')).rejects.toThrow(
+      'permission denied for view daily_category_counts (42501)',
     )
   })
 })
