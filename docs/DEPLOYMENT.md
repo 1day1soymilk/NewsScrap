@@ -92,15 +92,22 @@ Management API 의 로그 엔드포인트는 `function_logs` 에 403 을 주고,
 `collect_cap` 말고도 **측정은 끝났고 판단만 남은** 값이 둘 있다. 둘 다 한 줄로
 켜고 되돌릴 수 있고, 재배포가 필요 없다.
 
-- **`place_needs_edge` — 장소 게이트.** 켜면 다른 단어와 선을 하나도 못 가진
-  지명(`word_overrides`의 `place` 항목, 현재 45개)이 그래프에서 빠지고 그 자리를
-  71위 단어가 채운다. 껐을 때가 지금 실려 있는 상태다.
+- **`place_needs_edge` — 장소 게이트. 마이그레이션 `0028`부터 켜져 있고, 그것이
+  지금 실려 있는 상태다.** 지명(`word_overrides`의 `place` 항목, 현재 45개)은
+  **지명이 아닌 단어와 이어진 선**이 하나라도 있을 때만 그려진다 — 지명끼리만
+  이어진 쌍은 남지 않는다. 빠진 자리는 71위 단어가 채운다.
+
+  **하니스는 이 게이트에 반대했고 `0026`이 그래서 꺼서 출하했다.** `0028`이
+  뒤집은 근거는 새 측정이 아니라 화면이다: 껐을 때 2026-08-03의 4위 사건이
+  「서울 · 광주」 66건인데, 두 지명이 서로하고만 이어져 있어 그 66건이 무슨
+  이야기인지 페이지 어디에도 없다. 되돌리려면 아래 두 번째 줄이면 되고, 그때
+  잃는 것과 얻는 것은 `0028` 헤더에 전부 적혀 있다.
 
   ```bash
-  # 켜기
-  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1 where key = 'place_needs_edge'"
-  # 되돌리기
+  # 되돌리기 (게이트 끄기)
   scripts/analysis/run.sh -c "update public.scoring_weights set value = 0 where key = 'place_needs_edge'"
+  # 다시 켜기
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1 where key = 'place_needs_edge'"
   ```
 
   측정은 `scripts/analysis/README.md`의 "Round fourteen — three mechanisms

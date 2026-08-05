@@ -495,14 +495,22 @@ produced.
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
-#### Round fourteen built three mechanisms, measured them, and shipped none
+#### Round fourteen built three mechanisms, measured them, and shipped one — on a judgement, not on the numbers
 
 Migrations `0023`–`0025` wired a **place gate**, a **render cap the harness can
 sweep** and a **category-balance exponent α**, all three switched off pending the
 measurement, and migration `0026` is the verdict: **no `value` in
 `scoring_weights` moves.** It updates four `note` columns so the deployed
 database carries the reasoning. A round that earns nothing has to be as legible
-as one that earns something, or the next person re-runs it. All of what follows
+as one that earns something, or the next person re-runs it.
+
+**Migration `0028` then turned the place gate on anyway, and that is the round's
+sharpest finding rather than a reversal.** The measurement stands exactly as
+`0026` recorded it — the gate costs F1 on both surfaces and every word it removes
+is labelled good. What overruled it was looking at the screen, where the gate's
+absence leaves an unreadable 66-headline "서울 · 광주" as the day's fourth-largest
+event. The cap and α remain off. Details are in the place-gate entry below. All
+of what follows
 has `unlab` 0 and `story_rank` 1 on every quoted row, and both worklists returned
 nothing before the harness was read and again after.
 
@@ -535,13 +543,36 @@ nothing before the harness was read and again after.
   a word worth showing". The gate was asked for on a different question — "can a
   reader do anything with a word no line touches" — and no label set can price
   that. It is the same mismatch that stops the harness pricing the display cap.
-  So the mechanism is built, measured and **shipped off**: flipping
-  `scoring_weights.place_needs_edge` to 1 is a one-row update with no redeploy,
-  and it costs about **1.5×** (one sitting, 2026-08-03, all-categories view:
-  `0018` 1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be read
-  against each other and against nothing else). `word_overrides` mode 'place'
-  stays: a labelled fact about 45 words a later round can read for something
-  other than a cut.
+  It costs about **1.5×** (one sitting, 2026-08-03, all-categories view: `0018`
+  1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be read against
+  each other and against nothing else).
+
+  **The gate is ON, since migration `0028`, and none of the above is retracted.**
+  `0026` shipped it off because a measurement is what this project moves a
+  threshold on; `0028` turns it on because the screen was then looked at and
+  showed what the labels structurally cannot. Two views of 2026-08-03 one flip
+  apart: the gate removes 서울, 광주, 인천, 포항, 울산 and 강원 and keeps 부산,
+  대구, 경남 and 충청 — and **the four it keeps are exactly the four that sit
+  inside a story** (부산 with 노무현·김용민·돌려차기, 대구 with 경산·경북, 경남
+  with 양산, 충청 with 김민석), while the six it drops touched nothing or touched
+  only each other.
+
+  **The decisive difference is in the event list, not on the canvas.** With the
+  gate off, that day's **fourth-largest event is "서울 · 광주" at 66 headlines** —
+  two place names joined to each other and to nothing else, so nothing on the page
+  can say what those 66 articles are about. With the gate on the row is gone and
+  "미국 · 중국 · 기아 · 정의선 외 2" at 57 headlines takes its place. That one can
+  be read. The F1 loss is real and is the price of removing it: 서울 and 광주 are
+  each independently worth showing, which is precisely why the labels defend them.
+
+  So the standing lesson is not "the gate was wrong" or "the harness was wrong" —
+  it is that **the two were answering different questions, and the file records
+  which one each can settle.** Anything that changes what a word *means on the
+  page* rather than whether it deserves a place is outside what
+  `analysis.word_labels` can price, and has to be decided by looking.
+
+  `word_overrides` mode 'place' is now load-bearing rather than a labelled fact
+  in reserve: the 45 rows are the gate's whole input.
 
 - **`10_sieve_eval.sql` structurally cannot price the render cap.** F1 rises
   monotonically with it — **63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 /
