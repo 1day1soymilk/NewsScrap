@@ -316,6 +316,251 @@ every dictionary edit regardless.
 Labels: `17_labels_two_character.sql` (44) and
 `18_labels_two_character_category.sql` (36). Both worklists empty afterwards.
 
+## Round fourteen — three mechanisms measured, none shipped
+
+Migrations `0023`–`0025` wired a place gate, a render cap the harness could
+sweep, and a category-balance exponent α, and shipped all three switched off
+pending this measurement. Migration `0026` is the verdict: **nothing moved.**
+No threshold in `scoring_weights` changes value; four `note` columns change so
+the database carries the reason.
+
+Both worklists returned nothing before the harness was read and again after
+`24_cap_and_place_configs.sql`'s `active` list was narrowed, and `unlab` is 0 on
+every row quoted below — 40 day-wide, 120 category, and all 28 live-RPC cells in
+both gate states. `story_rank` is 1 in every one of them, so rule 5 disqualifies
+nothing and each verdict below is decided on the numbers rather than on the
+safety net.
+
+### The render cap: the harness structurally cannot price it
+
+| cap | mean shown | mean precision | mean F1 |
+| --- | --- | --- | --- |
+| **70 (ships)** | 69.75 | **93.53** | 63.70 |
+| 85 | 81.00 | 88.80 | 66.38 |
+| 100 | 92.25 | 87.75 | 70.60 |
+| 130 | 105.75 | 85.40 | **73.80** |
+
+**F1 rises monotonically with the cap, and that is the metric misbehaving rather
+than a result.** `10_sieve_eval.sql` holds the recall denominator fixed — every
+labelled-good word on the day with `df >= 3` — while the cap *is* how many words
+the screen shows. Widening therefore always buys recall, and F1 turns over only
+when precision collapses, which at these caps it never does. The optimum sits at
+the edge of the sweep, and rule 2's instruction to widen is useless here: the
+limit of this metric is "draw every word that qualifies".
+
+**Rule 3 is the rule that applies — the metric does not match the question.**
+Migration `0006` already said so in one line, "render_cap is not a sieve
+threshold, so this does not go through `10_sieve_eval.sql`". Round fourteen put
+it through anyway and found out why that sentence was there. **This is the first
+time a quantity has been swept in this harness that the harness cannot decide**,
+and the tell is the shape: a monotone column with no interior turn. Any future
+knob whose sweep looks like that should be checked for the same defect before
+its best cell is believed.
+
+Precision is what reads a fixed screen honestly, and it decides: **93.53 at 70
+against 85.40 at 130**. The marginal bands say it more sharply. Over the three
+days where the cap binds the top 70 are 201 good / 9 bad (95.7%), and what each
+widening adds is:
+
+| band | good | bad | precision |
+| --- | --- | --- | --- |
+| ranks 71–85 | 27 | 18 | 60.0% |
+| ranks 86–100 | 36 | 9 | 80.0% |
+| ranks 101–130 | 36 | 18 | 66.7% |
+| ranks 71–end | 99 | 45 | **68.8%** |
+
+Every band is drawn from a population far worse than what is already on screen,
+and they are **not even monotone** — 71–85 is worse than 86–100 — so there is no
+rank at which the screen cleanly stops being worth widening. Bad words on the
+canvas go 3 → 16 on 2026-07-31 and 2 → 23 on 2026-08-03.
+
+The cap is read **per day** and not on a mean, because it can only act where it
+binds. Qualifying words: 07-31 116, 08-01 108, 08-02 **69**, 08-03 260.
+2026-08-02 is identical in all four rows by construction.
+
+And nothing in this round re-measures the picture, which is what `0006` decided
+on: ranks 71–130 arrived faded at the minimum font size and sat in every gap
+between the words worth reading. `scripts/layout/` measures crossings, overlap
+and height at 70 and none of it has been re-run. **A cap change is a canvas
+change** and needs that harness plus a judgement about the picture.
+
+### The place gate: the premise failed, not the threshold
+
+`place_needs_edge` draws a `word_overrides` place only when a line joins it to a
+non-place.
+
+| surface | gate off (ships) | gate on | wins / losses |
+| --- | --- | --- | --- |
+| all-categories, 4 days | F1 **63.70**, prec 93.53 | F1 62.67, prec 92.05 | 0 wins, 3 losses, 1 tie |
+| category tabs, 24 cells | F1 **78.58**, prec 85.40 | F1 75.22, prec 84.48 | 1 win, 17 losses, 6 ties |
+
+At cap 100 the same comparison gives 70.60 → 69.98 day-wide, so a wider canvas
+does not rescue it either.
+
+**Name the cost, and it is one-sided.** Diffing the drawn word set day-wide, gate
+on against gate off, over the four days: the gate removes **eleven words and
+every one of them is labelled good** — 서울 ×2, 울산 ×2, 제주, 강남, 부산, 강원,
+광주, 인천, 포항 — and promotes ten, six good (경계작전, 공화당, 김동관, 김병기,
+김용, 한반도) and four bad (단일종목, 반도체주, 고속도로, 대공습). Net five good
+words off the screen and four bad ones onto it. Round ten could name three good
+words as the price of a real gain; here there is no gain to price.
+
+**So the premise is what failed.** The gate was built on "a place with no line to
+a non-place is backdrop". A place can be the story and still hold no *drawn*
+line, because its partner sits below the render cap. 부산 on 2026-08-02 is the
+clean case — a day qualifying only 69 words, where the gate drops it and promotes
+nothing at all. There is no threshold to retune: the gate is already at its
+weakest setting, one edge.
+
+**Do not re-file this as head_pos and reach for a demotion.** That signature is a
+day-wide *win* with a category loss, which says the mechanism needs the cap to be
+binding, so a demotion keeps the win and drops the loss. This gate loses on
+**both** surfaces, and day-wide it loses precisely where the cap binds. A
+demotion is a no-op where the cap does not bind and identical to the cut where it
+does, so its day-wide mean is arithmetically 62.88 — 67.3 (tie) / 64.3 / 77.9
+restored / 42.0 — still below the shipped 63.70. Worth stating as the general
+form: **a demotion can only rescue a mechanism whose losses are in the
+non-binding cells.** The single cell the gate wins, 2026-08-03 politics
+(70.3 → 71.5), is a binding cell, which is the same mechanism seen from the other
+side and does not carry the other 23.
+
+**The tab numbers came from the deployed RPC rather than from a variant in
+`11_category_eval.sql`, on purpose.** The gate needs a per-(day, category) edge
+set and `analysis.day_edges` is day-wide, so a variant there would have been a
+third copy of sieve 6 plus a fourth copy of the pair/NPMI arithmetic. Instead:
+flip `place_needs_edge`, pull `keyword_graph`'s node array for all 28 cells, flip
+back, score against the same labels and the same pool definition
+`11_category_eval.sql` uses — the method Task 3 used to validate the harness's own
+copy of sieve 6. **The gate-off run reproduces both harnesses to the digit**
+(24-cell mean 78.58, all-view 63.70 / 93.53 on all four days), which is what makes
+the gate-on run comparable.
+
+### α: not measurable on this day set
+
+| α | mean F1 | mean precision | story_rank |
+| --- | --- | --- | --- |
+| **0.00 (ships)** | **63.70** | **93.53** | 1/1/1/1 |
+| 0.25 | 63.20 | 92.83 | 1/1/1/1 |
+| 0.50 | 63.20 | 92.83 | 1/1/1/1 |
+| 0.75 | 63.20 | 92.83 | 1/1/1/1 |
+| 1.00 | 63.20 | 92.83 | 1/1/1/1 |
+
+Out of band — deliberately **not** in `analysis.sieve_configs`, because α > 1 is
+outside the estimator's meaning and adding the rows would cost every future
+harness run two more `keyword_signals` calls and put two more values under rule
+4 permanently:
+
+| α | 07-31 | 08-01 | 08-02 | 08-03 | mean F1 | story_rank |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1.50 | 65.3 | 64.3 | 77.9 | 42.7 | 62.55 | 1/1/1/1 |
+| 2.00 | 65.3 | 64.3 | 77.9 | 42.0 | 62.38 | 1/**2**/1/1 |
+| 4.00 | 65.3 | 64.3 | 77.9 | 40.8 | 61.98 | 1/**4**/**5**/1 |
+
+Monotonically non-increasing, and past 2.00 rule 5 begins to bite, so the curve
+does not turn around above the named range. α = 0 is the identity and α = 1 is
+the estimator migration `0025` set out to build, so the named sweep spans the
+parameter's whole meaningful domain rather than a window inside it — which is
+rule 2 answered by the domain rather than by widening.
+
+**The honest one-line summary is "α is not measurable on this day set", not "α
+costs 0.5 F1".** It loses on exactly one day, and the balance factors say why:
+
+| day | min factor | max factor | section totals |
+| --- | --- | --- | --- |
+| 2026-07-31 | 0.999 | 1.006 | 150/149/150/150/150/150 |
+| 2026-08-01 | 0.742 | 1.869 | 167/207/102/210/257/201 |
+| 2026-08-02 | 0.773 | 1.294 | 89/114/89/149/149/101 |
+| 2026-08-03 | 0.808 | 1.201 | 313/445/309/372/453/305 |
+| *2026-08-04, 11:00 KST* | *0.741* | *1.790* | *322/561/241/479/582/403* |
+| *2026-08-04, 20:24 KST* | *0.756* | *1.563* | *391/710/354/629/732/503* |
+
+**The last two rows are the same day and they are stamped for that reason.** The
+four days above them are settled and reproducible; 2026-08-04 is still being
+collected, and in the nine hours between those two readings it went from 130
+qualifying words to **240** and from 2,4xx headlines to 3,319. Any 08-04 figure
+in this repository is a snapshot. Quoting one without its clock time next to four
+settled days is how it gets read as a measurement, and this table is the one
+place the difference is visible.
+
+2026-07-31 is a single capped collection run, balanced to within 0.6% of 1 — so α
+cannot correct anything there and all it does is break a raw-`df` tie by a
+third-decimal hair. **That is the only day it loses on.** The two days with real
+imbalance are label-neutral at every α, and 2026-08-02 draws 69 words against a
+cap of 70 so no substitution is available at all.
+
+**Rule 5 holds at α = 1, and the denominator is why.** The top story from
+`analysis.eval_days` keeps rank 1 on every eval day, and the reason is that the
+divisor is the word's *own* section distribution rather than its top category —
+a spread word gets a blend of factors, so a word that spans sections is not
+charged the largest section's divisor:
+
+| day | word | df | df_balanced (α = 1) | rank α = 0 | rank α = 1 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-07-31 | 폭염 | 38 | 38.0 | 1 | 1 |
+| 2026-08-01 | 폭염 | 42 | 42.0 | 1 | 1 |
+| 2026-08-02 | 김민석 | 45 | 34.8 | 1 | 1 |
+| 2026-08-03 | 폭염 | 121 | **125.6** | 1 | 1 |
+
+폭염 in fact *gains*: 121 → 125.6 on 2026-08-03. On 07-31 and 08-01 those days
+were collected evenly enough that N̄/N_c ≈ 1 for its sections and the number does
+not move at all. The same reading taken on *2026-08-04 at 11:00 KST* gives
+113 → 118.3, and is a snapshot rather than a measurement for the reason the
+balance-factor table above states — that day was still collecting.
+
+This table is here because CLAUDE.md's "Word scoring" section quotes the
+121 → 125.6 figure, and a figure quoted in a tracked file has to be traceable to
+a tracked one.
+
+**The day the mechanism was built for is 2026-08-04 and it is not in
+`analysis.eval_days`.** Not an oversight: it is *today*, the cron collects again
+at 15, 19 and 23 KST, and a day that is still moving cannot carry a label set —
+rule 4's second trigger, which has already fired once on this branch. Adding it
+was considered and declined for exactly that reason.
+
+**Diagnostic, out of band and label-free**, α 0 against α 0.50 on 2026-08-04,
+**taken at 20:24 KST** against that reading's section totals. Four words of
+seventy swap, in the designed direction:
+
+| move | word | count | top section (total at 20:24) |
+| --- | --- | --- | --- |
+| leaves | 강도살인 | 6 | society (732) |
+| leaves | 오토바이 | 6 | society (732) |
+| leaves | 고려아연 | 5 | economy (710) |
+| leaves | 근원물가 | 5 | economy (710) |
+| enters | 기아 | 5 | culture (391) |
+| enters | 무장해제안 | 5 | world (503) |
+| enters | 미일 | 5 | world (503) |
+| enters | 아이디어 | 5 | world (503) |
+
+The two thickest sections lose four words and two thinner ones gain them; the
+thinnest, it at 354, gains nothing. Whether the trade is an improvement is the
+question labels answer and this day has none, so **this moves nothing** — it is a
+diagnostic in the sense `30_word_scores.sql` is one. It is written down so a
+future round knows the effect is real, small and correctly directed before it
+pays for the labels, **not so that anyone reproduces these eight words**: the day
+is still collecting and the table above shows how far it moved in nine hours.
+
+### What is left active
+
+`24_cap_and_place_configs.sql` now sets `active = (ord in (200))` — the shipped
+sieve alone — the way `19_rounds_ten_to_twelve_configs.sql` narrows at its tail.
+The nine declined rows stay in the file. Keeping them active is not free: the
+four α rows put four more distinct α values into the harness's `alphas` CTE and
+each costs one `keyword_signals` call per day. **Round thirteen's own sitting**
+measured that as `10_sieve_eval.sql` 4.2s → 24.8s and `20_unlabeled.sql`
+4.1s → 23.3s when the four rows went in; **this round's sitting** measures
+`10_sieve_eval.sql` at **6.2s** with 200 alone. Those are two sittings and the
+pairs are only comparable inside each — the shape they agree on is that the cost
+tracks the distinct α count, not the configuration count. And worse than the
+seconds, every active row carries a permanent rule-4 obligation, since a later
+collection can promote a word onto *its* screen and the worklist will then demand
+it be labelled before any row can be read.
+
+Nothing is deleted from the database either. `place_gate` and `balance_alpha`
+stay as columns, `analysis.day_edges` stays as a table, and re-activating a row
+is one `UPDATE`. The α arm in particular is expected to be re-run once
+2026-08-04 stops collecting and can be labelled.
+
 ## Labels
 
 891 words, covering everything drawn by every **active** configuration in

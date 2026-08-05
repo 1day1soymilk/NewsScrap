@@ -9,6 +9,7 @@ import {
   type ScrapedHeadline,
 } from './lib/headlines.ts'
 import { extractNouns, filterNouns } from './lib/nouns.ts'
+import { DEFAULT_COLLECT_CAP, resolveCollectCap } from './lib/collectCap.ts'
 // The node entry, which is the one the probe in Task 1 proved: `Garu.load()`
 // reads the wasm and the 1.4MB model off disk through fs/promises, and npm
 // packages sit on disk under Deno, so it simply works. The browser entry and
@@ -19,56 +20,111 @@ import { Garu } from 'npm:garu-ko@0.9.12'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-// A section's first page carries ~45 headlines and each "더보기" page adds ~36,
-// so this cap is reached in four pages (measured across all six sections).
-// MAX_LIST_PAGES is slack for a section whose pages come back short.
+// **The per-section cap is `scoring_weights.collect_cap` and no longer lives
+// here.** It was a literal, and migration 0023 moved it because two things have
+// to agree about it — this function, which enforces it, and the reporting that
+// says whether a section hit it. The read is at the top of Deno.serve.
 //
-// **The measurement that set this needs re-testing, and it is now known to have
-// measured the wrong thing.** 300 over 12 pages killed the run — 546
-// WORKER_RESOURCE_LIMIT at 63s, against a successful 150-per-section run of
-// 64.6s the same morning — and that was read as a wall-clock wall near 63s.
-// It is not. The platform kills on **CPU time**, roughly 3s of it per worker,
-// and it says so: `CPU Time exceeded` in the function logs. The 63s run died
-// because it was doing 5,400 ETRI-paced round trips, not because 63 seconds
-// had passed; a 64.6s run passed the same morning on fewer of them.
+// **CPU is no longer the reason not to page deeper. It was tested and it fits.**
+// The refusal that used to stand here — 300 over 12 pages returned 546
+// WORKER_RESOURCE_LIMIT once — was diagnosed twice and wrong both times: first
+// as a wall-clock wall near 63s, then as this function's own CPU cost. Measured
+// on 2026-08-04 with a throwaway probe that scrapes and analyses exactly as this
+// file does and writes nothing:
 //
-// Since storage was batched (see processHeadlines) a full 900-headline run
-// costs 4-5s of wall clock and a small fraction of the CPU budget, so **deeper
-// paging may now fit and nobody has tried.** Measure `elapsedMs` and watch for
-// `CPU Time exceeded` rather than trusting either number above.
+//   cap 150 →   900 headlines, 816ms of analysis, 2.0s wall → 200
+//   cap 300 → 1,800 headlines, 1,481ms of analysis, 4.2s wall → 200
+//   cap 441 → 2,630 headlines, 2,082ms of analysis, 5.3s wall → 200
 //
-// Note that the reason to prefer running more often is unaffected, because it
-// is about freshness rather than cost: **a deeper page is older news, a later
-// run is newer news.**
+// That is the **all-new** case, the one a live run cannot be made to take on
+// demand, and 441 per section is past anything anyone has proposed.
 //
-// The way to collect more is **to run more often**, and it is better on its own
-// terms. A deeper page is older news; a later run is newer news. Measured on
-// 2026-08-03, one manual run some hours after the 07:00 cron found **404 new
-// headlines inside this same 150-per-section window** — the sections churn
-// through the day. There are now four cron jobs (07, 11, 15, 19 KST) rather
-// than one, all calling this same function.
+// **The 546s are per worker and cumulative, not per request**, which is what
+// every earlier reading of them missed. The same cap-441 call that returns 200
+// on a fresh worker returns 546 as the third call in a row on a warm one, and
+// the ladder in the 2026-08-04 analyser probe (reps=1 → 200, reps=2,3,5,7,10,40
+// → 546, in that order and not in order of work) is the same artefact: once a
+// worker's budget is spent every later request in it dies whatever its size.
+// By the same logic a cron four hours apart should never share a worker — but
+// that is reasoning about the schedule, not a measurement: nothing here
+// observed how long a worker survives, only that rapid repeated invocation
+// trips this. **A collect-now button has to expect a 546 that says nothing
+// about the run it killed.**
 //
-// Why more headlines are wanted at all: `min_headlines` is the floor under
-// which a word is noise, and at ~900 a day raising it from 3 to 4 leaves only
-// 51 to 71 words eligible, so three of the four archived days can no longer
-// fill the 70 places on the canvas. Measured, that floor costs 8.1 mean F1
-// (67.30 to 59.20) with precision flat and recall collapsing — rule 5 in
-// scripts/analysis/README.md exactly. **The floor is not wrong, the corpus is
-// thin.** A word needs four headlines to be worth drawing whether the day holds
-// 900 or 1,800; what changes is how many words clear it.
+// **What stops a raise is the date stamp, not the budget.** `collected_date` is
+// the day of collection and a deeper page is an older article, so paging past
+// the day boundary files yesterday's news under today. Measured at 20:10 KST on
+// 2026-08-04, per section, at rank #400 — the deepest depth the measurement's
+// table covers: the fast sections never leave today, and society reaches only
+// 4 hours back at that depth — while culture and it cross into 2026-08-03 at
+// about rank 290 (ranks 278-296 for the 7 rows a cap-300 run actually stored,
+// all in it).
+//
+// Two things keep that small and both are worth knowing before anyone reads the
+// 7 as an argument either way. `UNIQUE (category_id, link)` is global rather
+// than per-date, so a yesterday article that yesterday collected cannot be
+// re-stamped — only one that fell in a coverage hole can. And **the effect is
+// already here at 150**: the 02:29 and 07:00 runs of 2026-08-04 stored 89
+// culture, 64 it and 43 world articles published on 08-03, because at 02:29
+// there are only 2.5 hours of today's news and a 150-headline window has to
+// reach back past midnight to fill itself.
+//
+// **The cap binds, and what is behind it is today's news.** society stored
+// exactly 150 on the 11:00, 15:00 and 19:00 runs of 2026-08-04 and publishes
+// about 75 headlines an hour, so a 150 window covers under 2 hours of a 4-hour
+// cron gap and the rest is lost for good. At 20:10 a cap of 300 would have taken
+// 478 new links against 150's 278. That gain is concentrated in society,
+// economy and politics; culture, world and it gain 1, 4 and 11, so **deeper
+// paging widens the section gap rather than closing it** — Task 7's finding,
+// reproduced from the other side.
+//
+// Why more headlines are wanted at all is settled elsewhere and is not the
+// `min_headlines` argument this comment used to make: round seven of
+// scripts/analysis/README.md found that on a fat day the word at rank 70 already
+// has eight headlines, so a promotion floor is unnecessary rather than deferred.
+// What a thicker day buys is a deeper pool for the render cap to pick 70 from,
+// and Task 7 measured that the top 70 of a bigger pool is a better 70 — 95.7%
+// good against 68.8% for ranks 71 and below.
+//
+// The reason to prefer running more often is unaffected and is about freshness
+// rather than cost: **a deeper page is older news, a later run is newer news.**
+// Measured on 2026-08-03, one manual run some hours after the 07:00 cron found
+// 404 new headlines inside the same 150-per-section window. There are six cron
+// jobs (03, 07, 11, 15, 19, 23 KST), all calling this same function.
 //
 // There is no external call limit any more — the analyser is in-process — so
 // nothing outside this function constrains how often or how deep it runs.
-const MAX_HEADLINES_PER_CATEGORY = 150
-const MAX_LIST_PAGES = 8
+// MAX_LIST_PAGES is slack behind the cap, never a second cap. A section's first
+// page carries 44-46 headlines and each "더보기" page adds exactly 36, so 8 pages
+// stop at ~298 — which is a limit the operator did not choose and cannot see,
+// since it fires as a short scrape rather than as anything named. 12 pages reach
+// ~440, past any cap this function has been measured at. Nothing else reads it.
+const MAX_LIST_PAGES = 12
 
 // **What the next version of this file is for**, written down because all three
 // of the numbers around here lost their justification on the same day:
 //
-// 1. **Re-tune collection volume** — the cap and the page count, each measured
-//    on its own, against the CPU budget rather than the wall clock.
+// 1. **Decide what `collected_date` should mean, and then raise the cap.** The
+//    budget question is settled above and the answer is that 300 fits. What is
+//    not settled is whether an article published yesterday should be filed under
+//    the day it was collected. The list cursor is a YYYYMMDDHHMMSS stamp of the
+//    oldest article on the page (`extractListCursor`), so stopping at the day
+//    boundary is available and costs nothing to compute — but it would change
+//    what the early runs collect today, at 150, and so has to be measured
+//    against the sieve rather than assumed. Until that is decided the cap is a
+//    number in `scoring_weights`, one `update` away, with no redeploy.
+//
+//    **If the cap is ever raised, the check to run is the pre-today count on
+//    the 03:00 and 07:00 runs, not on an evening one.** The whole of the
+//    20:10–21:10 KST measurement above is the regime least likely to reach past
+//    midnight — the fast sections already had most of a day's news between them
+//    and the day boundary. The 03:00 and 07:00 runs are the opposite regime, the
+//    one where a deeper page reaches furthest into yesterday, and they were not
+//    measured because they cannot be provoked on demand.
 // 2. **A collect-now button** in the frontend, so a collection can be taken on
-//    demand instead of waiting for the next of six crons.
+//    demand instead of waiting for the next of six crons. Note the worker budget
+//    is cumulative: pressing it repeatedly is exactly the shape that returns 546
+//    with no body.
 // 3. **Filter duplicate headlines by title.** `UNIQUE (category_id, link)` plus
 //    `canonicalLink` stop one article arriving twice, but the same story from a
 //    different outlet is not caught — 2026-08-01 holds 190 such rows.
@@ -308,6 +364,43 @@ Deno.serve(async () => {
   const collectedDate = todayInSeoul()
   const summary: Record<string, string> = {}
 
+  // One read, before the loop, so every category in a run scrapes to the same
+  // depth — reading it per category would let a mid-run edit split the run.
+  // A failed read is a fallback rather than an abort: see lib/collectCap.ts for
+  // why the coercion is a function and not `Number(value ?? 150)`.
+  //
+  // The request itself is also wrapped, not just its `error` field. postgrest-js
+  // resolves an ordinary failed fetch into `{ data: null, error }` rather than
+  // rejecting, which the `capError` check below already covers — but a thrown
+  // rejection (a network error the client itself raises, a client bug) is not
+  // that shape, and an unguarded `await` would abort the handler before the
+  // category loop instead of falling back, which is exactly the "a failed read
+  // silently collects nothing" case the default exists to prevent.
+  let capRow: { value: unknown } | null = null
+  try {
+    const { data, error: capError } = await supabase
+      .from('scoring_weights')
+      .select('value')
+      .eq('key', 'collect_cap')
+      .maybeSingle()
+    if (capError) console.error('collect_cap read failed, using the default:', capError)
+    else capRow = data
+  } catch (capThrow) {
+    console.error('collect_cap read threw, using the default:', capThrow)
+  }
+  const headlineCap = resolveCollectCap(capRow?.value)
+  if (headlineCap === DEFAULT_COLLECT_CAP && capRow?.value == null) {
+    console.error(`CHK collect_cap unreadable — falling back to ${DEFAULT_COLLECT_CAP}`)
+  } else if (capRow?.value != null && headlineCap !== Number(capRow.value)) {
+    // The row exists and holds something, but not a shape resolveCollectCap can
+    // use — 'many', 0, a negative number, an object. The branch above only ever
+    // caught a missing row or a null value, so this is the only signal an
+    // operator gets when an `update` did not take the shape it needed to.
+    console.error(
+      `CHK collect_cap unusable (${JSON.stringify(capRow.value)}) — falling back to ${headlineCap}`,
+    )
+  }
+
   // Each category gets its own slice of the budget rather than racing for one
   // shared deadline. With a single deadline the categories at the end of the
   // list would be the ones starved on every slow run, and always the same ones.
@@ -332,10 +425,7 @@ Deno.serve(async () => {
       }
 
       const scrapeStart = Date.now()
-      const headlines = await fetchSectionHeadlines(
-        category.sectionId,
-        MAX_HEADLINES_PER_CATEGORY,
-      )
+      const headlines = await fetchSectionHeadlines(category.sectionId, headlineCap)
       console.log(
         `CHK ${category.slug} scraped ${headlines.length} in ${Date.now() - scrapeStart}ms ` +
           `(run ${Date.now() - startedAt}ms)`,
@@ -354,9 +444,15 @@ Deno.serve(async () => {
         `CHK ${category.slug} processed ${tally.processed} in ${Date.now() - processStart}ms ` +
           `(run ${Date.now() - startedAt}ms)`,
       )
+      // The two phase timings are in the body as well as in the CHK lines
+      // because the CHK lines are only reachable from the dashboard — the
+      // Management API's log endpoint refuses them — and the split between
+      // scraping and processing is the only thing that says which half of a run
+      // is approaching the CPU budget. It costs about 20 characters a category.
       summary[category.slug] =
         `ok: ${headlines.length} collected, ${tally.processed} processed, ` +
-        `${tally.stored} new, ${tally.repaired} repaired, ${tally.failed} noun rows failed`
+        `${tally.stored} new, ${tally.repaired} repaired, ${tally.failed} noun rows failed ` +
+        `(scrape ${processStart - scrapeStart}ms, process ${Date.now() - processStart}ms)`
     } catch (categoryError) {
       console.error(`Category "${category.slug}" failed:`, categoryError)
       summary[category.slug] = `failed: ${String(categoryError)}`
@@ -364,7 +460,10 @@ Deno.serve(async () => {
   }
 
   return new Response(
-    JSON.stringify({ date: collectedDate, elapsedMs: Date.now() - startedAt, summary }),
+    // `cap` is in the response because it is now a database value: without it
+    // the summary cannot be read without a second query asking what the run was
+    // configured with, and a run's own report should say what it ran with.
+    JSON.stringify({ date: collectedDate, cap: headlineCap, elapsedMs: Date.now() - startedAt, summary }),
     { headers: { 'Content-Type': 'application/json' } },
   )
 })

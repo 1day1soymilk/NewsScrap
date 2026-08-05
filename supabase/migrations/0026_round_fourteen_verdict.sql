@@ -1,0 +1,210 @@
+-- 0026: round fourteen measured three mechanisms and ships none of them.
+--
+-- **Not a no-op migration and not a placeholder.** Migrations 0023 to 0025 wired
+-- a place gate, a measurable render cap and a category-balance exponent, and all
+-- three shipped switched off pending this measurement. The measurement is in, and
+-- it says leave all three where they are. What this file changes is the `note`
+-- column on four keys, so the deployed database carries the reason rather than
+-- only this repository. **`value` appears in no SET clause below**, deliberately:
+-- a round that earns nothing must be as legible as one that earns something, or
+-- the next person re-runs it.
+--
+-- Every row quoted here has `unlab` 0 and `story_rank` 1. `20_unlabeled.sql` and
+-- `21_unlabeled_category.sql` both returned nothing before the harness was read
+-- and again after, so rule 4 is satisfied on both worklists.
+--
+--
+-- ## 1. `place_needs_edge` stays 0 — the labels disagree with the premise
+--
+-- The gate draws a `word_overrides` place only when a line joins it to a
+-- non-place. `10_sieve_eval.sql` (config 210 against 200, four days) and the
+-- deployed RPC scored over all six tabs:
+--
+--                            mean F1   mean prec   wins / losses
+--     all-categories, 4 days
+--       gate off (ships)      63.70      93.53
+--       gate on               62.67      92.05     0 wins, 3 losses, 1 tie
+--     category tabs, 24 cells
+--       gate off (ships)      78.58      85.40
+--       gate on               75.22      84.48     1 win, 17 losses, 6 ties
+--
+-- At cap 100 the same comparison gives 70.60 -> 69.98 day-wide: the gate loses at
+-- every cap measured, so a wider canvas does not rescue it.
+--
+-- **The cost is not a trade, it is one-sided, and that is the finding.** Diffing
+-- the drawn word set day-wide, gate on against gate off, over the four days: the
+-- gate removes **eleven words and every one of them is labelled good** — 서울
+-- twice, 울산 twice, 제주, 강남, 부산, 강원, 광주, 인천, 포항 — and promotes ten,
+-- of which six are good (경계작전, 공화당, 김동관, 김병기, 김용, 한반도) and four
+-- bad (단일종목, 반도체주, 고속도로, 대공습). Net: five good words off the screen
+-- and four bad ones onto it.
+--
+-- **So the premise is what failed, not the threshold.** The gate was built on
+-- "a place with no line to a non-place is backdrop". A place can be the story and
+-- still hold no *drawn* line, because its partner sits below the render cap —
+-- 부산 on 2026-08-02 is the clean case, a day that qualifies only 69 words, where
+-- the gate drops it and promotes nothing at all. There is no threshold to move
+-- here: the gate is already at its weakest setting, one edge.
+--
+-- **Do not re-file this as head_pos and reach for a demotion.** That signature is
+-- a day-wide *win* with a category loss, which says the mechanism needs the cap
+-- to be binding and a demotion will keep the win while dropping the loss. This
+-- gate loses on **both** surfaces, and it loses day-wide precisely where the cap
+-- binds. A demotion is a no-op where the cap does not bind and identical to the
+-- cut where it does, so its day-wide mean is arithmetically 62.88 — 07-31 67.3
+-- (tie), 08-01 64.3, 08-02 77.9 restored, 08-03 42.0 — still below the shipped
+-- 63.70. The one cell the gate wins, 2026-08-03 politics (70.3 -> 71.5), is a
+-- binding cell, which is the same mechanism seen from the other side and is not
+-- enough to carry the other 23.
+--
+-- The machinery from 0023 and 0024 stays in place, and what it costs is measured.
+-- One sitting, 2026-08-03, all-categories view, `explain (analyze, timing off)`.
+-- These three numbers may be read against each other and nothing else may be read
+-- against them:
+--
+--     0018, the sieve this branch replaced      1,403 ms
+--     0024 gate off — what ships                1,342 ms
+--     0024 gate on                              2,056 ms
+--
+-- **Switched off the restructuring costs nothing: it is 61 ms *faster* than what
+-- it replaced**, because 0018 and the shipped version now both run
+-- `keyword_signals` exactly once and the sieve is no longer re-walked for the
+-- edge query. **Switched on it costs about 1.5x** — 1.53 here, 1.35 on
+-- 2026-08-04. That is a real price and it is not "inside the baseline": 2,056 ms
+-- is half again over 1,403. It is one more thing to weigh if a later round turns
+-- the gate on, on top of the F1 and precision losses above. The residual is two
+-- extra runs of `keyword_graph_pick_edges` at ~145 ms each, bounded by the loop's
+-- iteration count rather than by anything that grows with the data.
+--
+-- **Do not pair any of those three with a number from another sitting.** This
+-- header got that wrong twice before it got it right, so the traps are named:
+-- 1,417 ms is a *pre-restructure* run of 0018; 1,096 ms is 0018's baseline on
+-- **2026-08-04**, not a gate-off figure at all; and re-running the pair after
+-- Task 2's last seven changes gives 1,358 / 1,982 where the triple above reads
+-- 1,342 / 2,056. Every one of those is a true number and none of them belongs
+-- beside the triple. Quoting across sittings is the defect class this repository
+-- keeps re-committing, and this paragraph is where it did it.
+--
+-- `word_overrides` mode 'place' also stays: a labelled fact about 45 words that a
+-- later round can read for something other than a cut.
+--
+--
+-- ## 2. `render_cap` and `node_limit` stay 70 — and the harness cannot price them
+--
+--     cap    mean shown   mean prec   mean F1   story_rank
+--      70       69.75       93.53      63.70     1/1/1/1
+--      85       81.00       88.80      66.38     1/1/1/1
+--     100       92.25       87.75      70.60     1/1/1/1
+--     130      105.75       85.40      73.80     1/1/1/1
+--
+-- **F1 rises monotonically with the cap and that is an artefact of the metric,
+-- not a result.** `10_sieve_eval.sql` holds the recall denominator fixed — every
+-- labelled-good word on the day with df >= 3 — while the cap is exactly how many
+-- words the screen shows. So widening always buys recall and F1 only turns over
+-- when precision collapses, which at these caps it never does. The optimum is at
+-- the edge of the sweep, and rule 2 says widen; widening is pointless, because
+-- the limit of this metric is "draw every word that qualifies". Rule 3 is the
+-- rule that actually applies: **the metric does not match the question.** This is
+-- what migration 0006 meant by "render_cap is not a sieve threshold, so this does
+-- not go through 10_sieve_eval.sql" — round fourteen put it through anyway and
+-- found out why the sentence was there.
+--
+-- Precision is the quantity that reads a fixed screen honestly, and it decides:
+-- **93.53 at 70 against 85.40 at 130.**
+--
+-- **The marginal bands say the same thing more sharply.** Over the three days
+-- where the cap binds, the top 70 are 201 good / 9 bad (95.7%). What each
+-- widening adds:
+--
+--     ranks  71-85     27 good / 18 bad    60.0%
+--     ranks  86-100    36 good /  9 bad    80.0%
+--     ranks 101-130    36 good / 18 bad    66.7%
+--     ranks  71-end    99 good / 45 bad    68.8%
+--
+-- Every band is drawn from a population far worse than what is already on screen,
+-- and the bands are not even monotone — 71-85 is worse than 86-100 — so there is
+-- no rank at which the screen cleanly stops being worth widening. Bad words on
+-- the canvas go from 3 to 16 on 2026-07-31 and from 2 to 23 on 2026-08-03.
+--
+-- **And nothing here re-measures the picture, which is what 0006 decided on.**
+-- That migration cut 130 to 70 because ranks 71-130 arrived faded at the minimum
+-- font size and sat in every gap between the words worth reading, and because a
+-- word cloud spends size and hue on every label so an extra word costs more here
+-- than on a node-link diagram. `scripts/layout/` measures crossings, overlap and
+-- height at 70; none of it has been re-run at 130. A cap change is a canvas
+-- change, so it needs the layout harness and a judgement about the picture, not
+-- this one.
+--
+-- `render_cap` and `node_limit` move **together** or not at all. 0006 made them
+-- equal so `faded` can only mean a `word_overrides` 'demote' entry; splitting
+-- them again would silently reintroduce faded minimum-size labels in every gap.
+--
+--
+-- ## 3. `category_balance_alpha` stays 0 — and it is *not measurable* here
+--
+--     alpha   mean F1   mean prec   story_rank
+--      0.00     63.70     93.53      1/1/1/1
+--      0.25     63.20     92.83      1/1/1/1
+--      0.50     63.20     92.83      1/1/1/1
+--      0.75     63.20     92.83      1/1/1/1
+--      1.00     63.20     92.83      1/1/1/1
+--
+-- Out of band (diagnostic, not in `analysis.sieve_configs`): 1.50 gives 62.55,
+-- 2.00 gives 62.38 and drops 08-01's top story to rank 2, 4.00 gives 61.98 and
+-- drops it to rank 4 with 08-02's to rank 5. Monotonically non-increasing, and
+-- rule 5 starts to bite past 2.00, so the curve does not turn around above the
+-- named range. alpha = 0 is the identity and alpha = 1 is the estimator this
+-- migration's predecessor asked for, so the sweep spans the parameter's whole
+-- meaningful domain rather than a window inside it.
+--
+-- **The honest summary is "alpha is not measurable on this day set", not "alpha
+-- costs 0.5 F1".** It loses on exactly one day, 2026-07-31, and that day is a
+-- single capped collection run — 150/149/150/150/150/150 headlines, balance
+-- factors within 0.6% of 1. There is nothing there for alpha to correct; all it
+-- does is break a raw-`df` tie by a third-decimal hair. The two days with real
+-- imbalance, 08-01 (0.742-1.869) and 08-03 (0.808-1.201), are label-neutral at
+-- every alpha, and 08-02 draws 69 words against a cap of 70 so no substitution is
+-- available at all.
+--
+-- **The day the mechanism was built for is 2026-08-04 and it is not in
+-- `analysis.eval_days`.** It is not there because it is *today*: the cron
+-- collects again at 15, 19 and 23 KST, and a day that is still moving cannot
+-- carry a label set. That is rule 4's second trigger, which has already fired
+-- once on this branch.
+--
+-- **Every 2026-08-04 figure below is stamped, and none of it is reproducible** —
+-- the same fact stated as a warning. Measured twice, hours apart, it moved both
+-- times: society 582 / it 241, factors 0.741-1.790, 130 words qualifying at
+-- **11:00 KST**; society 732 / it 354, factors 0.756-1.563, 3,319 headlines and
+-- **240** words qualifying at **20:24 KST**. Read any of it as a snapshot, never
+-- as a figure a later run should reproduce.
+--
+-- Diagnostic on that day, out of band and label-free, **taken at 2026-08-04
+-- 20:24 KST against section totals 391/710/354/629/732/503** (culture, economy,
+-- it, politics, society, world), alpha 0 against alpha 0.50: four words of
+-- seventy swap, and they swap in the designed direction — 강도살인 and 오토바이
+-- (society, the thickest at 732) and 고려아연 and 근원물가 (economy, 710) leave;
+-- 기아 (culture, 391), 무장해제안, 미일 and 아이디어 (world, 503) enter. The
+-- thinnest section, it at 354, gains nothing. Whether that trade is an
+-- improvement is exactly the question labels answer and this day has none, so it
+-- moves nothing here. Recorded so a future round knows the effect is real, small
+-- and correctly directed before it pays for the labels — not so that anyone
+-- reproduces these eight words.
+--
+-- 0025 already ships alpha at 0, so this migration moves nothing for it either.
+
+update public.scoring_weights
+   set note = 'sieve 6: DISABLED, and measured rather than merely unproven — round fourteen, migration 0026. Day-wide F1 63.70 -> 62.67 (0 wins, 3 losses over 4 days), tabs 78.58 -> 75.22 (1 win, 17 losses over 24 cells), and it loses at cap 100 too. It removes 11 words day-wide and all 11 are labelled good, all places. Not a head_pos-shaped problem: it loses on both surfaces, so a demotion variant would score 62.88 and still lose.'
+ where key = 'place_needs_edge';
+
+update public.scoring_weights
+   set note = 'sieve ranking: 0 = raw frequency (identity), 1 = the count under equal collection. Held at 0 by round fourteen (0026) and NOT because it was measured to cost — mean F1 63.70 vs 63.20 at every positive value, but the only day it loses on is 2026-07-31, whose six sections collected 150/149/150/150/150/150 so its balance factors sit within 0.6% of 1. The day the mechanism was built for, 2026-08-04 (society 582 against it 241 as of 11:00 KST; 732 against 354 by 20:24, which is the point), cannot be in analysis.eval_days while it is still collecting. Alpha is not measurable on this day set; re-measure when 08-04 settles and can be labelled.'
+ where key = 'category_balance_alpha';
+
+update public.scoring_weights
+   set note = 'hard stop on how many words reach the canvas. Held at 70 by round fourteen (0026). The sieve harness cannot price this: its recall denominator is fixed while the cap IS the screen size, so F1 rises monotonically to the edge of any sweep (63.70/66.38/70.60/73.80 at 70/85/100/130). Precision decides instead — 93.53 at 70 against 85.40 at 130, and ranks 71-end are only 68.8% good against the top 70''s 95.7%. Moving it is a canvas change and needs scripts/layout/ re-run, not this harness. Moves together with node_limit — see 0006.'
+ where key = 'render_cap';
+
+update public.scoring_weights
+   set note = 'drawn at full opacity; the rest fade. Held equal to render_cap since 0006 so that faded can only mean a word_overrides ''demote'' entry. Round fourteen (0026) swept the pair to 85, 100 and 130 and kept 70; the two must never be split again without reintroducing faded minimum-size labels in every gap.'
+ where key = 'node_limit';

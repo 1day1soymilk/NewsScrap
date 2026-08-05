@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import {
   CATEGORIES,
+  CATEGORY_SHARE,
   COLLECTED_DATES,
   DEFAULT_GRAPH,
   EVENT_HEADLINE_COUNTS,
@@ -37,6 +38,7 @@ export type EndpointName =
   | 'collected_dates'
   | 'headline_nouns'
   | 'daily_word_counts'
+  | 'daily_category_counts'
   | 'headlines'
   | 'keyword_graph'
   | 'event_headline_counts'
@@ -47,6 +49,7 @@ export type MockOptions = {
   collected_dates?: RowsOrFn
   headline_nouns?: RowsOrFn
   daily_word_counts?: RowsOrFn
+  daily_category_counts?: RowsOrFn
   /** Headlines per collected_date, answered as a head-count. */
   headlines?: Record<string, number>
   keyword_graph?: GraphOrFn
@@ -78,6 +81,15 @@ function parseIn(filter: string | null): string[] | null {
   return match[1].split(',').map((value) => value.replace(/^"|"$/g, ''))
 }
 
+// daily_category_counts is read one day at a time — six rows a day reaches
+// PostgREST's cap in 166 days — so the default has to read the request rather
+// than being a constant, exactly like wordCountsFor. A mock that ignored the
+// filter would pass even if the app asked for the wrong day.
+function categoryShareFor({ params }: MockRequest): Rows {
+  const date = (params.get('date') ?? '').replace(/^eq\./, '')
+  return CATEGORY_SHARE.filter((row) => row.date === date)
+}
+
 function wordCountsFor({ params }: MockRequest): Rows {
   const dates = parseIn(params.get('collected_date'))
   const words = parseIn(params.get('word'))
@@ -104,11 +116,14 @@ const TABLE_DEFAULTS: Record<string, RowsOrFn> = {
   collected_dates: COLLECTED_DATES,
   headline_nouns: HEADLINE_ROWS,
   daily_word_counts: wordCountsFor,
+  daily_category_counts: categoryShareFor,
 }
 
-// The fallback is resolved the same way the override is: daily_word_counts has
-// to answer two different dates through one endpoint, so its default is a
-// function too, and returning it unresolved would serialise to `undefined`.
+// The fallback is resolved the same way the override is: daily_word_counts and
+// daily_category_counts each have to answer two different dates through one
+// endpoint, so their defaults are functions too, and returning one unresolved
+// would serialise to `undefined` — which reaches the app as an empty result and
+// reads exactly like "no data".
 function resolve<T>(
   value: T | ((request: MockRequest) => T) | undefined,
   fallback: T | ((request: MockRequest) => T),

@@ -66,6 +66,46 @@ export const COLLECTED_DATES: CollectedDateRow[] = [
   { collected_date: previousDayInSeoul(), headline_count: HEADLINE_COUNTS[previousDayInSeoul()] },
 ]
 
+export type CategoryShareRow = { date: string; slug: string; headlines: number; capped: boolean }
+
+// daily_category_counts rows. **The day's total is read from COLLECTED_DATES
+// rather than written out again**: the donut's shares are that day's headlines
+// split six ways, and a copy that drifted would put a chart on screen describing
+// a day that does not exist — the same rule COLLECTED_DATES itself follows.
+//
+// The split is fixed weights so the percentages are stated rather than emergent,
+// and society is marked `capped` on today only, so one assertion can show the
+// caveat appearing and another can show it staying away.
+const SHARE_WEIGHTS: [string, number, boolean][] = [
+  ['society', 4, true],
+  ['politics', 3, false],
+  ['economy', 2, false],
+  ['culture', 1, false],
+  ['world', 1, false],
+  ['it', 1, false],
+]
+
+// The remainder goes to the first (largest) section so the six rows sum to the
+// day's total exactly. A fixture whose parts do not add up to its own whole is a
+// day that does not exist, which is the thing deriving it was meant to prevent.
+function shareFor(date: string, capped: boolean): CategoryShareRow[] {
+  const total = HEADLINE_COUNTS[date] ?? 0
+  const weight = SHARE_WEIGHTS.reduce((sum, [, w]) => sum + w, 0)
+  const rows = SHARE_WEIGHTS.map(([slug, w, isCapped]) => ({
+    date,
+    slug,
+    headlines: Math.floor((total * w) / weight),
+    capped: capped && isCapped,
+  }))
+  rows[0].headlines += total - rows.reduce((sum, row) => sum + row.headlines, 0)
+  return rows
+}
+
+export const CATEGORY_SHARE: CategoryShareRow[] = [
+  ...shareFor(todayInSeoul(), true),
+  ...shareFor(previousDayInSeoul(), false),
+]
+
 // daily_word_counts rows for the two days above, which is what computeSurges
 // compares. Counts match DEFAULT_GRAPH's so the two fixtures tell one story.
 //

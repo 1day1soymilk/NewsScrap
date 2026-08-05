@@ -35,28 +35,54 @@ fi
 
 # The API takes JSON, so the SQL has to be encoded rather than interpolated —
 # these scripts are full of quotes, backslashes and newlines.
+#
+# The temp file carries the pid because several of these can be in flight at once
+# — the analysis harness is routinely driven by more than one agent, and a fixed
+# name means one run's SQL is executed under another run's name.
+query_file="${TMPDIR:-/tmp}/run-sh-query.$$.json"
+trap 'rm -f "$query_file"' EXIT
+
 SQL="$sql" python -c '
 import json, os, sys
 sys.stdout.write(json.dumps({"query": os.environ["SQL"]}))
-' > "${TMPDIR:-/tmp}/run-sh-query.json"
+' > "$query_file"
 
+# `--retry` covers the Management API's transient 5xx, which showed up on roughly
+# one call in three on 2026-08-04 and cost a measurement run each time. curl
+# retries 408/429/500/502/503/504 on its own; nothing here has to know which.
 response="$(curl -sS -X POST \
+  --retry 3 --retry-delay 2 --retry-connrefused \
+  --write-out '\n%{http_code}' \
   "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
   -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
-  --data-binary @"${TMPDIR:-/tmp}/run-sh-query.json")"
+  --data-binary @"$query_file")"
 
-RESPONSE="$response" python -c '
+status="${response##*$'\n'}"
+response="${response%$'\n'*}"
+
+# **The split is on whether the body is JSON, not on the status code**, and that
+# is the whole point of carrying the status down here. The API answers a SQL
+# error with HTTP 400 and a JSON object naming it, so a status check alone would
+# call a malformed query a transport failure. A gateway 5xx answers with an HTML
+# page, which is not JSON — and that used to print "unparseable response",
+# indistinguishable at a glance from a bad query, so the natural reaction was to
+# go and debug SQL that had never run.
+RESPONSE="$response" STATUS="$status" python -c '
 import json, os, sys
 
-body = os.environ["RESPONSE"]
+body, status = os.environ["RESPONSE"], os.environ["STATUS"]
 try:
     rows = json.loads(body)
 except json.JSONDecodeError:
-    sys.exit("run.sh: unparseable response: " + body[:400])
+    sys.exit(
+        "run.sh: HTTP %s and the body is not JSON — a transport failure, not a\n"
+        "        SQL error. The query never reached Postgres.\n        %s"
+        % (status, body[:400].replace("\n", " "))
+    )
 
 if isinstance(rows, dict):                 # the API reports errors as an object
-    sys.exit("run.sh: " + json.dumps(rows, ensure_ascii=False)[:800])
+    sys.exit("run.sh: HTTP %s %s" % (status, json.dumps(rows, ensure_ascii=False)[:800]))
 if not rows:
     print("(no rows)")
     sys.exit()

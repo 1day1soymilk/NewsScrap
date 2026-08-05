@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeGraphLayout, nextLayoutWidth, routeEdge, seededRandom } from './graphLayout'
+import { computeGraphLayout, CURVE_STEPS, nextLayoutWidth, routeEdge, seededRandom } from './graphLayout'
 import type { EdgeCurve, MeasuredWord, PlacedNode } from './graphLayout'
 import type { GraphEdge } from '../lib/types'
 
@@ -566,6 +566,256 @@ describe('사건 구역', () => {
     const spokes = ['가', '나', '다', '라'].map((w) => distance(hub, find(nodes, w)))
     // 한 반지름 위에 있다.
     expect(Math.max(...spokes) - Math.min(...spokes)).toBeLessThan(1)
+  })
+})
+
+describe('흩뿌리기', () => {
+  // routeEdge의 intrusion()이 걷는 표본과 scatterLoose가 찍는 표본이 같은 점이어야
+  // 불변식이 성립하므로, 구간 수는 저쪽에서 읽어 온다 — 여기에 32를 손으로 적으면
+  // 세 리터럴이 서로 같기를 바라는 일이 된다.
+  function curvePoints(c: EdgeCurve) {
+    return Array.from({ length: CURVE_STEPS + 1 }, (_, i) => {
+      const t = i / CURVE_STEPS
+      const m = 1 - t
+      return {
+        x: m * m * c.x1 + 2 * m * t * c.cx + t * t * c.x2,
+        y: m * m * c.y1 + 2 * m * t * c.cy + t * t * c.y2,
+      }
+    })
+  }
+
+  /**
+   * 실제 하루의 비율에 가까운 픽스처 — 사건 몇 개에 걸친 연결 단어 14개와 무연결
+   * 단어 20개.
+   *
+   * **성긴 픽스처는 이 불변식을 지키지 못한다.** 아래 `sparse`(연결 6 / 무연결 6)로는
+   * 곡선 찍기를 통째로 지워도, 구역 막기를 지워도 시험이 전부 통과한다 — 자리가
+   * 남아돌면 "이미 놓인 것에서 제일 먼 칸"이 어차피 선과 구역을 비껴가기 때문이다.
+   * 통과만 본 단정은 아직 시험이 아니다.
+   *
+   * 이 픽스처는 두 변이에서 모두 무너진다. 곡선을 안 찍으면 550px에서 4개, 600px에서
+   * 2개의 무연결 단어가 선 위에 앉고, 구역을 안 막으면 각각 3개와 5개가 남의 이야기
+   * 안에 앉는다. 폭을 둘 재는 것도 그래서다 — 한 폭은 우연일 수 있다.
+   *
+   * **구역 밖을 지나는 곡선이 남아 있어야 곡선 찍기를 시험할 수 있고, 이 픽스처는
+   * 그것을 쌍마다 다리 하나로 보장하지 않는다.** 아래 여섯 개의 사건 간 엣지 중
+   * 둘은 같은 쌍에 얹혀 있고, `MERGE_MIN_EDGES`가 실제로 그 쌍을 합친다. 돌려 보면
+   * 이렇게 된다 (550px·600px 동일):
+   *
+   * - 루뱅이 내놓는 커뮤니티는 다섯. 정치 넷이 {정청래·김민석}과 {민주당·전당대회}로
+   *   쪼개진다.
+   * - 병합 뒤 구역은 **셋**. {트럼프·이스라엘·하마스·가자}와 {폭염·양산·경남}은
+   *   가자–양산·이스라엘–경남 **둘**로 이어져 한 사건(7단어)이 되고, 정치 두 쪽은
+   *   김민석–민주당·정청래–전당대회 둘로 다시 붙는다.
+   * - 정치×증시는 엣지가 둘(전당대회–환율, 코스닥–김민석)이지만 정치의 **다른**
+   *   반쪽에 하나씩 걸려 쌍마다 하나라서 합쳐지지 않는다.
+   * - 그래서 구역 밖을 지나는 곡선이 넷 남는다: 민주당–폭염, 트럼프–코스피,
+   *   전당대회–환율, 코스닥–김민석. 시험이 필요로 하는 것은 이 넷이다.
+   *
+   * 픽스처를 건드릴 때 지켜야 하는 것은 "쌍마다 하나"가 아니라 **합쳐지고 남는
+   * 다리가 0이 아닐 것**이다. 0이면 곡선 찍기를 시험할 것 자체가 없어진다.
+   */
+  const dense = {
+    words: [
+      ...(
+        [
+          ['트럼프', 30], ['이스라엘', 26], ['하마스', 22], ['가자', 20],
+          ['정청래', 30], ['김민석', 26], ['민주당', 22], ['전당대회', 18],
+          ['폭염', 28], ['양산', 24], ['경남', 20],
+          ['코스피', 26], ['코스닥', 22], ['환율', 18],
+        ] as [string, number][]
+      ).map(([text, count]) => ({
+        word: text,
+        count,
+        fontSize: 22 + count / 3,
+        textWidth: text.length * (22 + count / 3) * 0.95,
+        faded: false,
+      })),
+      ...[
+        '월요일', '가능성', '변동성', '막바지', '무방비', '시험대', '승부수', '수도권',
+        '테러범', '최고위원', '경찰관', '보릿돌', '상한가', '유조선', '까마귀', '아르헨',
+        '호르무즈', '레버리지', '클라우드', '배터리',
+      ].map((text, i) => ({
+        word: text,
+        count: 6 - (i % 3),
+        fontSize: 18,
+        textWidth: text.length * 17,
+        faded: false,
+      })),
+    ] as MeasuredWord[],
+    edges: [
+      edge('트럼프', '이스라엘', 0.8),
+      edge('이스라엘', '하마스', 0.8),
+      edge('하마스', '가자', 0.75),
+      edge('트럼프', '가자', 0.6),
+      edge('정청래', '김민석', 0.85),
+      edge('김민석', '민주당', 0.8),
+      edge('민주당', '전당대회', 0.8),
+      edge('정청래', '전당대회', 0.7),
+      edge('폭염', '양산', 0.9),
+      edge('양산', '경남', 0.85),
+      edge('폭염', '경남', 0.7),
+      edge('코스피', '코스닥', 0.85),
+      edge('코스닥', '환율', 0.7),
+      // 사건을 잇는 엣지 여섯. 이 중 둘은 같은 쌍에 얹혀 합쳐지고 넷만 다리로
+      // 남는다 — 위 주석의 목록을 볼 것.
+      edge('민주당', '폭염', 0.35),
+      edge('트럼프', '코스피', 0.32),
+      edge('가자', '양산', 0.31),
+      edge('전당대회', '환율', 0.33),
+      edge('이스라엘', '경남', 0.3),
+      edge('코스닥', '김민석', 0.34),
+    ],
+  }
+
+  /** 어느 구역에도 안 든 단어. 선을 가진 단어는 반드시 구역을 받는다. */
+  function scatteredNodes(layout: ReturnType<typeof computeGraphLayout>) {
+    const held = new Set(layout.regions.flatMap((r) => r.words))
+    return layout.nodes.filter((n) => !held.has(n.word))
+  }
+
+  /** 성긴 쪽. 쉬운 경우를 문서로 남기지만, 위에 적었듯 이것은 파수꾼이 아니다. */
+  const sparse = {
+    words: [
+      ...['트럼프', '이스라엘', '하마스', '압박', '휴전', '가자'].map((text, i) => ({
+        word: text,
+        count: 20 - i,
+        fontSize: 30,
+        textWidth: text.length * 28,
+        faded: false,
+      })),
+      ...['월요일', '가능성', '변동성', '막바지', '무방비', '시험대'].map((text) => ({
+        word: text,
+        count: 4,
+        fontSize: 16,
+        textWidth: text.length * 15,
+        faded: false,
+      })),
+    ] as MeasuredWord[],
+    edges: [
+      edge('트럼프', '이스라엘', 0.8),
+      edge('이스라엘', '하마스', 0.7),
+      edge('하마스', '압박', 0.6),
+      edge('압박', '휴전', 0.5),
+      edge('휴전', '가자', 0.5),
+    ],
+  }
+
+  // 이 설계의 중심 불변식. 엣지를 먼저 라우팅하고 그 표본을 장애물로 삼기 때문에
+  // 성립하며, 성립하지 않으면 순서가 뒤바뀐 것이다.
+  for (const width of [550, 600]) {
+    it(`never puts a scattered word on top of an edge (${width}px)`, () => {
+      const layout = computeGraphLayout(dense.words, dense.edges, { width })
+      const loose = scatteredNodes(layout)
+
+      expect(loose).toHaveLength(20)
+      for (const node of loose) {
+        for (const e of layout.edges) {
+          if (!e.curve) continue
+          for (const p of curvePoints(e.curve)) {
+            const onLabel =
+              Math.abs(p.x - node.x) < node.halfWidth && Math.abs(p.y - node.y) < node.halfHeight
+            expect(onLabel, `${node.word} sits on ${e.a}—${e.b}`).toBe(false)
+          }
+        }
+      }
+    })
+  }
+
+  it('성긴 날에도 같은 불변식이 성립한다', () => {
+    const layout = computeGraphLayout(sparse.words, sparse.edges, { width: 900 })
+    const linked = new Set(sparse.edges.flatMap((e) => [e.a, e.b]))
+    const loose = layout.nodes.filter((n) => !linked.has(n.word))
+
+    expect(loose).toHaveLength(6)
+    for (const node of loose) {
+      for (const e of layout.edges) {
+        if (!e.curve) continue
+        for (const p of curvePoints(e.curve)) {
+          const onLabel =
+            Math.abs(p.x - node.x) < node.halfWidth && Math.abs(p.y - node.y) < node.halfHeight
+          expect(onLabel, `${node.word} sits on ${e.a}—${e.b}`).toBe(false)
+        }
+      }
+    }
+  })
+
+  it('places at least one edgeless word above the packed regions', () => {
+    // The band used to hold all of them, so every edgeless word was below every
+    // region. Scattering means at least one is not.
+    const words = [
+      ...['트럼프', '이스라엘', '하마스', '압박'].map((text, i) => ({
+        word: text,
+        count: 20 - i,
+        fontSize: 30,
+        textWidth: text.length * 28,
+        faded: false,
+      })),
+      ...['월요일', '가능성', '변동성'].map((text) => ({
+        word: text,
+        count: 4,
+        fontSize: 16,
+        textWidth: text.length * 15,
+        faded: false,
+      })),
+    ] as MeasuredWord[]
+    const edges = [
+      edge('트럼프', '이스라엘', 0.8),
+      edge('이스라엘', '하마스', 0.7),
+      edge('하마스', '압박', 0.6),
+    ]
+    const layout = computeGraphLayout(words, edges, { width: 900 })
+    const lowestRegion = Math.max(...layout.regions.map((r) => r.y + r.height))
+    const loose = layout.nodes.filter((n) => ['월요일', '가능성', '변동성'].includes(n.word))
+    expect(loose.some((n) => n.y < lowestRegion)).toBe(true)
+  })
+
+  // 구역은 그려지지 않고 여백으로만 읽힌다. 그 여백에 무관한 단어가 앉으면 구분이
+  // 사라지고, 재보니 하필 그 날의 제일 큰 이야기에 몰렸다(12단어 사건 하나에 7개).
+  // 막는 값은 여덟 칸 전부에서 0이었다 — 높이도 교차도 안 움직이고 무연결 단어도
+  // 여전히 전부 놓인다.
+  for (const width of [550, 600]) {
+    it(`남의 사건 구역 안에는 앉지 않는다 (${width}px)`, () => {
+      const layout = computeGraphLayout(dense.words, dense.edges, { width })
+
+      expect(layout.regions.length).toBeGreaterThan(1)
+      for (const node of scatteredNodes(layout)) {
+        for (const region of layout.regions) {
+          const inside =
+            node.x + node.halfWidth > region.x &&
+            node.x - node.halfWidth < region.x + region.width &&
+            node.y + node.halfHeight > region.y &&
+            node.y - node.halfHeight < region.y + region.height
+          expect(inside, `${node.word} in ${region.words.join('·')}`).toBe(false)
+        }
+      }
+    })
+  }
+
+  it('흩뿌린 뒤에도 어떤 라벨도 겹치지 않는다', () => {
+    // 격자는 보수적으로 거절할 뿐이므로, 겹침 불변식은 흩뿌리기가 도는 캔버스에서
+    // 다시 확인해야 의미가 있다.
+    const layout = computeGraphLayout(sparse.words, sparse.edges, { width: 900 })
+    for (let i = 0; i < layout.nodes.length; i++) {
+      for (let j = i + 1; j < layout.nodes.length; j++) {
+        expect(
+          overlaps(layout.nodes[i], layout.nodes[j]),
+          `${layout.nodes[i].word} / ${layout.nodes[j].word}`,
+        ).toBe(false)
+      }
+    }
+  })
+
+  it('자리가 없으면 아래 띠로 흘린다 — 그것이 저하 방식이다', () => {
+    // 폭이 좁으면 구역이 캔버스를 가득 채우고 빈틈이 남지 않는다. 그런 날에도
+    // 단어가 사라지지는 않는다: 예전처럼 구역 아래로 내려갈 뿐이다.
+    const layout = computeGraphLayout(sparse.words, sparse.edges, { width: 200 })
+    const linked = new Set(sparse.edges.flatMap((e) => [e.a, e.b]))
+    const loose = layout.nodes.filter((n) => !linked.has(n.word))
+    const lowestRegion = Math.max(...layout.regions.map((r) => r.y + r.height))
+
+    expect(loose).toHaveLength(6)
+    expect(loose.some((n) => n.y > lowestRegion)).toBe(true)
   })
 })
 

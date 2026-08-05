@@ -148,6 +148,41 @@ instead of producing a wrong ratio for every word on screen. Measured cold load:
 `fetchWordCounts` (the whole-day read) is still exported and tested but nothing
 calls it; it is the one function here that can be silently truncated.
 
+**The section share is the one response that is summed, and it is not an
+exception to that rule.** `fetchCategoryShare` reads `daily_category_counts`
+(migration `0027`) filtered to one date and `CategoryShare.tsx` divides each
+section by the sum of the six rows. What the rule bans is inferring a day total
+from a response that may have been truncated; this response is six rows by
+construction and the quantity divided by is literally "the sum of these
+sections". The `.eq('date', …)` is what keeps it that way — six rows a day
+reaches the 1,000-row cap in 166 days — so it is the rule being obeyed rather
+than waived.
+
+**`capped` is per run, never per day**, and that had to be learnt from a number
+that made no sense. 2026-08-04's 02:00 KST hour holds **174** society rows
+against a cap of 150, which reads as a cap being exceeded and is not: it is
+124 + 33 + 9 + 8, five hand invocations inside fourteen minutes plus the 03:00
+cron, and **no run stored more than 150 in any category**. A day is the sum of
+six or more runs, so a day-wide count answers a different question than the one
+the flag asks. There is no run id in the schema; `date_trunc('minute',
+created_at)` is the available proxy, since a run writes its six sections in 4–5
+seconds and the crons are four hours apart. Its one blind spot is a run
+straddling :59/:00, which splits a capped run into two uncapped halves.
+
+**And `capped` counts rows *stored*, not the window *scraped*, which is the
+larger blind spot and the reason the caption is worded the way it is.**
+`index.ts` upserts with `ignoreDuplicates`, so a run that filled its whole
+150-headline window and re-saw one article it already held stores 149 and is not
+flagged. Live instance, read after that day had closed: 2026-08-04 economy's
+biggest run is **exactly 149** and its 948 headlines are drawn with no asterisk
+although that run almost certainly bound. Both failures point the same way, which is the right way for a caveat to
+fail — **a flag means the share is a lower bound, and the absence of a flag means
+nothing.** The comparison is `>=` rather than `=` because a run made under a
+deeper cap is still evidence the window bound (2026-08-03 07:32 UTC stored 275,
+242 and 208 inside one minute), so the flag says "may have reached the limit" and
+the UI says it that way. Making it a fact would take the collector storing what
+it fetched alongside what it kept.
+
 `daily_word_counts` is a `UNION ALL` of a per-category aggregate and an
 all-categories rollup keyed by a null `category_slug`. **Do not rewrite it with
 `GROUP BY GROUPING SETS`** — that form blocks predicate pushdown, so the planner
@@ -159,14 +194,57 @@ aggregates the entire history before applying the date filter. Migration
 `keyword_graph(p_date, p_category)` is an RPC rather than a view because the node
 and edge cuts and the NPMI arithmetic have to happen server side — a day's word
 pairs run to thousands of rows even after grouping, and PostgREST would truncate
-at 1000. It returns `{nodes, edges}` as JSON. SQL functions default to
+at 1000. It returns `{nodes, edges}` as JSON. Functions here are all
 `SECURITY INVOKER`, so the select-only policies still apply; `anon` needs
-`execute` on both it and `keyword_signals`.
+`execute` on the whole chain.
 
-`keyword_signals(p_date)` computes the five per-word signals and is called by
+**`keyword_graph` is `language plpgsql` and everything else here is
+`language sql`, because the node rule is a fixed point** (migration `0024`).
+With the place gate on, dropping a place promotes the word at rank 71, and that
+word can be the only non-place partner some *other* place was hanging on by — or
+can itself be the partner that rescues one. A recursive CTE cannot express it:
+Postgres forbids window functions in the recursive term and the ranking is
+`row_number()`. Hence a loop. **Termination is by monotonicity** — `banned` only
+grows and can only hold places — and the iteration guard is derived from the
+place count rather than hardcoded: it is `count(*) + 2` over the `place` rows of
+`word_overrides`, which at the live count of 45 places is **47**, one pass per
+place plus the confirming pass that finds nothing. A hardcoded 50 would have
+been a margin of five over that count and would go stale the moment a place is
+added. When the guard fires it `raise`s, since a silently wrong graph is worse
+than an error.
+
+**The one copy of each decision survives the loop, split by what it depends
+on.** `keyword_graph_candidates(p_date, p_category)` is expensive and
+banned-blind — it runs `keyword_signals` once and applies sieves 1–4, and is the
+only place that decides **whether a word may be drawn at all**.
+`keyword_graph_rank(p_cands, p_banned)` is cheap and banned-aware — ranking, the
+head_pos demotion, the cap and the `faded` / `is_place` flags, the only place
+that decides **which of them are drawn and in what order**.
+`keyword_graph_pick_edges(p_date, p_category, p_words)` is the only place that
+decides **what an edge is**. `keyword_graph_nodes` / `keyword_graph_edges`
+survive as thin wrappers for `scripts/analysis/`. The first version of this had
+one node helper and one edge helper taking `(date, category, banned)` and the
+loop calling them: correct, and **13 seconds with the gate on** against the
+1,417 ms that same profiling run measured for `0018` — a *pre-restructure*
+figure, which is why it appears here and nowhere near the shipped triple below —
+because `keyword_signals` (951 ms) was being paid for eight times.
+Nothing was made faster; something expensive was stopped from being asked eight
+times — the same finding the Edge Function records from the other side, one layer
+up.
+
+**Edge ordering gained `, a, b` and that was a latent bug rather than a
+refactor's cost.** `order by npmi desc, cooc desc` is not a total order — three
+pairs on 2026-07-31 carry `cooc` 3 and `npmi` 0.80097396756174372838, equal to
+the last digit — so which came first was decided by the query plan, and this file
+already claimed the picture is reproducible because ties are broken server side.
+That was true of the nodes and quietly untrue of the edges.
+
+`keyword_signals(p_date, p_alpha)` computes the per-word signals and is called by
 both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
 tuning that measures a hand-copied second copy is measuring the wrong thing, the
-same hazard as the rule above.
+same hazard as the rule above. It gained `df_balanced` and its α parameter with
+migration `0025`; α defaults to `scoring_weights.category_balance_alpha`, so the
+five existing callers were unchanged.
 
 `render_cap` is **70, and it is a display cap rather than a sieve threshold** —
 it does not decide which words qualify, only how many of the ranked survivors are
@@ -174,7 +252,8 @@ drawn, so changing it does not go through `10_sieve_eval.sql`. It was 130, and
 ranks 71 to 130 arrived faded at the minimum font size and sat in every gap
 between the words worth reading. At 70 the drawn set is exactly the set the
 harness measures. With it equal to `node_limit`, `faded` can now only mean a
-`word_overrides` 'demote' entry.
+`word_overrides` 'demote' entry. **Round fourteen put it through that harness
+anyway and found out why the sentence was there** — see below.
 
 Word selection is a **sieve** (thresholds in series), not a weighted score.
 Blending the signals measurably makes it worse: each one catches a different kind
@@ -188,7 +267,8 @@ fill the last places under the cap. Why it is a demotion rather than a sixth
 sieve clause is measured, and is the entry below.
 
 Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
-(`exclude` / `demote` / `allow`), so retuning needs no redeploy. **Never change a
+(`exclude` / `demote` / `allow` / `place`, the last added by migration `0023`),
+so retuning needs no redeploy. **Never change a
 threshold without running `scripts/analysis/10_sieve_eval.sql` first** (or
 `11_category_eval.sql` when the question is about a category tab) — its README
 records five ways this has already gone wrong. Note that the labels go stale when
@@ -326,6 +406,10 @@ cut there is loss with nothing to fill the hole". On a fat day the cap does bind
 so a cut there would substitute too. The demotion is not thereby wrong — it still
 wins — but its reason is now only partly right, and the cut-versus-demotion
 question deserves re-measuring on fat days rather than being treated as settled.
+Round fourteen answered half of it in passing: **a demotion can only rescue a
+mechanism whose losses sit in the non-binding cells**, which is why it was not a
+candidate for the place gate. head_pos's own re-measurement on fat days is still
+open and nothing on that branch touched it.
 
 **Where the five changes leave the sieve**: day-wide mean F1 **49.48 → 63.70**
 and mean precision **71.07 → 93.53**; the 24 category cells **55.07 → 78.58**.
@@ -411,10 +495,135 @@ produced.
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
 
+#### Round fourteen built three mechanisms, measured them, and shipped none
+
+Migrations `0023`–`0025` wired a **place gate**, a **render cap the harness can
+sweep** and a **category-balance exponent α**, all three switched off pending the
+measurement, and migration `0026` is the verdict: **no `value` in
+`scoring_weights` moves.** It updates four `note` columns so the deployed
+database carries the reasoning. A round that earns nothing has to be as legible
+as one that earns something, or the next person re-runs it. All of what follows
+has `unlab` 0 and `story_rank` 1 on every quoted row, and both worklists returned
+nothing before the harness was read and again after.
+
+- **The place gate loses on both surfaces, and the eleven words it removes are
+  all labelled good.** Sieve 6 draws a `word_overrides` place only when a drawn
+  line joins it to a non-place. Day-wide F1 **63.70 → 62.67** (0 wins, 3 losses,
+  1 tie); the 24 category cells **78.58 → 75.22** (1 win, 17 losses, 6 ties); at
+  cap 100 the same comparison gives 70.60 → 69.98, so a wider canvas does not
+  rescue it. The cost is one-sided: it removes 서울 ×2, 울산 ×2, 제주, 강남,
+  부산, 강원, 광주, 인천 and 포항 — **every one labelled good** — and promotes
+  ten, six good (경계작전, 공화당, 김동관, 김병기, 김용, 한반도) and four bad
+  (단일종목, 반도체주, 고속도로, 대공습).
+
+  **The premise failed, not the threshold.** "A place with no line to a non-place
+  is backdrop" is false: a place can be the story and hold no *drawn* line
+  because its partner sits below the cap. 부산 on 2026-08-02 is the clean case —
+  a day qualifying only 69 words, where the gate drops it and promotes nothing.
+  The gate is already at its weakest setting, one edge, so there is no number to
+  retune.
+
+  **Do not re-file it as head_pos and reach for a demotion.** That signature is a
+  day-wide *win* with a category loss. This one loses on both, and day-wide it
+  loses precisely where the cap binds, which is the only place a demotion still
+  acts: arithmetically a demotion scores **62.88**, still under the shipped
+  63.70. The general form is worth more than the case — **a demotion can only
+  rescue a mechanism whose losses sit in the non-binding cells.**
+
+  **And the harness is the wrong instrument for the question that was actually
+  asked, which is the finding to keep.** `analysis.word_labels` answers "is this
+  a word worth showing". The gate was asked for on a different question — "can a
+  reader do anything with a word no line touches" — and no label set can price
+  that. It is the same mismatch that stops the harness pricing the display cap.
+  So the mechanism is built, measured and **shipped off**: flipping
+  `scoring_weights.place_needs_edge` to 1 is a one-row update with no redeploy,
+  and it costs about **1.5×** (one sitting, 2026-08-03, all-categories view:
+  `0018` 1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be read
+  against each other and against nothing else). `word_overrides` mode 'place'
+  stays: a labelled fact about 45 words a later round can read for something
+  other than a cut.
+
+- **`10_sieve_eval.sql` structurally cannot price the render cap.** F1 rises
+  monotonically with it — **63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 /
+  130** — because the recall denominator is fixed at every labelled-good word
+  with `df >= 3` while the cap *is* the screen size. Widening always buys recall,
+  and the optimum sits at the edge of any sweep; the limit of this metric is
+  "draw every word that qualifies". **Precision is what reads a fixed screen
+  honestly and it decides: 93.53 at 70 against 85.40 at 130.** The marginal bands
+  say it more sharply — over the three days where the cap binds the top 70 are
+  201 good / 9 bad (95.7%), while ranks 71–85 are 60.0%, 86–100 80.0%, 101–130
+  66.7% and 71–end **68.8%**. They are **not even monotone**, so there is no rank
+  at which the screen cleanly stops being worth widening. Bad words on the canvas
+  go 3 → 16 on 2026-07-31 and 2 → 23 on 2026-08-03. **The tell is the shape: a
+  monotone column with no interior turn.** Any future knob whose sweep looks like
+  that should be suspected of the same defect before its best cell is believed.
+  A cap change is a canvas change and needs `scripts/layout/` re-run as well,
+  which nothing here did.
+
+  A swept cap is also the one thing that reaches ranks the worklist has never
+  looked at, so `20_unlabeled.sql` joins **each configuration's own
+  `render_cap`** rather than a literal 70 — otherwise it would report 0 while
+  being structurally unable to see the words the sweep promoted. It was checked
+  the round it mattered: 144 words became newly reachable at ranks 71–130 and
+  every one of them already carried a label, so the silence was real rather than
+  rule 4's blind spot.
+
+- **α is not measurable on this day set, which is not the same as α costing
+  something.** `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α` — at α = 1 the count
+  under equal collection, at α = 0 the count itself, so the shipped configuration
+  enters its own sweep as the control. Measured: **63.70 / 93.53 at 0 against
+  63.20 / 92.83 at every one of .25, .50, .75 and 1.00**, and out of band 62.55 /
+  62.38 / 61.98 at 1.50 / 2.00 / 4.00, with rule 5 biting past 2.00. But **the
+  only day it loses on is 2026-07-31, whose six sections collected
+  150/149/150/150/150/150 in a single capped run, so its balance factors sit
+  within 0.6% of 1** — there is nothing there to correct and all α does is break
+  a `df` tie in the third decimal. The two days with real imbalance (08-01
+  0.742–1.869, 08-03 0.808–1.201) are label-neutral at every α, and 08-02 draws
+  69 words against a cap of 70 so no substitution is available at all. **The day
+  the mechanism was built for is 2026-08-04 and it cannot be an evaluation day
+  while it is still collecting** — that is rule 4's second trigger, and the day
+  moved between two readings nine hours apart, from factors 0.741–1.790 and 130
+  qualifying words at 11:00 KST to 0.756–1.563 and **240** at 20:24. Re-measure
+  when it settles and can be labelled.
+
+  **The denominator is the word's own section distribution, not its top
+  category**, and that is what keeps rule 5 safe: 폭염 spans sections and its top
+  category is society, the largest, so a single denominator would charge it the
+  largest divisor and put the day's biggest story at risk. A spread word gets a
+  blend, and 폭염 in fact *gains* (2026-08-03, 121 → 125.6 at α = 1) — the table
+  is in `scripts/analysis/README.md`'s round-fourteen α section, with the ranks
+  at α = 0 and α = 1 for all four eval days.
+
+  **α is the identity inside a category tab, at every α, by construction** —
+  every drawn row in section *c* carries the same factor, so `count_balanced` is
+  `count` times a constant. Measured as well as argued: with α flipped to 1 on
+  the live database **all 30 tab hashes stayed byte-identical and only the 5
+  all-view hashes moved**. `11_category_eval.sql` therefore needs no α variant
+  and is the round's **control** — its 78.58 moving would mean α had reached a
+  scoped count where it should have been day-wide, or the reverse.
+
+**Both wiring migrations were checked rather than asserted**: `keyword_graph` is
+byte-identical to what it drew before on all 35 cells (five collected days × the
+all view and six tabs) after `0024`, and again after `0025`. Only the edge
+*ordering* moved, on 18 of the 35, and running both orders through the
+frontend's own code moved the Louvain partition on **0** cells, merged events on
+**0**, and drawn geometry on 7 — six of them sub-pixel. The one real move is
+2026-08-02's all view, where one region rearranges internally and 전남 travels
+137.6 px with the same partition and the same events; the cause is `forceLink`
+applying its velocity updates in link order, not the tie rule.
+
 Measured precision of the top 70 words, four days, as of 2026-08-04 — **the
 first run on an archive analysed end to end by one analyser**:
 **75.7 / 70.0 / 70.0 / 68.6**, mean F1 55.45. The drawn set is 199 good and 81
 bad. On the 24 category cells the shipped configuration means **57.20**.
+
+**Those four numbers are the screen *before* migrations `0018`–`0022`, and they
+are kept because the paragraphs below are about that run.** The shipped sieve
+now scores per-day precision **95.7 / 94.3 / 87.0 / 97.1** and F1
+**67.3 / 66.3 / 77.9 / 43.3** on the same four days — mean 93.53 and 63.70,
+78.58 on the tabs. Note that 2026-08-02 draws **69** words and not 70: at
+`min_word_len` 4 only 69 qualify on the archive's thinnest day, so its cap does
+not bind and it is not word-count-comparable with anything above.
 
 **Every one of those numbers is lower than the ones this file used to carry
 (85.7 / 84.3 / 70.0 / 67.1, mean F1 63.2, 215 good and 65 bad), and the drop is
@@ -497,7 +706,9 @@ changed.**
 
 ### Reading the same view twice costs nothing
 
-`src/lib/queryCache.ts` sits under five of the query functions and holds the
+`src/lib/queryCache.ts` sits under seven of the query functions (count them —
+`grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
+incremented from a stale one instead of counted) and holds the
 **promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
 rejections evicted immediately so "다시 시도" really retries). Two things follow
 that are easy to underrate:
@@ -568,11 +779,32 @@ to single the top story out — and grey cannot stack into blue. The grey is a t
 grey (`#737373`), **not slate**: slate-500's hue is 215° against the top story's
 221°, six degrees from the thing it exists to be told apart from.
 
-**The tab row is the canvas's colour key.** Section ink appears in exactly two
-places, the words and the dot on the tab that filters for them, and
-`src/lib/sectionColors.ts` is the one definition both read. A key that names a
-different green from the one on screen is worse than no key, so
-`e2e/keywordGraph.spec.ts` asserts the two resolve to the same rgb.
+**The tab row is the canvas's colour key.** Section ink appears in the words, in
+the dot on the tab that filters for them and — since the day's section share was
+added — in the donut's arcs, and `src/lib/sectionColors.ts` is the one definition
+all three read. A key that names a different green from the one on screen is
+worse than no key, so `e2e/keywordGraph.spec.ts` asserts the tab dot and the word
+resolve to the same rgb, and the arc is selected by `data-section` rather than by
+position so a fixture reweight cannot silently point the assertion at another
+section.
+
+**The donut is the first place those inks are used as areas, and the `dataviz`
+skill's own validator fails them there.** Run against the six section colours as
+chart fills it reports adjacent CVD separation ΔE **1.4** (deutan) and a
+normal-vision worst pair of **8.9**, both below its floors. **Acting on that
+would be the bug.** These are canvas *text* first, held by `theme.test.ts` to
+4.5:1 on the ground and 40° of hue — a stricter bar that pulls the opposite way
+from the chroma a fill wants — and this file's own ruling is that a key naming a
+different green is worse than no key. The debt was paid in the escape the skill
+itself names, **redundant encoding**: every legend row states name, share and
+count in ink text, a flagged row says so in words for a screen reader, the arcs
+are separated by a 2px surface gap centred on the true boundary, and the svg is
+`aria-hidden` so nothing is announced twice. **Nothing on that chart carries
+identity by colour alone.** A section smaller than the gap still gets a
+`MIN_SWEEP` mark at its true centre — "0.2% of the day" and "absent" must not
+look alike on a chart about proportions. If a section ink is ever retuned the
+donut is now a constraint that did not exist before, though a weaker one than
+`theme.test.ts`.
 
 **The webfont is loaded from `index.html`, never from `index.css`.** It used to
 be an `@import` at the top of the stylesheet, which looks correct and is not:
@@ -607,7 +839,7 @@ drawn, never how big.
 **The layout is two stages, and there is no global simulation.** This was one
 `forceSimulation` over all 70 words, and the trouble with it was structural
 rather than a matter of tuning. A day is not a hairball: it is eight to a dozen
-constellations of three to eight words plus 23–28 words holding no edge at all
+constellations of three to eight words plus 14–26 words holding no edge at all
 (`scripts/layout/README.md` has the counts for four days). The global sim knew
 none of that, and `isolatedRings` sent the edgeless words to rings at 0.36–0.52
 of the *short side* — inside the canvas — so unrelated words sat between the
@@ -637,11 +869,54 @@ events and every edge had to cross somebody else's story.
   silently: 22 of 37 drawn. That is CLAUDE.md's cohesion-at-0.35 failure
   returning by a different door. Slack is cheap because `crop` sizes the region,
   not the box.
-- **Edgeless words go to a band *below* the packed regions**, not to a ring
-  inside them. That is what actually empties the middle. They flow at
-  `DEFAULT_PADDING`, not at the region gutter — they are unrelated to each
-  other, but they are all unrelated in the same way, and gutter-sized gaps would
-  assert a grouping that is not there.
+- **Edgeless words are scattered into the gaps between the regions, and the
+  invariant that makes that safe is an ordering rather than a tuning**
+  (`scatterLoose`). They used to go to a band *below* the packed regions — never
+  to a ring inside them, which is what emptied the middle — and the band is still
+  there as the graceful degradation. What changed is that **edges are routed
+  first and their curves are then obstacles**: each curve's `CURVE_STEPS` samples
+  are stamped into an 8px occupancy grid alongside the anchored labels, and a
+  loose word may sit anywhere its label box touches no marked cell, ties going to
+  the cell farthest from anything already placed. **`crowded` therefore cannot
+  rise**, and that is provable rather than measured: `routeEdge` now receives a
+  strict *subset* of the obstacle list it used to get — the removed members are
+  exactly the band words, and the band sat entirely below every region — so no
+  route could change. Measured accordingly: `crowded`, `crossings`, `xIn`, `xBr`,
+  `bridges` and `lenMax` are byte-identical in all eight cells. **What is bought
+  is height, down 5.6–17.4% everywhere** (9.4 / 6.4 / 15.0 / 5.6 desktop and
+  9.7 / 8.7 / 17.4 / 6.6 phone, computed from the before/after pairs in
+  `scripts/layout/README.md`'s `scatterLoose` table), which is the band's whole
+  vertical cost. If
+  `crowded` ever does rise here, that is a broken implementation and not a trade.
+  This is the same problem the old inner-ring placement failed at, solved by
+  ordering rather than by a force balance.
+
+  The curves are not re-routed around the scattered words, and that is symmetric
+  rather than a shortcut: those words were placed to miss the curves, so the
+  curves already miss them.
+
+  **Every edgeless word is placed on all eight cells and the band takes zero**,
+  including on the phone, which the design did not expect: a narrow canvas stacks
+  its regions vertically and so is *taller*, and the 48px shelf gutter is wider
+  than the smallest label needs. The band path stays live and is unit-tested at
+  200px, where six of six loose words are stranded — it is the kind of path that
+  rots, so do not "simplify" `flowRows` away.
+
+- **A stranger may not sit inside somebody else's story, and the numbers rather
+  than taste settled that.** With in-region placement allowed, `inRegion` was 5 /
+  8 / 3 / 7 on desktop and 4 / 7 / 5 / 4 on the phone, and **on every one of the
+  eight cells the strangers concentrated in the day's biggest event** (7 of 7 in
+  2026-08-03's twelve-word one). That follows from the mechanism — the largest
+  crop box holds the most interior slack — and it is **the convex-hull failure
+  running backwards**: the blobs were removed because a hull swallows whatever
+  lies between an event's members, and here the words were being put there on
+  purpose. A region is read from the whitespace around it and nothing else, so a
+  foreign word in that whitespace erases the only thing saying "different story".
+  Region rectangles are now stamped into the same occupancy grid, `inRegion` is 0
+  everywhere, and **blocking them cost nothing**: every column and every height
+  identical to the decimal, all 14–26 loose words still placed, the only movement
+  a cropped svg width of 1040 → 1034 on two cells. `inRegion` stays in the
+  harness at 0 for the same reason the sieve harness prints `unlabeled`.
 - **Bridged events are packed next to each other** (`orderForPacking`). Ordering
   by area alone sent one bridge diagonally across the frame: edge length maxed
   at 719px against 208 before the rewrite. Ordering greedily by ties to what is
@@ -729,31 +1004,66 @@ events and every edge had to cross somebody else's story.
   throughout, events drawing a crossing 6 → 3 against a floor of 2.
 
   **Those figures are from the canvas of 2026-08-03 and the canvas has moved
-  twice since** — once when the analyser changed and again when migrations
-  `0018`–`0021` retuned the sieve. `scripts/layout/README.md` carries the
-  current table. The short version: `overlap` is still 0 everywhere and `xBr` is
-  down to 4 with `brOther` 0 in every cell, while `xIn` is 34 and **all of the
-  rise is one event** — 2026-08-02's 김민석·정청래·민주당, 12 words and 26 edges,
-  the archive's only non-planar event, drawing 11 against a floor of 2. The
-  better sieve brought the 전당대회 story back to the screen. Every other event
-  is planar.
+  several times since** — the analyser change, migrations `0018`–`0021`, and then
+  `0022`. `scripts/layout/README.md` carries the current table, taken from a
+  fixture stamped **2026-08-04 21:44 KST**, and it is stamped because this branch
+  was bitten three times by numbers written down without their sitting.
 
-  `PLANAR_AREA_PER_CROSSING` was re-swept on the new canvas and is **still a
-  staircase**: 0.5 gives `xIn` 34, 1.0 and 2.0 both give 24 for 11% more height
-  with no other column moving, 4.0 gives 12 for 47% more height and pushes `xBr`
-  back to 7. **Raised to 1.0.** The price is a cliff, so it is a judgement about
-  the picture rather than something the harness settles, and the judgement went
-  this way because the crossings it removes are all inside **the day's biggest
-  story** — the place a reader is most likely to be tracing a line — while
-  `overlap`, `xBr` and `crowded` do not move at all, so there is no regression
-  surface. Only 2026-08-02 changes: `xIn` 13 → 8, height 1285 → 2100 desktop.
-  `lenMax` goes 823 → 1769 on that day and is accepted knowingly: the event's
-  region grows, so the edges crossing it grow with it. **The price is height** —
-  08-02 desktop 651 → 1544px — **and the per-crossing price is a cliff, not a
-  dial**: 0.15, 0.25 and 0.35 draw the four days identically to having no planar
-  path at all, and 0.5 buys the whole move. There is no middle setting, so this
-  is a judgement about the picture rather than something the harness settles,
-  and `PLANAR_AREA_PER_CROSSING` reverses it.
+  The short version of that table: `overlap` is 0 in all eight cells, `drawn`
+  equals `edges` in all eight, and **twenty-six of the day's twenty-seven events
+  are planar and draw no crossing at all**. `xBr` rose 4 → 12 and every one of
+  the twelve is `brOwn` under the three-way split, with `brBr`, `brOther` and
+  `overBoxes` 0 everywhere — a bridge cutting its own event's spokes on the way
+  out, the kind neither `orderForPacking` nor `faceBridges` can touch. **Read the
+  totals with 2026-08-02 removed and the direction reverses**: on the other three
+  days `xIn` is **0** and `crowded` went 12 → 2.
+
+  **The one event is a regression, it is large, and it is open.** 2026-08-02's
+  김민석·정청래·민주당 grew from 12 words / 26 edges to **13 / 29** when the
+  sieve improved, and at `PLANAR_AREA_PER_CROSSING` 1.0 the area budget
+  **refused** it a flat drawing — desktop height 2100 → **780**, below even the
+  1285 it had at price 0.5 — so it now draws **40** crossings against a floor of
+  2, with `crowded` 0 → 10 and `lenMax` 1769 → 217. `layoutCluster` verifies a
+  candidate before returning it, so 40 crossings cannot be a bad flat drawing; it
+  is the force layout, which is what the refusal falls back to. This is the
+  property already recorded here — **the area budget is a threshold, not a dial**
+  — firing for the first time in the direction that costs something, and one word
+  and three edges flipped it. **No constant was touched.** Also note that phone
+  08-02's svg falling to 402px looks like a fix for the "30% shrink" finding and
+  is not one: the box is small because the event lost its flat drawing, and if it
+  is ever let back in the shrink returns with it.
+
+  `PLANAR_AREA_PER_CROSSING` had been re-swept on the previous canvas and was
+  **still a staircase**: 0.5 gave `xIn` 34, 1.0 and 2.0 both gave 24 for 11% more
+  height with no other column moving, 4.0 gave 12 for 47% more height and pushed
+  `xBr` back to 7. **Raised to 1.0** on that sweep. The price is a cliff, so it
+  is a judgement about the picture rather than something the harness settles, and
+  the judgement went this way because the crossings it removes are all inside
+  **the day's biggest story** — the place a reader is most likely to be tracing a
+  line — while `overlap`, `xBr` and `crowded` did not move at all, so there was
+  no regression surface. On that canvas only 2026-08-02 changed: `xIn` 13 → 8,
+  height 1285 → 2100 desktop, `lenMax` 823 → 1769, accepted knowingly because the
+  event's region grows and the edges crossing it grow with it. **The price is
+  height** — 08-02 desktop 651 → 1544px — **and the per-crossing price is a
+  cliff, not a dial**: 0.15, 0.25 and 0.35 drew the four days identically to
+  having no planar path at all, and 0.5 bought the whole move. There is no middle
+  setting. That "no regression surface" is exactly what the paragraph above
+  overturned, on a canvas one word wider.
+
+  **The table went stale because of `0022`, not because of `0024`, and this
+  branch's own first conclusion was the wrong one.** `0024` reordered
+  exactly-tied edges, so it looked like the culprit. **The leg that settles it is
+  the one that does not depend on sampling**: no edge reordering can add a *word*
+  to an event, and 2026-08-02's largest event went 12 words / 26 edges to 13 / 29,
+  so a reorder cannot be what moved it. The old order was decided by a query plan
+  and cannot be replayed, so the sampled leg was run alongside it — permute the
+  tied edges eight ways per cell, which is **a sample of the space the reorder
+  could have moved through, not a span of it** — and **every metric column is
+  unmoved in all eight cells**, with only 2026-08-02's coordinate sum wobbling by
+  0.03%. What invalidated the table is `min_word_len` 3 → 4 changing
+  which 70 words are drawn — and the two halves of that, "which words" and
+  "therefore which edges", cannot be separated, because edges exist only between
+  drawn words. That is migration `0007`'s recorded trap, unchanged.
 - **Shelves wrap like a snake, and the packing order was never the problem.**
   `orderForPacking` puts bridged events next to each other, and the shelf wrap
   then splits that pair across the full width of the canvas — the two boxes
@@ -790,9 +1100,24 @@ Still true, and still arrived at by looking at real days:
   at is the collision padding. Do not raise it past ~16: at 22 a 40-word canvas
   can no longer resolve its collisions and labels overlap, which
   `graphLayout.test.ts` catches.
-- **Widening buys nothing.** The svg is drawn at its own cropped size and then
-  `max-w-full` scales it down to the container, so spreading sideways shrinks
-  everything by the same factor.
+- **Widening buys nothing — *inside a fixed container*.** The svg is drawn at its
+  own cropped size and then `max-w-full` scales it down to the container, so
+  spreading sideways shrinks everything by the same factor. **Growing the
+  container is a different act and it does buy something**, which is why the
+  graph now has its own `max-w-[1600px]` box while the prose keeps its measure:
+  the layout runs at a larger width, so there are fewer shelf rows and less is
+  scaled away. Measured at 1600 against 1024, every column about the lines is
+  identical and `overlap` is 0, and height falls **26–41%** on all four days.
+  `<main>`'s `max-w-6xl` moved down onto the masthead and the error block,
+  `KeywordGraph.tsx`'s own `max-w-5xl` had to come off too or the change would
+  have been a no-op, and the event list keeps 1024 from the header block inside
+  it. Verified in Chromium at a 1700px viewport: graph 1600, masthead 1152, list
+  1024. **1600 is not a measured number** — height falls monotonically with
+  width, so this harness cannot choose a stopping point; past it the minimum font
+  size and the reading distance decide, and that is a judgement about the picture.
+  `GraphSkeleton` carries the same cap, because when the two disagreed the canvas
+  jumped ~570px wider the moment loading ended — the exact page-jump the skeleton
+  exists to prevent.
 - **`h-auto` on the svg, not `max-w-full` alone.** The element carries `width`
   and `height` attributes, so capping the width leaves the height at the box the
   layout ran in and the drawing is letterboxed inside it. That put a 141px
@@ -813,12 +1138,19 @@ Still true, and still arrived at by looking at real days:
   inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
   d3's own forces across 300 ticks, so anything that actually moves this number
   changes the picture. Do not re-run this experiment.
-- **Both figures above predate the region rewrite and have not been re-measured.**
-  They should now be lower rather than higher — the simulation runs per event
-  instead of over the whole day, so the biggest collision pass is 14 nodes and
-  91 pairs a tick rather than 70 and 2,415 — but `untangle` adds a cost that did
-  not exist before, and nobody has put a number on the pair. If the layout ever
-  feels slow, measure before assuming which half it is.
+- **Both figures above predate the region rewrite, and the rewrite did make it
+  cheaper.** The simulation runs per event instead of over the whole day, so the
+  biggest collision pass is 14 nodes and 91 pairs a tick rather than 70 and
+  2,415. `scripts/layout/measure.ts` now prints `ms` per cell: the region layout
+  alone is **6.8–20.9 ms** across the eight cells, against the 48 ms this file
+  recorded for one global layout. The scatter is a fixed
+  O(cells × loose words) cost on top of that and takes it to **13.5–24.0 ms** —
+  the first draft was 26–42 ms, brought back by two exact optimisations that move
+  no pixel (a 2-D prefix sum so `fits` is four reads rather than a walk, and one
+  `Int32Array` BFS queue instead of a fresh array per layer). It grows with
+  canvas *area*, so the 1600px box is the sensitivity to watch, and the resize
+  path still re-runs the whole layout every 8px. Numbers from this harness are
+  comparable only to other runs of it.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -994,7 +1326,7 @@ reimplemented either.
 
 `src/lib/surge.ts` marks the words that gained the most of the day against the
 previous **collected** date — not against yesterday, since the archive has gaps
-and today is empty until the 13:00 KST cron runs. Two things there were settled
+and today is empty until the day's first cron, now 03:00 KST. Two things there were settled
 by measurement and should not be re-argued from first principles:
 
 - **Shares, never raw counts.** 2026-08-01 was collected twice and holds 1,144
@@ -1036,14 +1368,50 @@ route. Two details that are easy to get wrong:
 
 ### Edge Function run budget
 
-The function paginates each section's "더보기" endpoint to 150 headlines, six
-sections per run.
+The function paginates each section's "더보기" endpoint to
+**`scoring_weights.collect_cap`** headlines (150), six sections per run. The cap
+is a database value rather than a constant because two things have to agree
+about it — the collector, which enforces it, and the reporting that says whether
+a section hit it — and because it can then be retuned with an `update` and no
+redeploy. `index.ts` reads it once at the top of `Deno.serve` and puts it in the
+response as `cap`, so a run's own summary says what it ran with.
+
+The coercion is `lib/collectCap.ts`, on the runtime-agnostic side, and it is not
+ceremony: `Number(row?.value ?? 150)` — the obvious one-liner — turns a row whose
+`value` is null into a cap of **0**, a run that scrapes nothing and reports six
+successful categories. `null` is the one shape that silently zeroes; `undefined`,
+`'many'`, `{}`, `-1` and `0` each fail their own way and are all equally
+unusable, which is why the resolver covers shapes rather than one value. A
+default exists so a failed read cannot silently collect nothing, and the read is
+wrapped in a `try` so a thrown rejection — as opposed to postgrest-js's usual
+`{ data: null, error }` — cannot abort the handler before the category loop.
+
+**`MAX_LIST_PAGES` is a second cap and it used to override the first without
+saying so.** At 8 pages a section stops at ~298 headlines (46 + 36×7) whatever
+`collect_cap` says — a limit nobody chose, invisible because it surfaces as a
+short scrape rather than as anything named. It is 12 now, reaching ~440, past any
+cap measured here. A database value is only a decision if nothing else silently
+binds first.
 
 **The limit that kills this function is CPU time, not the wall clock, and every
 number in this section used to be written against the wrong one.** The platform
 allows roughly **3 seconds of accumulated CPU per worker** and says so in the
 logs — `CPU Time exceeded` — before returning 546 WORKER_RESOURCE_LIMIT with no
-body at all. A 45s run has died where a 64.6s run passed.
+body at all. A 45s run has died where a 64.6s run passed. **The "3 seconds" is a
+quoted figure and not one anything here measured** — no endpoint an agent can
+reach exposes a CPU number. What is established is the *shape*: cumulative per
+worker, and insensitive to a single run's depth up to a cap of 441.
+
+**"Per worker" is load-bearing and had been read as "per request" every time it
+mattered.** The budget is *cumulative across the requests one worker serves*, so
+the same call can pass and fail with nothing about the call changing. Measured on
+2026-08-04: a cap-441 scrape-and-analyse of 2,630 headlines returns 200 on a
+fresh worker and 546 as a later call on a warm one, and the analyser probe's
+ladder from earlier the same day — `reps=1` 200, then `reps=2,3,5,7,10,40` all
+546, in call order rather than in order of work — is the same artefact rather
+than a size limit. **The practical consequence is that a 546 is evidence about
+the worker, not about the run**, and that a collect-now button is exactly the
+shape that trips it.
 
 Analysis is not what spends it. Measured on the platform: **0.88ms a headline,
 900 of them for 0.8s, heap flat at 9MB.** What spent it was the round trips
@@ -1071,7 +1439,13 @@ able to go away.
 
 A killed run returns no body, so the `summary` this file calls `index.ts`'s only
 check is exactly what is missing when it is most needed. The function logs
-`CHK <category> scraped/processed` lines for that case.
+`CHK <category> scraped/processed` lines for that case — **but those are
+dashboard-only.** The Management API's log endpoint answers 403 for
+`function_logs`, and the MCP `get_logs` tool returns the request-level rows
+(`execution_time_ms`, status) without the console output, so nothing an agent can
+reach shows a `CHK` line. That is why the two phase timings are in the response
+body as well: `(scrape Xms, process Yms)` per category is the only machine-
+readable statement of where a run's time went.
 
 **It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
 pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
@@ -1085,13 +1459,70 @@ hours after the 07:00 cron found 404 new headlines inside the same
 150-per-section window — the sections churn all day. The day went from 900
 headlines to 2,197. There is no external call limit any more.
 
-**Raising `MAX_HEADLINES_PER_CATEGORY` deserves re-testing rather than the
-refusal that used to stand here.** The 300-over-12-pages failure was read as a
-wall near 63s; it was CPU, spent on ETRI-paced round trips that no longer exist.
-Deeper paging may now fit, and nobody has tried.
+**Raising the cap was re-tested, and CPU is not what stops it.** The
+300-over-12-pages failure was diagnosed twice and wrong twice — first as a wall
+near 63s, then as this function's own CPU cost. A throwaway probe that scrapes
+and analyses exactly as `index.ts` does and writes nothing, run on 2026-08-04,
+gives the **all-new** case a live run cannot be made to take on demand:
 
-That change is what settled the `min_headlines` question — see the round-seven
-section of `scripts/analysis/README.md`. The short version: on a thin day the
+| cap | headlines | analysis | wall | result |
+| --- | --- | --- | --- | --- |
+| 150 | 900 | 816ms | 2.0s | 200 |
+| 300 | 1,800 | 1,481ms | 4.2s | 200 |
+| 441 | 2,630 | 2,082ms | 5.3s | 200 |
+
+**What stops it is the date stamp.** `collected_date` is the day of collection
+and a deeper page is an older article, so paging past midnight files yesterday's
+news under today. Measured at 20:10 KST at rank #400 — the deepest depth the
+measurement's table covers: the fast sections never leave today — society
+reaches only 4 hours back at that depth — while culture and `it` cross into
+2026-08-03 at about rank 290, and one cap-300 run stored 7 such rows, all in
+`it`, at ranks 278-296.
+
+**That measurement covers one time of day, and raising the cap needs the
+opposite one.** The whole of it is 20:10–21:10 KST, the regime least likely to
+reach past midnight — the fast sections already had most of a day's news ahead
+of the boundary. If the cap is ever raised, the check to run is the pre-today
+count on the 03:00 and 07:00 runs, not on an evening one; those runs are the
+regime where a deeper page reaches furthest into yesterday, and they were not
+measured because they cannot be provoked on demand.
+
+Two things keep that small, and both have to be read before the 7 is used as an
+argument either way. `UNIQUE (category_id, link)` is **global rather than
+per-date**, so only an article that fell in a coverage hole can be re-stamped at
+all. And **the effect is already here at 150**: the 02:29 and 07:00 runs of
+2026-08-04 stored 89 culture, 64 `it` and 43 world articles published on 08-03,
+because at 02:29 the day holds 2.5 hours of news and a 150-headline window has to
+reach past midnight to fill itself. So a raise makes an existing property of the
+design larger; it does not introduce one. **Deciding what `collected_date` should
+mean comes before deciding the cap**, and `extractListCursor` already returns the
+YYYYMMDDHHMMSS stamp a day-boundary stop would need.
+
+**The cap does bind, and what is behind it is today's news.** society stored
+exactly 150 on the 11:00, 15:00 and 19:00 runs of 2026-08-04 and publishes about
+75 headlines an hour, so a 150 window covers under half of a 4-hour cron gap and
+the remainder is lost for good — of the 140 society links sitting at ranks
+301-441 at 20:10, **139 are absent from the archive** and every one is from that
+day, a permanent hole between the 15:00 and 19:00 runs. At 20:10 a cap of 300
+would have taken
+478 new links against 150's 278. The gain is concentrated: politics +50, economy
++98, society +36 against culture +1, world +4, `it` +11, so **deeper paging
+widens the section gap rather than closing it**.
+
+The cap therefore **stays at 150**, and the value being in the database is what
+makes that a decision rather than a deployment.
+
+**Collection cannot be equalised by paging deeper, and that is why balance was
+attempted in the ranking instead.** The same day, counted per run: society took
+the whole 150-headline window on both the 11:00 and the 15:00 run while `it`
+never passed 98 on any of the five. **The thin section is not being truncated —
+it publishes less** — so a deeper page adds rows where there are already rows.
+Migration `0025` took the balance in the ranking instead
+(`df_balanced`), and round fourteen then measured that it cannot be priced on the
+day set the archive has; both halves of that are recorded above under the sieve.
+
+The move to six runs a day is what settled the `min_headlines` question — see the
+round-seven section of `scripts/analysis/README.md`. The short version: on a thin day the
 word at rank 70 has three headlines, so a floor is the screen; on a fat day it
 already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion floor
 is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a safety
@@ -1195,6 +1626,15 @@ inserts fail with 42501, and deletes/updates return 204 having matched zero rows
 Do not add write policies. The service-role key exists only in the Edge Function
 environment.
 
+Every function on the `keyword_graph` chain is `SECURITY INVOKER` with
+`set search_path = ''`, so it is the *calling* role's privilege that is checked
+and a `SECURITY DEFINER` anywhere on it would hand out the service role's view of
+the tables. `keyword_signals` and `category_balance_factors` are granted to
+`anon, authenticated` because a signature change drops the function and discards
+its old grant; `authenticated` is an empty role here — there is no login — so
+naming it moves nothing about the access model and only keeps one chain
+consistent with itself.
+
 ## Testing notes
 
 `KeywordGraph.tsx` and `App.tsx` have no unit tests: the graph measures text on a
@@ -1221,18 +1661,54 @@ already caused a false pass or a failure:
 - A default that varies by request has to be a function, and `resolve()` has to
   call it. Returning the function itself serialises to `undefined`, which reaches
   the app as an empty result and reads exactly like "no data" — the surge markers
-  silently never appeared.
+  silently never appeared. `CATEGORY_SHARE` is one of those, and like
+  `COLLECTED_DATES` it is **derived from `HEADLINE_COUNTS`** rather than written
+  out beside it, since a drifted copy would describe a day that does not exist.
+
+Two failures this suite has caught that no unit test could, and they belong
+beside the `expect(skeleton).toBeHidden()` note above because they are the same
+shape — an assertion that cannot fail, and an assertion that agrees with the code
+rather than with the browser:
+
+- **A test group passed with its own invariant deleted.** The scatter's two
+  guards — curves stamped as obstacles, regions kept out — were both removed and
+  all 43 tests still passed, including the two written to catch exactly those
+  mutations. The sampling was right; the *fixture* was too sparse. At 6 linked
+  and 6 loose words the canvas is empty enough that "the cell farthest from
+  anything already placed" misses the curves and the regions whether or not they
+  are stamped, at every width from 300 to 900. Replaced with roughly the real
+  ratio — **14 linked words across three events with a bridge between each pair,
+  plus 20 loose words, run at two widths** because one width can be luck — and
+  then verified by mutation one gate at a time: removing the curve stamping fails
+  **exactly** the edge test at 550 and 600px and nothing else, removing the
+  keep-out fails **exactly** the region test, both restored 46/46. A fixture that
+  fails everything would prove no more than one that fails nothing. **Mutation is
+  what found this; nothing about the test's text was wrong.**
+- **A percentage split agreed with itself and disagreed with the browser.** The
+  first largest-remainder implementation compared floating-point fractional
+  parts, and 4/12 against 1/12 — mathematically both exactly one third — differ
+  in their last bits, so which section received the spare percent was decided by
+  rounding noise: **the browser drew 33% where the unit arithmetic said 34%.**
+  Only the e2e run saw it. It is integer quotient and remainder now, and the test
+  pins the whole distribution `[34, 25, 17, 8, 8, 8]` — a weak "does it sum to
+  100" assertion passed against the buggy version too.
+
+A third, smaller: **the donut made `svg path` stop meaning "an edge"**, and one
+`toHaveCount(1)` assertion had been passing only in the frame before the donut
+existed. Both bare selectors are now scoped to `svg[role="group"]`.
 
 `e2e/smoke.spec.ts` is the only file that hits the real project, and it asserts
 the seeded category tabs rather than collected words — nothing exists for the
-current date between midnight and 13:00 KST, when the cron runs.
+current date between midnight and the day's first cron at 03:00 KST.
 
 `e2e/smoke.spec.ts` needs a real `.env` (recoverable with
 `npx vercel env pull .env --environment=development`); on a fresh clone without
-one, `npm run test:e2e` fails 1 of 27 with a bare count mismatch. Also note
+one, `npm run test:e2e` fails 1 of 43 with a bare count mismatch. Also note
 `playwright.config.ts` sets `reuseExistingServer: true`, so a dev server started
 before `.env` existed will be silently reused with stale environment variables —
-stop it first.
+stop it first. It also pins the viewport to 1280×900, so **the suite says nothing
+about the graph's 1600px box**: it never exercises it above 1232px, and that
+width rests on `scripts/layout/`'s `wide` view plus a one-off DOM measurement.
 
 Asserting how many words were drawn is now safe in a way it was not under
 d3-cloud, which silently dropped whatever did not fit: a force layout draws every
@@ -1253,8 +1729,9 @@ Two habits it enforces, both learned the hard way:
   unlabelled ones move up to fill the gap, invisible to the metric. The harness
   prints an `unlabeled` column; if it is not 0 the row is meaningless. Widening the
   configuration list promotes deeper-ranked words onto the screen, so **re-run
-  `20_unlabeled.sql` after any edit to `02_sieve_configs.sql`** and label what it
-  finds. That fired three times in one sitting.
+  `20_unlabeled.sql` after any edit to `02_sieve_configs.sql` or
+  `24_cap_and_place_configs.sql`** and label what it finds. That fired three
+  times in one sitting.
 - **Never optimise precision alone.** It does not punish discarding good words, so
   maximising it converges on dropping the day's biggest story — measured, not
   hypothetical. Judge on F1 and the `story_rank` column together. That story is
@@ -1269,6 +1746,18 @@ history — `10_sieve_eval.sql`, `11_category_eval.sql`, `20_unlabeled.sql` and
 silently: a day the harness scores but the worklist does not cover is a day
 whose promoted words are never put in front of anyone to label.
 
+**A round's rows are cheap to leave behind and are not free.** Round fourteen's
+live in `24_cap_and_place_configs.sql`, which also carries the `render_cap` and
+`balance_alpha` columns the harness sweeps, and `active` is narrowed to the
+shipped row at the end. Every extra active α value costs one `keyword_signals`
+call a day — the same file's own sitting measured `10_sieve_eval.sql` at 6.2s
+with one α, against a previous sitting's 24.8s with five (two sittings, so only
+the *shape* is comparable: the cost tracks the distinct α count, not the
+configuration count). Worse than the seconds, **every active row carries a
+permanent rule-4 obligation**, because a later collection can promote a word onto
+*its* screen and the worklist will then demand it be labelled before any row can
+be read.
+
 `30_word_scores.sql` and `31_fragments.sql` are the other half: they explain one
 day's screen word by word rather than comparing configurations. **They are
 diagnostics and never grounds for moving a threshold** — that is still
@@ -1277,6 +1766,16 @@ wrong is the habit the rules above exist to stop. `30`'s `chk` column cross-chec
 its own copy of the sieve against `keyword_graph`'s node list and prints `!` on
 disagreement, for the same reason the harness prints `unlabeled`; a `!` means the
 script is wrong, not the sieve.
+
+**That cross-check has now earned itself twice, and its second catch says how
+long a drift can hide.** `30`'s copy of sieve 4 never gained the `min_proper`
+clause when migration `0018` shipped it, so for four rounds it reported every
+proper-noun rescue as "cut: generic" — a `!` on every word admitted by
+`passed_by = 'proper'`. Fixed in that file; the sieve was never touched. **Note
+what `chk` still cannot see**: it asks whether a word *may* be drawn, never why
+it placed where it did, so sieve 6 and the α ordering are both invisible to it. A
+round that turns the place gate on has to add that clause by hand, because the
+cross-check will not demand it.
 
 Two things they found on the first run, both recorded in
 `scripts/analysis/README.md`. The compound merge did not restore 반도체, 무인기,

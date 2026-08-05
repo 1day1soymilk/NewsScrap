@@ -25,6 +25,26 @@
 -- of the sieve's clauses, and a second copy drifts — so `chk` cross-checks it
 -- against the node list and prints `!` on any word the two disagree about.
 -- **A single `!` means this file is wrong, not the sieve.** Fix it here.
+--
+-- **What `chk` cannot see, and it is two things.** It compares membership of the
+-- drawn set against sieves 1 to 4, so:
+--
+--   * **Sieve 6, the place gate, is invisible to it.** `is_place` is deliberately
+--     absent from keyword_graph's JSON (migration 0024's tail comment says why),
+--     so a place dropped by the gate arrives here looking exactly like a word
+--     that lost on rank, and this file would report `cut: rank` with a clean
+--     `chk`. Round fourteen left `place_needs_edge` at 0, so nothing is wrong
+--     today; **a later round that turns the gate on must add the clause here by
+--     hand, because the cross-check will not demand it.** What does check that
+--     copy is the procedure in 10_sieve_eval.sql's `gate_fail` comment.
+--   * **The α ordering is invisible to it too.** `rank` is read out of the RPC's
+--     own JSON rather than recomputed, so a disagreement about `count_balanced`
+--     could not show up as a `!` — it would simply be inherited. That is the
+--     right trade for a diagnostic, but it means this file cannot be used to
+--     verify migration 0025's ranking key.
+--
+-- Both blind spots are membership-vs-order in shape: `chk` tests *whether* a word
+-- may be drawn, never *why it placed where it did*.
 
 with
 -- The most recent collected day. Replace with a literal date to look at another
@@ -43,6 +63,9 @@ w as (
     coalesce(max(value) filter (where key = 'min_word_len'), 3)            as min_word_len,
     coalesce(max(value) filter (where key = 'min_spec'), 0.80)             as min_spec,
     coalesce(max(value) filter (where key = 'max_neighbors_per_doc'), 1.8) as max_neighbors_per_doc,
+    -- Sieve 4d, migration 0018. 9.9 disables it, the convention min_spec uses,
+    -- since the signal maxes at 1.
+    coalesce(max(value) filter (where key = 'min_proper'), 9.90)           as min_proper,
     coalesce(max(value) filter (where key = 'demote_head_pos'), 9.90)      as demote_head_pos,
     coalesce(max(value) filter (where key = 'node_limit'), 70)             as node_limit,
     coalesce(max(value) filter (where key = 'render_cap'), 130)            as render_cap
@@ -86,7 +109,17 @@ annotated as (
     -- word cut by sieve 4 as merely outranked. Same trap as the `faded` flag in
     -- migration 0003, and it was walked into here before the cross-check found
     -- it — which is what the cross-check is for.
+    -- Sieve 4d belongs in this disjunction and was missing from it from the day
+    -- migration 0018 shipped until round fourteen ran this file and read `chk`.
+    -- It is exactly the drift the cross-check exists to catch, and it caught it:
+    -- **every word admitted by `passed_by = 'proper'` was reported `!`**, because
+    -- this copy had no clause that could admit it. On the run that found it —
+    -- 2026-08-04 at 20:0x KST, a day still collecting, so the count is a snapshot
+    -- and not a figure to reproduce — that was 12 of 70 drawn words. Nothing
+    -- about the sieve was wrong; this copy of it was, which is what a `!` always
+    -- means.
     (char_length(s.word) >= w.min_word_len
+      or s.proper >= w.min_proper
       or s.spec >= w.min_spec
       or s.neighbors_per_doc <= w.max_neighbors_per_doc
       or ov.mode is not distinct from 'allow')               as ok_sieve4

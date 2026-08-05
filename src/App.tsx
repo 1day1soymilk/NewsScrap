@@ -1,5 +1,6 @@
 // src/App.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CategoryShare } from './components/CategoryShare'
 import { CategoryTabs } from './components/CategoryTabs'
 import { EventList } from './components/EventList'
 import { GraphSkeleton } from './components/GraphSkeleton'
@@ -8,6 +9,7 @@ import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
 import {
   fetchCategories,
+  fetchCategoryShare,
   fetchCollectedDates,
   fetchEventHeadlineCounts,
   fetchHeadlineCount,
@@ -29,12 +31,13 @@ import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { sameState, stateFromUrl, toSearch } from './lib/urlState'
-import type { CollectedDate } from './lib/queries'
+import type { CategoryShare as CategoryShareRow, CollectedDate } from './lib/queries'
 import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
 const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
+const NO_SHARE: CategoryShareRow[] = []
 
 // A Louvain partition is carried around paired with the graph it came from,
 // because it arrives from an effect that runs **after** the canvas has painted:
@@ -66,6 +69,7 @@ function App() {
   // ?event= that a third axis would only complicate.
   const [eventsExpanded, setEventsExpanded] = useState(false)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
+  const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -165,6 +169,23 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedCategory])
+
+  // 그날 각 섹션이 실제로 낸 몫. 그래프와 독립된 데이터라 그래프의 오류·스켈레톤에
+  // 얽히지 않고, 실패는 급상승 표식과 같은 방식으로 삼킨다 — 도넛이 없어도 화면은
+  // 그대로 읽히고, 없는 편이 오류 페이지보다 낫다.
+  useEffect(() => {
+    let cancelled = false
+    fetchCategoryShare(selectedDate)
+      .then((rows) => {
+        if (!cancelled) setCategoryShare(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryShare(NO_SHARE)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDate])
 
   const previousDate = useMemo(
     () => adjacentDate(availableDates, selectedDate, 'prev'),
@@ -417,20 +438,37 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pt-6 pb-8 sm:px-6">
-        <Masthead
-          date={selectedDate}
-          minDate={availableDates[availableDates.length - 1]}
-          maxDate={availableDates[0]}
-          previousDate={previousDate}
-          nextDate={nextDate}
-          onDateChange={setSelectedDate}
-          words={!error && !loading ? graph.nodes.length : null}
-          links={!error && !loading ? graph.edges.length : null}
-        />
+      {/* **가로 폭이 여기서 갈린다.** 산문은 자기 자로 재고 캔버스는 자기 자로
+          잰다: 읽는 글줄은 길어져서 좋을 것이 없고, 그림은 넓을수록 선반이 한 줄에
+          더 들어가 세로가 짧아진다. 그래서 `max-w-6xl`이 <main>에서 내려와 매스트헤드와
+          오류 블록에 각각 붙고, 그래프만 자기 상자를 따로 받는다.
+
+          CLAUDE.md의 "넓혀도 얻는 것이 없다"는 이 경우가 **아니다**. 그 기록은 고정된
+          상자 **안에서** 단어를 옆으로 벌리는 것에 대한 것이고 — svg는 자기 크롭 크기로
+          그려진 뒤 `max-w-full`로 축소되므로 벌린 만큼 그대로 작아진다 — 여기서는 상자
+          자체가 커진다. 배치가 더 넓은 폭에서 돌므로 축소되는 몫이 줄고 선반이 더 들어간다. */}
+      <main className="px-4 pt-6 pb-8 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <Masthead
+            date={selectedDate}
+            minDate={availableDates[availableDates.length - 1]}
+            maxDate={availableDates[0]}
+            previousDate={previousDate}
+            nextDate={nextDate}
+            onDateChange={setSelectedDate}
+            words={!error && !loading ? graph.nodes.length : null}
+            links={!error && !loading ? graph.edges.length : null}
+          />
+          {/* 전체 보기에서만. 한 섹션 탭 위의 몫 차트는 아무것도 말하지 않는
+              꽉 찬 원이다. 산문 쪽 폭에 두는 이유는 이것이 그날의 **수집**에
+              대한 서술이지 캔버스의 일부가 아니기 때문이다. */}
+          {selectedCategory === null && (
+            <CategoryShare share={categoryShare} categories={categories} />
+          )}
+        </div>
 
         {error && (
-          <div className="text-center">
+          <div className="mx-auto max-w-6xl text-center">
             <p className="mb-2 text-danger">{error}</p>
             <button
               onClick={() => loadGraph()}
@@ -448,7 +486,7 @@ function App() {
           // contentRect, so the ResizeObserver inside the graph never fires and
           // the picture slides intact out from under the panel.
           <div
-            className={`origin-top transition-transform duration-300 motion-reduce:transition-none ${
+            className={`mx-auto w-full max-w-[1600px] origin-top transition-transform duration-300 motion-reduce:transition-none ${
               selectedWord || selectedEvent ? 'sm:-translate-x-24 sm:scale-90' : ''
             }`}
           >
