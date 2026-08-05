@@ -27,6 +27,32 @@ const MIN_SWEEP = 0.012
 
 const TAU = Math.PI * 2
 
+/**
+ * 정수 퍼센트로 나누되 합을 정확히 100으로 맞춘다(최대잉여법).
+ *
+ * **나머지는 정수로 센다.** 소수부를 부동소수로 비교하면 4/12와 1/12의 소수부가
+ * 마지막 비트에서 갈려 — 둘 다 수학적으로는 정확히 1/3이다 — 남은 한 자리가
+ * 어느 줄로 가는지가 반올림 잡음으로 정해진다. 실제로 그렇게 갈렸고, 그래서
+ * 같은 하루가 브라우저에서 33%, 단위 테스트의 산수로는 34%였다. `count * 100`을
+ * `total`로 나눈 몫과 나머지는 정확하고, 동률은 입력 순서로 깬다 — 입력이 이미
+ * 몫 내림차순·슬러그 오름차순이므로 같은 하루는 언제나 같은 숫자를 낸다.
+ */
+function percentOf(counts: number[], total: number): number[] {
+  const floors = counts.map((count) => Math.floor((count * 100) / total))
+  let left = 100 - floors.reduce((sum, value) => sum + value, 0)
+
+  const order = counts
+    .map((count, index) => ({ index, remainder: (count * 100) % total }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+
+  for (const { index } of order) {
+    if (left <= 0) break
+    floors[index] += 1
+    left -= 1
+  }
+  return floors
+}
+
 function round(value: number): number {
   return Math.round(value * 100) / 100
 }
@@ -86,8 +112,14 @@ export function CategoryShare({ share, categories }: CategoryShareProps) {
 
   const anyCapped = rows.some((row) => row.capped)
 
+  // **최대잉여법.** 각자 반올림하면 라벨의 합이 100이 아니게 된다 — 33+25+17+8+8+8
+  // 은 99이고, 몫을 말하는 차트에서 그 1은 읽는 사람이 알아차린다. 내림한 뒤 남은
+  // 자리를 소수부가 큰 순서로 준다. 호는 참값 그대로이고 움직이는 것은 라벨뿐이며,
+  // 대신 한 줄은 자기 참값에서 최대 1만큼 멀어진다 — 합이 맞는 쪽을 택했다.
+  const percents = percentOf(rows.map((row) => row.headlines), total)
+
   let boundary = 0
-  const arcs = rows.map((row) => {
+  const arcs = rows.map((row, index) => {
     const sweep = (row.headlines / total) * TAU
     // 경계는 진짜 비율 그대로 두고, 틈은 그 경계에 **가운데를 맞춰** 판다. 그래서
     // 색이 바뀌는 자리는 정확히 참값이고, 틈이 비율을 먹지 않는다.
@@ -102,7 +134,7 @@ export function CategoryShare({ share, categories }: CategoryShareProps) {
     return {
       ...row,
       label: named.get(row.slug) ?? row.slug,
-      percent: Math.round((row.headlines / total) * 100),
+      percent: percents[index],
       d: annulus(drawn[0], drawn[1]),
     }
   })
@@ -121,7 +153,16 @@ export function CategoryShare({ share, categories }: CategoryShareProps) {
         {arcs.map((arc) => (
           // fill은 presentation attribute가 아니라 inline style로 간다 —
           // 전자에서는 var()가 신뢰할 수 없다.
-          <path key={arc.slug} d={arc.d} style={{ fill: sectionColor(arc.slug) }}>
+          //
+          // data-section은 호가 무엇인지를 DOM에 적어 둔다. 없으면 이 호를 가리키는
+          // 유일한 방법이 위치(nth)뿐이고, 그러면 픽스처의 가중치를 바꾸는 순간
+          // 색 단정이 조용히 **다른 섹션**을 검사하게 된다.
+          <path
+            key={arc.slug}
+            data-section={arc.slug}
+            d={arc.d}
+            style={{ fill: sectionColor(arc.slug) }}
+          >
             <title>{`${arc.label} ${arc.percent}% (${arc.headlines.toLocaleString('ko-KR')}건)`}</title>
           </path>
         ))}
@@ -143,16 +184,26 @@ export function CategoryShare({ share, categories }: CategoryShareProps) {
               <span className="ml-auto tabular-nums text-ink-muted">
                 {arc.percent}%{arc.capped && <span aria-hidden="true">*</span>}
               </span>
+              {/* **별표와 건수는 눈에만 있었다.** 별표는 aria-hidden이고 건수는
+                  aria-hidden인 svg의 <title> 안에만 있어서, 캡션이 "*가 붙은
+                  섹션은"이라고 말해도 스크린 리더로는 어느 섹션인지 찾을 길이
+                  없었다. 두 가지를 여기서 말로 적는다. */}
+              <span className="sr-only">
+                , {arc.headlines.toLocaleString('ko-KR')}건
+                {arc.capped && ', 수집 상한에 닿았을 수 있어 최소치'}
+              </span>
             </li>
           ))}
         </ul>
         <p className="mt-2 text-xs text-ink-faint">
-          모두 {total.toLocaleString('ko-KR')}건.
+          모두 {total.toLocaleString('ko-KR')}건. 몫은 <strong className="font-medium">저장된</strong>{' '}
+          기사 수로 셉니다 — 이미 가진 기사를 다시 본 회차는 창을 꽉 채우고도 상한보다
+          적게 저장하므로, 표시가 없는 섹션도 상한에 걸렸을 수 있습니다.
           {anyCapped && (
             <>
               {' '}
-              *가 붙은 섹션은 한 회차가 수집 상한을 꽉 채웠으므로, 그 몫은 실제보다
-              작게 잡힌 <strong className="font-medium">최소치</strong>입니다.
+              *가 붙은 섹션은 한 회차가 수집 상한에 닿았을 수 있어, 그 몫은{' '}
+              <strong className="font-medium">최소치</strong>입니다.
             </>
           )}
         </p>

@@ -289,7 +289,7 @@ test('resolves the design tokens to real colours in the SVG', async ({ page }) =
   // from the words is worse than no donut — the whole reason the colour has one
   // definition in sectionColors.ts.
   const share = page.getByRole('figure')
-  const politicsArc = share.locator('svg path').nth(1)
+  const politicsArc = share.locator('svg path[data-section="politics"]')
   const arcFill = await politicsArc.evaluate((el) => getComputedStyle(el).fill)
   expect(arcFill).toBe('rgb(190, 18, 60)')
 })
@@ -305,11 +305,16 @@ test('states the day’s real section proportions, and says when the cap hid som
   const share = page.getByRole('figure')
   await expect(share).toBeVisible()
   await expect(share.getByRole('listitem').first()).toContainText('사회')
-  await expect(share.getByRole('listitem').first()).toContainText('33%')
+  await expect(share.getByRole('listitem').first()).toContainText('34%')
 
   // 사회만 상한에 걸린 픽스처이므로 캡션이 뜬다. 걸리지 않은 날에는 뜨지 않아야
   // 하고, 그래야 이 표시가 값을 구별한다고 말할 수 있다.
-  await expect(share.getByText(/최소치/)).toBeVisible()
+  await expect(share.getByText(/\*가 붙은 섹션/)).toBeVisible()
+  // 그리고 그 섹션이 어디인지 말로도 적혀 있다 — 별표만으로는 스크린 리더가
+  // 캡션이 가리키는 행을 찾을 수 없다.
+  await expect(
+    share.getByRole('listitem').first().getByText(/수집 상한에 닿았을 수 있어 최소치/),
+  ).toBeAttached()
 
   // 한 섹션 탭 위에서는 그리지 않는다 — 몫이 100%인 원은 아무 말도 하지 않는다.
   await page.getByRole('button', { name: '경제' }).click()
