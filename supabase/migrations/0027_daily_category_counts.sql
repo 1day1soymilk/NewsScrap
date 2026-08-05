@@ -59,9 +59,14 @@ with per_run as (
 )
 select date, slug,
        sum(n)::int as headlines,
-       -- The cap is read rather than written down. Task 8 retunes it in
-       -- scoring_weights and the Edge Function reads the same row, so this
-       -- cannot drift out of agreement with what the collector actually did.
+       -- The cap is read from scoring_weights rather than written down, so a
+       -- retune there moves this flag and the Edge Function together and the
+       -- two cannot disagree about what the collector actually did. The 150 is
+       -- not a second copy of the cap but the **fallback for an unreadable
+       -- row** — the same default, and for the same reason, as
+       -- lib/collectCap.ts: a missing or null row must not silently flag every
+       -- section as capped. Both fallbacks are 150 and have to be changed
+       -- together if that default ever moves.
        bool_or(n >= coalesce(
          (select value from public.scoring_weights where key = 'collect_cap'), 150)) as capped
 from per_run

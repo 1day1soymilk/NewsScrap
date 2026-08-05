@@ -87,6 +87,44 @@ Management API 의 로그 엔드포인트는 `function_logs` 에 403 을 주고,
 요청 단위 행(`execution_time_ms`, status)만 돌려준다. 그래서 카테고리별 단계 시간을
 응답 본문에도 넣어 둔다: `(scrape Xms, process Yms)`.
 
+### 1-2. 배포 없이 켜고 끄는 값 (`scoring_weights`)
+
+`collect_cap` 말고도 **측정은 끝났고 판단만 남은** 값이 둘 있다. 둘 다 한 줄로
+켜고 되돌릴 수 있고, 재배포가 필요 없다.
+
+- **`place_needs_edge` — 장소 게이트.** 켜면 다른 단어와 선을 하나도 못 가진
+  지명(`word_overrides`의 `place` 항목, 현재 45개)이 그래프에서 빠지고 그 자리를
+  71위 단어가 채운다. 껐을 때가 지금 실려 있는 상태다.
+
+  ```bash
+  # 켜기
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1 where key = 'place_needs_edge'"
+  # 되돌리기
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 0 where key = 'place_needs_edge'"
+  ```
+
+  측정은 `scripts/analysis/README.md`의 "Round fourteen — three mechanisms
+  measured, none shipped" 중 "The place gate: the premise failed, not the
+  threshold" 절에 있고, 구현이 왜 `plpgsql` 루프인지는 마이그레이션 `0024`의
+  헤더에 있다. **켜고 끄는 것 말고 다시 재는 것이 필요하면 반드시 그 두 곳을 먼저
+  읽을 것** — 라벨은 데이터가 움직이면 상해서, 새로 수집한 날 위에서 하네스를
+  돌리려면 `20_unlabeled.sql`이 먼저다.
+
+- **`category_balance_alpha` — 수집량 불균형 보정.** 0이 항등(지금 값, 순수
+  빈도순)이고 1이 "모든 섹션을 똑같이 수집했다면 나왔을 개수"다. 크기는 안 변하고
+  순서만 움직이며, **카테고리 탭 안에서는 α가 무엇이든 항등**이다(같은 섹션의 모든
+  행이 같은 상수를 받으므로).
+
+  ```bash
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1 where key = 'category_balance_alpha'"
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 0 where key = 'category_balance_alpha'"
+  ```
+
+  측정은 같은 README의 "α: not measurable on this day set" 절, 정의와 비용은
+  마이그레이션 `0025`의 헤더에 있다. 요약하면 **이 네 날 위에서는 α를 잴 수 없다** —
+  넷 중 셋이 라벨 기준으로 중립이고 나머지 하나는 균등 수집된 날이라 보정할 것이
+  없다. 2026-08-04처럼 섹션이 크게 갈린 날에 라벨이 붙은 뒤에 다시 볼 값이다.
+
 ### 2. 데이터 확인 (SQL Editor)
 
 ```sql

@@ -77,6 +77,38 @@
 -- 0023 and 0024 passed. The identity is arithmetic, not luck: at α = 0 every
 -- factor is exactly numeric 1, so a sum of factors over a word's rows is that
 -- word's row count, and `count_balanced desc, count desc` is `count desc` twice.
+--
+--
+-- ## What the added aggregate costs (2026-08-04, one sitting)
+--
+-- 0024's header prices its own restructuring, so this one prices the per-call
+-- `headlines ⋈ categories` aggregate it adds.
+--
+--   explain analyze select * from public.category_balance_factors('2026-08-03');
+--   -> Execution Time: 4.688 ms   (Function Scan actual time 4.565..4.566, 6 rows)
+--
+-- Before/after on keyword_signals, **same sitting, same box**: 0017's body was
+-- recreated as analysis._kws_pre0025(date), timed against the shipped function
+-- three times alternating, then dropped.
+--
+--   run | pre-0025            | shipped
+--   ----+---------------------+-------------
+--    1  | 941.900 ms          | 980.559 ms
+--    2  | 932.927 ms          | 971.563 ms
+--    3  | 931.112 ms          | 971.527 ms
+--
+-- **+39 ms, +4.2%**, tight across all three pairs. About 5 ms of it is the
+-- factors function itself; the rest is the extra hash join of 5,372 word groups
+-- against six rows. keyword_graph('2026-08-03', null) with the gate off runs
+-- 1,293-1,299 ms and calls the factors function twice (once inside
+-- keyword_signals, once in keyword_graph_candidates), so roughly 78 ms of that
+-- total is this migration.
+--
+-- **Do not read those against 0024's recorded gate-off figure.** 0024 records
+-- 1,096 ms in its header and 1,342 ms in its commit message for the same query
+-- on the same day, so the cross-sitting noise on this box is larger than
+-- anything measured here. The same-sitting A/B above is the number to trust,
+-- and that is why the sitting is stamped rather than the numbers quoted bare.
 
 insert into public.scoring_weights (key, value, note) values
   ('category_balance_alpha', 0,

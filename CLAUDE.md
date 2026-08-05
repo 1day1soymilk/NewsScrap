@@ -206,8 +206,11 @@ can itself be the partner that rescues one. A recursive CTE cannot express it:
 Postgres forbids window functions in the recursive term and the ranking is
 `row_number()`. Hence a loop. **Termination is by monotonicity** — `banned` only
 grows and can only hold places — and the iteration guard is derived from the
-place count rather than hardcoded, because a hardcoded 50 against 45 places is a
-margin of four; when it fires it `raise`s, since a silently wrong graph is worse
+place count rather than hardcoded: it is `count(*) + 2` over the `place` rows of
+`word_overrides`, which at the live count of 45 places is **47**, one pass per
+place plus the confirming pass that finds nothing. A hardcoded 50 would have
+been a margin of five over that count and would go stale the moment a place is
+added. When the guard fires it `raise`s, since a silently wrong graph is worse
 than an error.
 
 **The one copy of each decision survives the loop, split by what it depends
@@ -587,7 +590,9 @@ nothing before the harness was read and again after.
   category**, and that is what keeps rule 5 safe: 폭염 spans sections and its top
   category is society, the largest, so a single denominator would charge it the
   largest divisor and put the day's biggest story at risk. A spread word gets a
-  blend, and 폭염 in fact *gains* (2026-08-03, 121 → 125.6 at α = 1).
+  blend, and 폭염 in fact *gains* (2026-08-03, 121 → 125.6 at α = 1) — the table
+  is in `scripts/analysis/README.md`'s round-fourteen α section, with the ranks
+  at α = 0 and α = 1 for all four eval days.
 
   **α is the identity inside a category tab, at every α, by construction** —
   every drawn row in section *c* carries the same factor, so `count_balanced` is
@@ -701,7 +706,9 @@ changed.**
 
 ### Reading the same view twice costs nothing
 
-`src/lib/queryCache.ts` sits under six of the query functions and holds the
+`src/lib/queryCache.ts` sits under seven of the query functions (count them —
+`grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
+incremented from a stale one instead of counted) and holds the
 **promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
 rejections evicted immediately so "다시 시도" really retries). Two things follow
 that are easy to underrate:
@@ -876,7 +883,10 @@ events and every edge had to cross somebody else's story.
   exactly the band words, and the band sat entirely below every region — so no
   route could change. Measured accordingly: `crowded`, `crossings`, `xIn`, `xBr`,
   `bridges` and `lenMax` are byte-identical in all eight cells. **What is bought
-  is height, down 7–17% everywhere**, which is the band's whole vertical cost. If
+  is height, down 5.6–17.4% everywhere** (9.4 / 6.4 / 15.0 / 5.6 desktop and
+  9.7 / 8.7 / 17.4 / 6.6 phone, computed from the before/after pairs in
+  `scripts/layout/README.md`'s `scatterLoose` table), which is the band's whole
+  vertical cost. If
   `crowded` ever does rise here, that is a broken implementation and not a trade.
   This is the same problem the old inner-ring placement failed at, solved by
   ordering rather than by a force balance.
@@ -1042,13 +1052,15 @@ events and every edge had to cross somebody else's story.
 
   **The table went stale because of `0022`, not because of `0024`, and this
   branch's own first conclusion was the wrong one.** `0024` reordered
-  exactly-tied edges, so it looked like the culprit. The old order was decided by
-  a query plan and cannot be replayed, so the answerable question was asked
-  instead: permute the tied edges eight ways per cell, which spans the space the
-  reorder could have moved through. **Every metric column is unmoved in all eight
-  cells** — only 2026-08-02's coordinate sum wobbles by 0.03%. And independently,
-  no edge reordering can add a *word* to an event, while 08-02's largest went
-  12/26 to 13/29. What invalidated the table is `min_word_len` 3 → 4 changing
+  exactly-tied edges, so it looked like the culprit. **The leg that settles it is
+  the one that does not depend on sampling**: no edge reordering can add a *word*
+  to an event, and 2026-08-02's largest event went 12 words / 26 edges to 13 / 29,
+  so a reorder cannot be what moved it. The old order was decided by a query plan
+  and cannot be replayed, so the sampled leg was run alongside it — permute the
+  tied edges eight ways per cell, which is **a sample of the space the reorder
+  could have moved through, not a span of it** — and **every metric column is
+  unmoved in all eight cells**, with only 2026-08-02's coordinate sum wobbling by
+  0.03%. What invalidated the table is `min_word_len` 3 → 4 changing
   which 70 words are drawn — and the two halves of that, "which words" and
   "therefore which edges", cannot be separated, because edges exist only between
   drawn words. That is migration `0007`'s recorded trap, unchanged.

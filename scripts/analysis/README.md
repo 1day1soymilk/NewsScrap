@@ -488,6 +488,29 @@ third-decimal hair. **That is the only day it loses on.** The two days with real
 imbalance are label-neutral at every α, and 2026-08-02 draws 69 words against a
 cap of 70 so no substitution is available at all.
 
+**Rule 5 holds at α = 1, and the denominator is why.** The top story from
+`analysis.eval_days` keeps rank 1 on every eval day, and the reason is that the
+divisor is the word's *own* section distribution rather than its top category —
+a spread word gets a blend of factors, so a word that spans sections is not
+charged the largest section's divisor:
+
+| day | word | df | df_balanced (α = 1) | rank α = 0 | rank α = 1 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-07-31 | 폭염 | 38 | 38.0 | 1 | 1 |
+| 2026-08-01 | 폭염 | 42 | 42.0 | 1 | 1 |
+| 2026-08-02 | 김민석 | 45 | 34.8 | 1 | 1 |
+| 2026-08-03 | 폭염 | 121 | **125.6** | 1 | 1 |
+
+폭염 in fact *gains*: 121 → 125.6 on 2026-08-03. On 07-31 and 08-01 those days
+were collected evenly enough that N̄/N_c ≈ 1 for its sections and the number does
+not move at all. The same reading taken on *2026-08-04 at 11:00 KST* gives
+113 → 118.3, and is a snapshot rather than a measurement for the reason the
+balance-factor table above states — that day was still collecting.
+
+This table is here because CLAUDE.md's "Word scoring" section quotes the
+121 → 125.6 figure, and a figure quoted in a tracked file has to be traceable to
+a tracked one.
+
 **The day the mechanism was built for is 2026-08-04 and it is not in
 `analysis.eval_days`.** Not an oversight: it is *today*, the cron collects again
 at 15, 19 and 23 KST, and a day that is still moving cannot carry a label set —
