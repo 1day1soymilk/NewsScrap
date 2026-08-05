@@ -3,6 +3,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { CATEGORIES } from './lib/categories.ts'
 import {
+  cursorIsBefore,
   extractHeadlines,
   extractListCursor,
   extractTemplateListHtml,
@@ -51,32 +52,74 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // trips this. **A collect-now button has to expect a 546 that says nothing
 // about the run it killed.**
 //
-// **What stops a raise is the date stamp, not the budget.** `collected_date` is
-// the day of collection and a deeper page is an older article, so paging past
-// the day boundary files yesterday's news under today. Measured at 20:10 KST on
-// 2026-08-04, per section, at rank #400 — the deepest depth the measurement's
-// table covers: the fast sections never leave today, and society reaches only
-// 4 hours back at that depth — while culture and it cross into 2026-08-03 at
-// about rank 290 (ranks 278-296 for the 7 rows a cap-300 run actually stored,
-// all in it).
+// **What used to stop a raise was the date stamp. That is what the day-boundary
+// stop in fetchSectionHeadlines is, and it is why the cap can now move.**
 //
-// Two things keep that small and both are worth knowing before anyone reads the
-// 7 as an argument either way. `UNIQUE (category_id, link)` is global rather
-// than per-date, so a yesterday article that yesterday collected cannot be
-// re-stamped — only one that fell in a coverage hole can. And **the effect is
-// already here at 150**: the 02:29 and 07:00 runs of 2026-08-04 stored 89
-// culture, 64 it and 43 world articles published on 08-03, because at 02:29
-// there are only 2.5 hours of today's news and a 150-headline window has to
-// reach back past midnight to fill itself.
+// The problem it removes: `collected_date` is the day of collection, a deeper
+// page is an older article, so a window wider than the day's own news files
+// yesterday under today. It is not a hypothetical cost of raising the cap — it
+// was **already happening at 150**, and by more than anyone had counted. Every
+// row stored under 2026-08-05 was classified against the live section lists at
+// 12:30 KST that day, after three runs: 1,224 rows, of which **129 were
+// published before that day** and a further 88 sat deeper than a 1,620-article
+// scrape could reach, so almost certainly older still. **80 of the 129 came
+// from the 03:00 run**, which is exactly where this was predicted to be worst
+// and exactly the run nobody had measured.
 //
-// **The cap binds, and what is behind it is today's news.** society stored
-// exactly 150 on the 11:00, 15:00 and 19:00 runs of 2026-08-04 and publishes
-// about 75 headlines an hour, so a 150 window covers under 2 hours of a 4-hour
-// cron gap and the rest is lost for good. At 20:10 a cap of 300 would have taken
-// 478 new links against 150's 278. That gain is concentrated in society,
-// economy and politics; culture, world and it gain 1, 4 and 11, so **deeper
-// paging widens the section gap rather than closing it** — Task 7's finding,
-// reproduced from the other side.
+// **The 03:00 and 07:00 regime is measurable without waiting for it**, which is
+// what makes the above a measurement rather than an estimate. The list is
+// ordered by publication time, so "articles published between midnight and T"
+// is the rank at which a run starting at T crosses into yesterday. Counted at
+// 12:30 KST on 2026-08-05:
+//
+//   section    published by 03:00   by 07:00
+//   politics                   17         50
+//   economy                    24        120
+//   society                    42        136
+//   culture                    15         52
+//   world                      15         75
+//   it                          1         23
+//
+// **Not one section reaches 150 before 07:00.** At 03:00 a 150-headline window
+// spends 133 of its 150 slots on yesterday in politics and 149 in it. What kept
+// the damage down to 129 rows is only that most of those articles were already
+// held: `UNIQUE (category_id, link)` is global rather than per-date, so a
+// yesterday article yesterday collected cannot be re-stamped. The 129 are the
+// ones that fell in a coverage hole.
+//
+// **The other end of the day says the opposite thing about the same number, and
+// that is the finding.** Of the articles published on 2026-08-05 before the
+// 11:00 run, **42.9% were never collected at all** — 704 of 1,641, and 61% of
+// economy, 53% of society. Every one of those holes sits between 07:00 and
+// 11:00, and none at all between midnight and 05:00. So a 150 window is
+// simultaneously far too wide for the thin hours and less than half of what the
+// busy ones need, and **the boundary stop is what lets one number stop being
+// asked to do both**: in the thin hours it stops the scrape early, in the busy
+// hours it never fires, so the cap is free to rise for the case that wants it.
+//
+// What the 11:00 run of that day would newly have stored, boundary stop on:
+//
+//   cap        150   200   300   450   600
+//   new rows   126   228   426   680   704
+//
+// **300 is the recommendation and it is not the top of that column**, because
+// 450 puts a cold all-new run at ~2,700 headlines against the 2,630 that is the
+// deepest anything here has been measured at, and the worker budget is
+// cumulative. Raise to 300, read `off-day` and the section counts for a day,
+// then decide about 450. The cap is a `scoring_weights` value: no redeploy.
+//
+// **The one thing lost is real and small.** Those 129 rows a day are genuine
+// articles, and after this change they are not collected at all rather than
+// collected under the wrong date. That is the right trade — they are yesterday's
+// holes, and 426 correctly dated rows arrive in their place — but it is a trade
+// and not a free fix. Deciding instead to stamp rows by publication date would
+// keep them, at the cost of a past day's totals changing after it closed, which
+// invalidates every measurement taken against that day. Not done.
+//
+// Note also that deeper paging **widens the section gap rather than closing
+// it**: the recovery above is 359 economy and 285 society against 11 culture,
+// 9 world and 11 it. Balance is a ranking question, and round fourteen's
+// `df_balanced` is where it lives.
 //
 // Why more headlines are wanted at all is settled elsewhere and is not the
 // `min_headlines` argument this comment used to make: round seven of
@@ -104,23 +147,17 @@ const MAX_LIST_PAGES = 12
 // **What the next version of this file is for**, written down because all three
 // of the numbers around here lost their justification on the same day:
 //
-// 1. **Decide what `collected_date` should mean, and then raise the cap.** The
-//    budget question is settled above and the answer is that 300 fits. What is
-//    not settled is whether an article published yesterday should be filed under
-//    the day it was collected. The list cursor is a YYYYMMDDHHMMSS stamp of the
-//    oldest article on the page (`extractListCursor`), so stopping at the day
-//    boundary is available and costs nothing to compute — but it would change
-//    what the early runs collect today, at 150, and so has to be measured
-//    against the sieve rather than assumed. Until that is decided the cap is a
-//    number in `scoring_weights`, one `update` away, with no redeploy.
+// 1. **Raise `collect_cap` to 300, once one day has run with the boundary stop
+//    deployed.** The check is `off-day` in the response, per section: it should
+//    be large on the 03:00 and 07:00 runs and near zero at 11:00 and after.
+//    Then re-run the classification that produced the numbers above — every row
+//    of a fresh `collected_date` matched against the live lists — and it should
+//    return 0 published-before-today where it returned 129.
 //
-//    **If the cap is ever raised, the check to run is the pre-today count on
-//    the 03:00 and 07:00 runs, not on an evening one.** The whole of the
-//    20:10–21:10 KST measurement above is the regime least likely to reach past
-//    midnight — the fast sections already had most of a day's news between them
-//    and the day boundary. The 03:00 and 07:00 runs are the opposite regime, the
-//    one where a deeper page reaches furthest into yesterday, and they were not
-//    measured because they cannot be provoked on demand.
+//    The cap is a `scoring_weights` value, so the raise is an `update` and not
+//    a deploy. **The boundary stop has to be deployed first**: at 150 the early
+//    runs already overshoot into yesterday, and at 300 they would overshoot
+//    twice as far.
 // 2. **A collect-now button** in the frontend, so a collection can be taken on
 //    demand instead of waiting for the next of six crons. Note the worker budget
 //    is cumulative: pressing it repeatedly is exactly the shape that returns 546
@@ -166,17 +203,44 @@ function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 }
 
-// Walks the section's paginated list until the cap is reached, the pages run
-// out, or a page fails. A short page set is not an error: partial collection
-// beats losing the whole category, and the next run re-scrapes anyway.
-async function fetchSectionHeadlines(sectionId: string, cap: number): Promise<ScrapedHeadline[]> {
+/**
+ * Walks the section's paginated list until the day boundary is crossed, the cap
+ * is reached, the pages run out, or a page fails. A short page set is not an
+ * error: partial collection beats losing the whole category, and the next run
+ * re-scrapes anyway.
+ *
+ * **Nothing published on another day is returned**, and that is what makes the
+ * cap raisable. Two mechanisms, because one cannot do it:
+ *
+ * - **`published !== collectedDate` drops the article**, wherever it sits. The
+ *   first page is not in publication order — it opens with the curated headline
+ *   block — so a rule that stopped at the first old article would truncate it
+ *   at whatever rank the editor put an old story.
+ * - **`cursorIsBefore` stops the paging.** Once a page's oldest article
+ *   predates the day, the next page holds nothing but the day before, and there
+ *   is no reason to fetch it.
+ *
+ * An article whose date cannot be read is **kept**, the same fail-open choice
+ * `canonicalLink` makes: dropping it would lose real news over a markup change,
+ * while keeping it costs one mis-dated row — the outcome every row used to get.
+ */
+async function fetchSectionHeadlines(
+  sectionId: string,
+  cap: number,
+  collectedDate: string,
+): Promise<{ headlines: ScrapedHeadline[]; dropped: number }> {
   const collected: ScrapedHeadline[] = []
   const seenLinks = new Set<string>()
+  let dropped = 0
 
   const absorb = (batch: ScrapedHeadline[]) => {
     for (const headline of batch) {
       if (seenLinks.has(headline.link)) continue
       seenLinks.add(headline.link)
+      if (headline.published !== null && headline.published !== collectedDate) {
+        dropped += 1
+        continue
+      }
       collected.push(headline)
     }
   }
@@ -190,7 +254,14 @@ async function fetchSectionHeadlines(sectionId: string, cap: number): Promise<Sc
   absorb(extractHeadlines(firstHtml))
   let cursor = extractListCursor(firstHtml)
 
-  for (let page = 2; page <= MAX_LIST_PAGES && collected.length < cap && cursor?.hasNext; page++) {
+  for (
+    let page = 2;
+    page <= MAX_LIST_PAGES &&
+    collected.length < cap &&
+    cursor?.hasNext &&
+    !cursorIsBefore(cursor, collectedDate);
+    page++
+  ) {
     const listUrl =
       `https://news.naver.com/section/template/SECTION_ARTICLE_LIST` +
       `?sid=${sectionId}&sid2=&cluid=&pageNo=${cursor.pageNo}&date=&next=${cursor.cursor}` +
@@ -210,7 +281,7 @@ async function fetchSectionHeadlines(sectionId: string, cap: number): Promise<Sc
     cursor = extractListCursor(listHtml)
   }
 
-  return collected.slice(0, cap)
+  return { headlines: collected.slice(0, cap), dropped }
 }
 
 interface CategoryTally {
@@ -425,10 +496,14 @@ Deno.serve(async () => {
       }
 
       const scrapeStart = Date.now()
-      const headlines = await fetchSectionHeadlines(category.sectionId, headlineCap)
+      const { headlines, dropped } = await fetchSectionHeadlines(
+        category.sectionId,
+        headlineCap,
+        collectedDate,
+      )
       console.log(
-        `CHK ${category.slug} scraped ${headlines.length} in ${Date.now() - scrapeStart}ms ` +
-          `(run ${Date.now() - startedAt}ms)`,
+        `CHK ${category.slug} scraped ${headlines.length} (${dropped} off-day) in ` +
+          `${Date.now() - scrapeStart}ms (run ${Date.now() - startedAt}ms)`,
       )
       const processStart = Date.now()
       const tally = await processHeadlines(
@@ -449,8 +524,12 @@ Deno.serve(async () => {
       // Management API's log endpoint refuses them — and the split between
       // scraping and processing is the only thing that says which half of a run
       // is approaching the CPU budget. It costs about 20 characters a category.
+      // `off-day` is the count the day-boundary stop is judged on, and it has to
+      // be in the body for the same reason the phase timings are: the CHK lines
+      // are dashboard-only. A run that reports 0 off-day on every section either
+      // never reached the boundary or has stopped reading the date.
       summary[category.slug] =
-        `ok: ${headlines.length} collected, ${tally.processed} processed, ` +
+        `ok: ${headlines.length} collected, ${dropped} off-day, ${tally.processed} processed, ` +
         `${tally.stored} new, ${tally.repaired} repaired, ${tally.failed} noun rows failed ` +
         `(scrape ${processStart - scrapeStart}ms, process ${Date.now() - processStart}ms)`
     } catch (categoryError) {
