@@ -1,5 +1,6 @@
 // src/App.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CategoryShare } from './components/CategoryShare'
 import { CategoryTabs } from './components/CategoryTabs'
 import { EventList } from './components/EventList'
 import { GraphSkeleton } from './components/GraphSkeleton'
@@ -8,6 +9,7 @@ import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
 import {
   fetchCategories,
+  fetchCategoryShare,
   fetchCollectedDates,
   fetchEventHeadlineCounts,
   fetchHeadlineCount,
@@ -29,12 +31,13 @@ import type { EventGraph } from './lib/events'
 import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { sameState, stateFromUrl, toSearch } from './lib/urlState'
-import type { CollectedDate } from './lib/queries'
+import type { CategoryShare as CategoryShareRow, CollectedDate } from './lib/queries'
 import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
 const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
+const NO_SHARE: CategoryShareRow[] = []
 
 // A Louvain partition is carried around paired with the graph it came from,
 // because it arrives from an effect that runs **after** the canvas has painted:
@@ -66,6 +69,7 @@ function App() {
   // ?event= that a third axis would only complicate.
   const [eventsExpanded, setEventsExpanded] = useState(false)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
+  const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -165,6 +169,23 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedCategory])
+
+  // 그날 각 섹션이 실제로 낸 몫. 그래프와 독립된 데이터라 그래프의 오류·스켈레톤에
+  // 얽히지 않고, 실패는 급상승 표식과 같은 방식으로 삼킨다 — 도넛이 없어도 화면은
+  // 그대로 읽히고, 없는 편이 오류 페이지보다 낫다.
+  useEffect(() => {
+    let cancelled = false
+    fetchCategoryShare(selectedDate)
+      .then((rows) => {
+        if (!cancelled) setCategoryShare(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryShare(NO_SHARE)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDate])
 
   const previousDate = useMemo(
     () => adjacentDate(availableDates, selectedDate, 'prev'),
@@ -438,6 +459,12 @@ function App() {
             words={!error && !loading ? graph.nodes.length : null}
             links={!error && !loading ? graph.edges.length : null}
           />
+          {/* 전체 보기에서만. 한 섹션 탭 위의 몫 차트는 아무것도 말하지 않는
+              꽉 찬 원이다. 산문 쪽 폭에 두는 이유는 이것이 그날의 **수집**에
+              대한 서술이지 캔버스의 일부가 아니기 때문이다. */}
+          {selectedCategory === null && (
+            <CategoryShare share={categoryShare} categories={categories} />
+          )}
         </div>
 
         {error && (

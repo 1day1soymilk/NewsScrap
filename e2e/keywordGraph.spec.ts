@@ -10,6 +10,12 @@ import {
 import type { GraphNodeRow, GraphPayload } from './support/fixtures'
 import { mockSupabase } from './support/mockSupabase'
 
+// 캔버스의 svg. **`svg path`만으로는 더 이상 엣지를 뜻하지 않는다** — 몫 도넛이
+// 같은 페이지에 여섯 개의 path를 그리므로, 엣지를 세는 자리는 그래프의 svg 안으로
+// 범위를 좁혀야 한다. 좁히지 않은 단정은 도넛이 아직 도착하지 않은 프레임에서만
+// 통과하는, 경주에 기대는 시험이다.
+const GRAPH = 'svg[role="group"]'
+
 // DEFAULT_GRAPH only has four words, and "the viewport is cropped to the
 // labels, not to the canvas the simulation ran in" (src/App.tsx / CLAUDE.md):
 // four words clump into a small bounding box regardless of container width,
@@ -60,7 +66,7 @@ test('draws an edge between words that share headlines', async ({ page }) => {
   // One <path> per edge is the point: the routing used to cut every label box
   // out of a straight line and draw the remainder, so a single relationship
   // could arrive as up to five separate strokes.
-  await expect(page.locator('svg path')).toHaveCount(1)
+  await expect(page.locator(`${GRAPH} path`)).toHaveCount(1)
 })
 
 test('draws no cluster blob', async ({ page }) => {
@@ -277,6 +283,37 @@ test('resolves the design tokens to real colours in the SVG', async ({ page }) =
   const tabDot = page.getByRole('button', { name: '정치' }).locator('span').first()
   const dotColor = await tabDot.evaluate((el) => getComputedStyle(el).backgroundColor)
   expect(dotColor).toBe('rgb(190, 18, 60)')
+
+  // And the third place the same ink appears: the 정치 arc of the share donut.
+  // The donut is a key like the tab row is, so an arc naming a different red
+  // from the words is worse than no donut — the whole reason the colour has one
+  // definition in sectionColors.ts.
+  const share = page.getByRole('figure')
+  const politicsArc = share.locator('svg path').nth(1)
+  const arcFill = await politicsArc.evaluate((el) => getComputedStyle(el).fill)
+  expect(arcFill).toBe('rgb(190, 18, 60)')
+})
+
+test('states the day’s real section proportions, and says when the cap hid some', async ({
+  page,
+}) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // 오늘의 픽스처는 12건을 4/3/2/1/1/1로 나눈다 — 사회 33%, 정치 25%, 경제 17%.
+  // 이것이 이 가지의 결론이다: 수집은 고르지 않고, 그 사실을 숨기지 않는다.
+  const share = page.getByRole('figure')
+  await expect(share).toBeVisible()
+  await expect(share.getByRole('listitem').first()).toContainText('사회')
+  await expect(share.getByRole('listitem').first()).toContainText('33%')
+
+  // 사회만 상한에 걸린 픽스처이므로 캡션이 뜬다. 걸리지 않은 날에는 뜨지 않아야
+  // 하고, 그래야 이 표시가 값을 구별한다고 말할 수 있다.
+  await expect(share.getByText(/최소치/)).toBeVisible()
+
+  // 한 섹션 탭 위에서는 그리지 않는다 — 몫이 100%인 원은 아무 말도 하지 않는다.
+  await page.getByRole('button', { name: '경제' }).click()
+  await expect(page.getByRole('figure')).toHaveCount(0)
 })
 
 // --- 브라우저만이 답할 수 있는 것 ---------------------------------------------
@@ -329,7 +366,7 @@ test('평면으로 그릴 수 있는 하루는 브라우저에서도 선이 안 
   await page.goto('/')
   await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
 
-  const drawn = await page.locator('svg path').evaluateAll((els) =>
+  const drawn = await page.locator(`${GRAPH} path`).evaluateAll((els) =>
     els.map((el) => el.getAttribute('d') ?? ''),
   )
   expect(drawn.length).toBe(12)
