@@ -538,11 +538,42 @@ Deno.serve(async () => {
     }
   }
 
+  // 검색이 읽는 사전은 미리 지어 둬야 의미가 있다 — 부분일치는 어떤 인덱스도 타지
+  // 않아서, 명사 행 11만 개를 그때그때 훑으면 316ms이고 그 값은 헤드라인 수에
+  // 비례해 자란다. 여기서 갱신하면 검색은 항상 직전 런까지 최신이다.
+  //
+  // **실패는 삼킨다.** 사전이 하루 낡는 것과 수집이 실패하는 것은 비교 대상이
+  // 아니다. 대신 응답 본문에 적는다: `CHK` 로그는 대시보드에만 있고 Management
+  // API는 function_logs에 403을 주므로, 기계가 읽을 수 있는 유일한 자리가 본문이다.
+  //
+  // CPU 예산과는 무관하다. 이 함수를 죽이는 한계는 워커의 **누적 CPU**인데 이것은
+  // DB가 하는 일을 기다리는 벽시계 시간이다.
+  let directory = 'ok'
+  try {
+    const { error: refreshError } = await supabase.rpc('refresh_word_directory')
+    if (refreshError) {
+      directory = `failed: ${refreshError.message}`
+      console.error('CHK word_directory refresh failed:', refreshError)
+    }
+  } catch (refreshThrow) {
+    // postgrest-js resolves an ordinary failure into { error }, but a network
+    // error it raises itself is not that shape — and an unguarded await here
+    // would lose the whole run's summary at the very last step.
+    directory = `failed: ${String(refreshThrow)}`
+    console.error('CHK word_directory refresh threw:', refreshThrow)
+  }
+
   return new Response(
     // `cap` is in the response because it is now a database value: without it
     // the summary cannot be read without a second query asking what the run was
     // configured with, and a run's own report should say what it ran with.
-    JSON.stringify({ date: collectedDate, cap: headlineCap, elapsedMs: Date.now() - startedAt, summary }),
+    JSON.stringify({
+      date: collectedDate,
+      cap: headlineCap,
+      elapsedMs: Date.now() - startedAt,
+      directory,
+      summary,
+    }),
     { headers: { 'Content-Type': 'application/json' } },
   )
 })
