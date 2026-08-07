@@ -756,6 +756,16 @@ that are easy to underrate:
   **and** the follow-up round trips, and the event list appears without its
   one blank frame. Measured on a tab round trip A→B→A: 6 requests on return
   became 0; on a date step there→back, 9 became 0.
+- **That measurement predates search, and search is why eviction is no longer
+  oldest-inserted.** `searchWords` and the trajectory fetches add one entry per
+  distinct term and one per word looked up, and a session that searches a
+  handful of words can add more entries than a plain tab/date round trip ever
+  did. Evicting the oldest-inserted key would throw away exactly the
+  keyword_graph/share promises the "6 requests → 0" measurement rests on in
+  favour of whatever was searched most recently, so eviction is
+  least-recently-**read**: a hit moves the entry to the end of the `Map`
+  (insertion order becomes read order), while `at` — and therefore the TTL —
+  stays pinned to when the request went out, never to when it was last read.
 - **`fetchWordCountsFor` needs it too**, which an earlier reading of this got
   wrong: `graphWords` keeps its identity across a date step, but `selectedDate`
   changes, so the surge effect re-runs regardless. Before it was cached it was
