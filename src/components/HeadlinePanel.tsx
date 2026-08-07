@@ -5,16 +5,37 @@ import { sectionColor } from '../lib/sectionColors'
 import { WordHistory } from './WordHistory'
 import type { HistoryPoint } from '../lib/history'
 
+/**
+ * 하루치 목록과 그 하루의 상태.
+ *
+ * 로딩과 오류가 날짜별인 것은 요청이 날짜별이기 때문이다. 여러 날을 한 요청으로
+ * 받지 않는 이유는 크기다 — 폭염은 아카이브 9일에 952건이라 한 번에 받으면
+ * PostgREST의 1,000행 캡에 앉아 말없이 잘린다.
+ */
+export interface DayHeadlines {
+  headlines: HeadlineSummary[]
+  loading: boolean
+  error: string | null
+}
+
+const NO_DAYS: ReadonlyMap<string, DayHeadlines> = new Map()
+const NO_OPEN: ReadonlySet<string> = new Set()
+const EMPTY_DAY: DayHeadlines = { headlines: [], loading: false, error: null }
+
 interface HeadlinePanelProps {
   /** 무엇에 대한 목록인가. null이면 패널이 닫힌다. */
   subject: string | null
   /** 사건의 이름은 단어 목록이므로 따옴표를 두르지 않는다. */
   isEvent?: boolean
-  headlines: HeadlineSummary[]
+  /**
+   * 날짜별 목록. 구획 없이 그리는 경우(사건, 그리고 창 안 어느 날에도 그 단어가
+   * 없는 경우)는 `activeDate` 한 칸만 읽는다 — 출처가 둘이 아니라 하나다.
+   */
+  days?: ReadonlyMap<string, DayHeadlines>
+  /** 화면의 날짜. 구획을 쓰지 않을 때 그려지는 날이다. */
+  activeDate: string
   /** In tab order, which is what the list groups by. */
   categories: Category[]
-  loading: boolean
-  error: string | null
   onClose: () => void
   /**
    * The subject word's share across the collected days. Empty for an event —
@@ -28,10 +49,14 @@ interface HeadlinePanelProps {
    */
   history?: HistoryPoint[]
   /**
-   * 지금 펼쳐져 있는 날. `history`의 어느 날짜여야 하고, 기본은 화면의 날짜다.
+   * 지금 펼쳐져 있는 날들. 각 날은 독립적으로 여닫히고, **기본은 전부 닫힘**이다.
+   *
+   * 집합인 것이 요점이다. 열린 날 하나를 문자열로 들고 있으면 같은 줄을 다시
+   * 눌러도 값이 안 바뀌어 토글이 표현되지 않고, 전부 닫힌 상태를 만들 방법이
+   * 아예 없다.
    */
-  openDate?: string
-  onOpenDate?: (date: string) => void
+  openDates?: ReadonlySet<string>
+  onToggleDate?: (date: string) => void
   /**
    * The subject is a word the sieve did not draw on this day — reached by
    * search rather than by clicking the canvas. Saying so is what stops the
@@ -43,14 +68,13 @@ interface HeadlinePanelProps {
 export function HeadlinePanel({
   subject,
   isEvent = false,
-  headlines,
+  days = NO_DAYS,
+  activeDate,
   categories,
-  loading,
-  error,
   onClose,
   history = [],
-  openDate,
-  onOpenDate,
+  openDates = NO_OPEN,
+  onToggleDate,
   offCanvas = false,
 }: HeadlinePanelProps) {
   const open = subject !== null
@@ -73,38 +97,56 @@ export function HeadlinePanel({
     [categories],
   )
 
-  const sorted = useMemo(
-    () => sortHeadlines(dedupe(headlines), categories),
-    [headlines, categories],
-  )
+  // 정렬과 중복 제거는 날짜별로 한다. 날을 가로질러 중복이 나올 일은 없다 —
+  // `UNIQUE (category_id, link)`가 전역이라 한 기사는 한 날에만 앉는다 — 그래서
+  // 이것은 날짜별로 쪼갠 것이지 규칙이 바뀐 것이 아니다.
+  const sorted = useMemo(() => {
+    const out = new Map<string, DayHeadlines>()
+    for (const [date, day] of days) {
+      out.set(date, { ...day, headlines: sortHeadlines(dedupe(day.headlines), categories) })
+    }
+    return out
+  }, [days, categories])
 
   // 최신이 위. 선은 왼쪽에서 오른쪽으로 시간이 흐르고 목록은 위에서 아래로 흐르는데,
   // 목록에서 먼저 읽고 싶은 것은 오늘이다.
   //
+  // **그 단어가 없던 날은 줄 자체가 없다.** 8월 3일 아래에 바로 8월 1일이 온다.
+  // 열 것이 없는 줄은 열리지도 않는데, 비활성 컨트롤과 "기사 없음" 표식으로 자리를
+  // 차지하면 읽을 것이 있는 날들 사이를 벌려 놓기만 한다. 궤적은 반대로 없는 날도
+  // 계속 그린다 — 점유율 0인 날은 선의 일부이고, 빼면 "그날 없었다"가 "그날이
+  // 없었다"로 바뀐다.
+  //
   // **사건에는 날짜 구획이 없다.** 사건의 신원은 날 사이에 정의돼 있지 않으므로
   // (루뱅 분할은 하루짜리다) 어제의 같은 이름 사건이라는 것이 없고, 따라서 나눌
   // 날도 없다. 궤적이 단어에만 붙는 것과 정확히 같은 이유다.
-  const days = useMemo(
-    () => (isEvent ? [] : [...history].reverse()),
+  const rows = useMemo(
+    () => (isEvent ? [] : history.filter((day) => day.present).reverse()),
     [isEvent, history],
   )
 
-  // **펼칠 날이 목록 안에 없으면 날짜 구획 자체를 쓰지 않는다.** 궤적은 *수집된* 날만
-  // 담는데 화면의 날짜는 아직 수집되지 않은 오늘일 수 있고 — 그날은 검색으로만 단어에
-  // 닿는다 — 그러면 어떤 칸도 열리지 않아 헤드라인이 통째로 사라진다. 그때는 예전처럼
-  // 평평한 목록을 그리고, 그 목록이 "관련 헤드라인이 없습니다"를 제대로 말한다.
-  const sectioned = days.some((day) => day.date === openDate)
+  // **판정은 "그릴 줄이 하나라도 있는가"이지 "무엇이 펼쳐져 있는가"가 아니다.**
+  // 펼친 것으로 판정하면 기본값인 전부 닫힘이 곧바로 평평한 목록으로 튀어, 전부
+  // 닫는 것이 불가능해진다.
+  //
+  // 줄이 없는 경우는 둘뿐이다: 사건, 그리고 창 안 어느 날에도 그 단어가 없는
+  // 경우 — 아직 수집되지 않은 오늘에 검색으로 닿았을 때다. 그때는 예전처럼 화면의
+  // 날짜를 평평하게 그리고, 그 목록이 "관련 헤드라인이 없습니다"를 제대로 말한다.
+  const sectioned = rows.length > 0
+
+  // 머리글의 수는 언제나 **지금 아래에 깔린 줄 수**다. 아직 받는 중이거나 실패한
+  // 날은 셀 것이 없으므로 빠진다.
+  const shownCount = useMemo(() => {
+    const counted = sectioned ? [...openDates] : [activeDate]
+    let total = 0
+    for (const date of counted) {
+      const day = sorted.get(date)
+      if (day && !day.loading && !day.error) total += day.headlines.length
+    }
+    return total
+  }, [sectioned, openDates, activeDate, sorted])
 
   if (!open) return null
-
-  const list = (
-    <HeadlineList
-      headlines={sorted}
-      labels={labels}
-      loading={loading}
-      error={error}
-    />
-  )
 
   return (
     // Bottom sheet on a phone, side drawer from `sm` up. The fixed 320px drawer
@@ -128,10 +170,12 @@ export function HeadlinePanel({
               그날의 건수를 여기 적으면 섹션 탭이 켜졌을 때 — 목록은 그 섹션으로
               좁혀지고 궤적은 규칙상 여섯 섹션 전부를 세므로 — 머리글이 목록보다
               큰 수를 말하게 된다. 그날 전체 건수는 스파크라인의 축이 지고, 그쪽은
-              캡션이 무엇을 센 수인지 적어 둔다. 한 수는 한 곳에서만 적는다. */}
-          {!loading && !error && sorted.length > 0 && (
+              캡션이 무엇을 센 수인지 적어 둔다. 한 수는 한 곳에서만 적는다.
+              아무 날도 안 열린 기본 상태에서 이 수가 0이 되어 사라지는 것은
+              그 규칙의 결과이지 예외가 아니다. */}
+          {shownCount > 0 && (
             <span className="ml-2 font-sans text-sm font-normal text-ink-faint">
-              {sorted.length}건
+              {shownCount}건
             </span>
           )}
         </h2>
@@ -146,33 +190,23 @@ export function HeadlinePanel({
         </p>
       )}
 
-      {!isEvent && <WordHistory points={history} activeDate={openDate} />}
+      {!isEvent && <WordHistory points={history} openDates={openDates} />}
 
       {!sectioned ? (
-        list
+        <DayList day={sorted.get(activeDate) ?? EMPTY_DAY} labels={labels} />
       ) : (
         <ul>
-          {days.map((day) => {
-            const isOpen = day.date === openDate
+          {rows.map((day) => {
+            const isOpen = openDates.has(day.date)
             const id = `${sectionId}-${day.date}`
             return (
               <li key={day.date} className="border-b border-line last:border-0">
                 <button
                   type="button"
-                  // 그날 그 단어가 아예 없었으면 열 것이 없다. 이 판정은 궤적이
-                  // 이미 알고 있고 — 여섯 섹션 전부를 센 값이라 — 어느 탭에서도
-                  // 참이다. 건수를 머리글에 적지 않는 이유와 대비되는 지점이다:
-                  // 0은 범위와 무관하지만 51은 그렇지 않다.
-                  //
-                  // **열려 있는 칸은 예외다.** 화면의 날짜에 그 단어가 없으면 그
-                  // 칸이 열린 채로 비어 있게 되는데, 그것을 비활성으로 그리면
-                  // 펼쳐진 비활성 컨트롤이 되고 "기사 없음"과 본문의 "관련
-                  // 헤드라인이 없습니다"가 같은 말을 두 번 한다.
-                  disabled={!day.present && !isOpen}
                   aria-expanded={isOpen}
                   aria-controls={id}
-                  onClick={() => onOpenDate?.(day.date)}
-                  className="flex w-full items-center gap-2 py-2.5 text-left text-sm disabled:cursor-default"
+                  onClick={() => onToggleDate?.(day.date)}
+                  className="flex w-full items-center gap-2 py-2.5 text-left text-sm"
                 >
                   <span
                     aria-hidden="true"
@@ -182,20 +216,13 @@ export function HeadlinePanel({
                   >
                     ▶
                   </span>
-                  <span
-                    className={
-                      isOpen ? 'font-semibold text-ink' : day.present ? 'text-ink-muted' : 'text-ink-faint'
-                    }
-                  >
+                  <span className={isOpen ? 'font-semibold text-ink' : 'text-ink-muted'}>
                     {formatDate(day.date).day}
                   </span>
-                  {!day.present && !isOpen && (
-                    <span className="ml-auto text-xs text-ink-faint">기사 없음</span>
-                  )}
                 </button>
                 {isOpen && (
                   <div id={id} className="pb-3">
-                    {list}
+                    <DayList day={sorted.get(day.date) ?? EMPTY_DAY} labels={labels} />
                   </div>
                 )}
               </li>
@@ -204,6 +231,17 @@ export function HeadlinePanel({
         </ul>
       )}
     </aside>
+  )
+}
+
+function DayList({ day, labels }: { day: DayHeadlines; labels: Map<string, string> }) {
+  return (
+    <HeadlineList
+      headlines={day.headlines}
+      labels={labels}
+      loading={day.loading}
+      error={day.error}
+    />
   )
 }
 

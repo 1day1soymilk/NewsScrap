@@ -5,6 +5,7 @@ import { CategoryTabs } from './components/CategoryTabs'
 import { EventList } from './components/EventList'
 import { GraphSkeleton } from './components/GraphSkeleton'
 import { HeadlinePanel } from './components/HeadlinePanel'
+import type { DayHeadlines } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
 import { WordSearch } from './components/WordSearch'
@@ -35,18 +36,27 @@ import { computeSurges, surgeLimitFor } from './lib/surge'
 import type { Surge } from './lib/surge'
 import { sameState, stateFromUrl, toSearch } from './lib/urlState'
 import type { CategoryShare as CategoryShareRow, CollectedDate } from './lib/queries'
-import type { Category, HeadlineSummary, KeywordGraphData } from './lib/types'
+import type { Category, KeywordGraphData } from './lib/types'
 
 const EMPTY_GRAPH: KeywordGraphData = { nodes: [], edges: [] }
 const NO_SURGES: Map<string, Surge> = new Map()
 const NO_EVENTS: EventGraph = { events: [], bridges: new Map() }
 const NO_SHARE: CategoryShareRow[] = []
+const NO_DATES: ReadonlySet<string> = new Set()
+const EMPTY_DAY: DayHeadlines = { headlines: [], loading: false, error: null }
+const NO_WORD_DAYS = { for: '', days: new Map<string, DayHeadlines>() }
+const NO_HISTORY = { for: '', points: [] as HistoryPoint[] }
 
 // A Louvain partition is carried around paired with the graph it came from,
 // because it arrives from an effect that runs **after** the canvas has painted:
 // for one frame, while a new day is first drawn, this Map still belongs to the
 // previous one.
 type Partition = { graph: KeywordGraphData; communities: Map<string, number> }
+
+// 궤적은 단어와 창의 끝(화면의 날짜) 둘 다에 달려 있으므로 둘 다 신원에 들어간다.
+function historyKey(word: string, date: string): string {
+  return `${word}|${date}`
+}
 
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message
@@ -71,23 +81,38 @@ function App() {
   // data, and the URL already carries a mutual-exclusion rule between ?word= and
   // ?event= that a third axis would only complicate.
   const [eventsExpanded, setEventsExpanded] = useState(false)
-  // 헤드라인 패널에서 지금 펼쳐 놓은 날. 같은 이유로 URL에 없다 — 그리고 **캔버스의
+  // 헤드라인 패널에서 지금 펼쳐 놓은 날들. 같은 이유로 URL에 없다 — 그리고 **캔버스의
   // 날짜를 바꾸지 않는다**: 검색으로 닿은 단어가 날짜를 옮기지 않는 것과 같은 판단으로,
   // 읽던 화면이 발밑에서 움직이면 안 된다.
   //
   // 어느 상태에 대한 펼침인지를 `for`에 같이 들고 다닌다. 날짜/단어가 바뀌면 저절로
-  // 무효가 되어 화면의 날짜로 돌아가므로, 되돌리는 effect가 필요 없다 — effect로
+  // 무효가 되어 기본값으로 돌아가므로, 되돌리는 effect가 필요 없다 — effect로
   // 되돌리면 그 한 렌더 동안 이전 날짜가 유효해 보여서 지난 날의 요청이 한 번 나간다.
-  const [panelDate, setPanelDate] = useState<{ for: string; date: string } | null>(null)
+  //
+  // **집합인 것과 기본이 빈 것이 둘 다 요점이다.** 날 하나를 문자열로 들면 같은 줄을
+  // 다시 눌러도 값이 안 바뀌어 토글이 표현되지 않고, 전부 닫힌 상태를 만들 방법이
+  // 없다. 그리고 기본이 비어 있으므로 단어를 눌러도 헤드라인 요청이 나가지 않는다 —
+  // 읽고 싶은 날을 고르는 것은 읽는 사람이다.
+  const [panelDates, setPanelDates] = useState<{ for: string; dates: Set<string> } | null>(null)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
-  const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
-  const [history, setHistory] = useState<HistoryPoint[]>([])
+  // 날짜별 목록. 어느 (단어, 섹션)에 대한 것인지를 함께 들고 다니는 것은 partition이
+  // graph와, eventCounts가 eventGraph와 짝지어 다니는 것과 같은 이유다: 짝이 어긋난
+  // 순간 통째로 비어야지, 다른 단어의 목록이 한 프레임 보여서는 안 된다. 그리고
+  // 이 짝짓기가 없으면 닫았다 다시 연 날이 — 캐시에 이미 있는데도 — 한 프레임
+  // "관련 헤드라인이 없습니다"를 번쩍인다.
+  const [wordDays, setWordDays] = useState<{ for: string; days: Map<string, DayHeadlines> }>(
+    NO_WORD_DAYS,
+  )
+  // 사건에는 날짜 축이 없다. 화면의 날짜 하나를 읽으므로 상태도 하나다.
+  const [eventDay, setEventDay] = useState<DayHeadlines>(EMPTY_DAY)
+  // 궤적도 **어느 단어의 것인지와 함께** 든다. 아직 안 온 것과 와서 비어 있는 것을
+  // 구별하지 못하면, 단어를 누를 때마다 도착 전 한 박자 동안 화면의 날짜를 평평한
+  // 목록으로 그리려고 요청을 한 번 내보내고 도착과 함께 그것이 사라져 깜빡인다.
+  const [history, setHistory] = useState<{ for: string; points: HistoryPoint[] }>(NO_HISTORY)
   const [loading, setLoading] = useState(true)
-  const [headlinesLoading, setHeadlinesLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [headlinesError, setHeadlinesError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchCategories().then(setCategories).catch((e) => setError(errorMessage(e)))
@@ -271,7 +296,7 @@ function App() {
   // 아니다.
   useEffect(() => {
     if (!selectedWord || availableDates.length === 0) {
-      setHistory([])
+      setHistory(NO_HISTORY)
       return
     }
     let cancelled = false
@@ -279,15 +304,20 @@ function App() {
     // fetch is bounded to the same window buildHistory would keep anyway —
     // historyWindow is what stops the two from being able to disagree.
     const dates = historyWindow(availableDates, selectedDate)
+    const key = historyKey(selectedWord, selectedDate)
     fetchWordCountsFor(dates, [selectedWord])
       .then((counts) => {
         if (cancelled) return
-        setHistory(buildHistory(counts, headlinesByDate, dates, { endDate: selectedDate }))
+        setHistory({
+          for: key,
+          points: buildHistory(counts, headlinesByDate, dates, { endDate: selectedDate }),
+        })
       })
       .catch(() => {
         // 급상승 표식과 같은 방식으로 삼킨다. 궤적이 없어도 헤드라인 목록은 그대로
-        // 읽히고, 없는 편이 오류 페이지보다 낫다.
-        if (!cancelled) setHistory([])
+        // 읽히고, 없는 편이 오류 페이지보다 낫다. 실패도 **도착**이므로 `for`를
+        // 채운다 — 그러지 않으면 목록이 영원히 도착을 기다리며 비어 있다.
+        if (!cancelled) setHistory({ for: key, points: [] })
       })
     return () => {
       cancelled = true
@@ -434,6 +464,10 @@ function App() {
     return lit
   }, [activeEvent, selectedWord, eventGraph])
 
+  // 사건은 화면의 날짜 한 칸짜리 맵으로 넘긴다. 패널의 출처를 둘로 두지 않기 위해서다
+  // — 구획을 쓰지 않는 경우는 사건이든 단어든 `activeDate` 한 칸을 읽는다.
+  const eventDays = useMemo(() => new Map([[selectedDate, eventDay]]), [selectedDate, eventDay])
+
   // 패널 제목. 목록의 한 줄과 같은 규칙으로 자른다.
   const eventSubject = useMemo(() => {
     if (!activeEvent) return null
@@ -441,57 +475,127 @@ function App() {
     return rest > 0 ? `${shown.join(' · ')} 외 ${rest}` : shown.join(' · ')
   }, [activeEvent])
 
-  // 패널이 지금 어느 날을 펼쳐 놓았는가. 기본은 화면의 날짜이고, 궤적의 다른 날을
-  // 누르면 그 날이 된다. 캔버스는 움직이지 않는다.
+  // 패널이 지금 어느 날들을 펼쳐 놓았는가. **기본은 전부 닫힘**이고, 줄을 누르면
+  // 그 날 하나가 토글된다. 캔버스는 움직이지 않는다.
   const panelKey = `${selectedWord ?? ''}|${selectedEvent ?? ''}|${selectedDate}`
-  const openDate = panelDate?.for === panelKey ? panelDate.date : selectedDate
+  const openDates = useMemo(
+    // 신원이 매 렌더 바뀌면 아래 effect가 매 렌더 돈다. 그래서 빈 경우는 상수 하나를
+    // 돌려준다.
+    () => (panelDates?.for === panelKey ? panelDates.dates : NO_DATES),
+    [panelDates, panelKey],
+  )
+  const toggleDate = useCallback(
+    (date: string) => {
+      setPanelDates((current) => {
+        const base = current?.for === panelKey ? current.dates : NO_DATES
+        const next = new Set(base)
+        if (!next.delete(date)) next.add(date)
+        return { for: panelKey, dates: next }
+      })
+    },
+    [panelKey],
+  )
 
+  // **"궤적이 도착했나"는 한 번만 묻는다.** 두 군데서 따로 물으면 한쪽을 지워도
+  // 다른 쪽이 가려 주어, 지워도 안 깨지는 자리가 생긴다(실제로 뮤테이션으로 확인함).
+  //
+  // 도착 전의 빈 배열을 "그릴 줄이 없다"로 읽으면 두 가지가 함께 잘못된다: 단어를
+  // 누를 때마다 화면의 날짜를 한 번 받아 버리고(전부 닫힌 채로 여는 규칙이 무너진다),
+  // 그리고 도착 직전 한 프레임 동안 **앞 단어의** 날짜 줄이 새 단어 아래 그려진다.
+  const historyReady =
+    selectedWord !== null && history.for === historyKey(selectedWord, selectedDate)
+  const historyPoints = historyReady ? history.points : NO_HISTORY.points
+
+  // 사건의 헤드라인. 날짜 축이 없으므로 화면의 날짜 하나를 읽는다 — **그것은 데이터의
+  // 성질이지 아직 안 만든 기능이 아니다**: 루뱅 분할이 하루짜리라 어제의 같은 사건
+  // 이라는 것이 정의되지 않는다.
   useEffect(() => {
-    setHeadlinesError(null)
     // 다리 단어를 눌러도 열리는 것은 **그 단어의** 헤드라인이다. 두 사건의
     // 헤드라인을 합쳐 열면 그 단어가 왜 접점인지가 오히려 묻힌다.
-    const eventWords = activeEvent?.words.map((word) => word.word) ?? null
-    if (!selectedWord && !eventWords) {
-      setHeadlinesForWord([])
-      setHeadlinesLoading(false)
+    const eventWords = selectedWord ? null : (activeEvent?.words.map((w) => w.word) ?? null)
+    if (!eventWords) {
+      setEventDay(EMPTY_DAY)
       return
     }
 
     let cancelled = false
-    // 단어는 펼쳐진 날을, 사건은 화면의 날짜를 읽는다. **사건에 날짜 축이 없는 것은
-    // 데이터의 성질이지 아직 안 만든 기능이 아니다** — 루뱅 분할이 하루짜리라
-    // 어제의 같은 사건이라는 것이 정의되지 않는다.
-    const request = selectedWord
-      ? fetchHeadlinesForWord(openDate, selectedCategory, selectedWord)
-      : fetchHeadlinesForEvent(selectedDate, selectedCategory, eventWords!)
-
-    // 스켈레톤은 **기다릴 것이 있을 때만** 올린다. 날짜 칸을 오갈 때 이미 받아 둔
-    // 날은 왕복 없이 그 자리에서 풀리는데, 거기에 한 프레임짜리 스켈레톤을 번쩍이면
-    // 캐시로 번 것을 그대로 돌려주는 셈이다 — loadGraph가 같은 이유로 같은 모양을
-    // 하고 있고, 그 판정을 프로미스가 언제 풀리는지로 추측하지 않는 것도 같다.
-    setHeadlinesLoading(
-      selectedWord
-        ? !fetchHeadlinesForWord.isReady(openDate, selectedCategory, selectedWord)
-        : !fetchHeadlinesForEvent.isReady(selectedDate, selectedCategory, eventWords!),
-    )
-
+    const request = fetchHeadlinesForEvent(selectedDate, selectedCategory, eventWords)
+    setEventDay({
+      headlines: [],
+      loading: !fetchHeadlinesForEvent.isReady(selectedDate, selectedCategory, eventWords),
+      error: null,
+    })
     request
       .then((data) => {
-        if (cancelled) return
-        setHeadlinesForWord(data)
+        if (!cancelled) setEventDay({ headlines: data, loading: false, error: null })
       })
       .catch((e) => {
-        if (cancelled) return
-        setHeadlinesError(errorMessage(e))
-      })
-      .finally(() => {
-        if (cancelled) return
-        setHeadlinesLoading(false)
+        if (!cancelled) setEventDay({ headlines: [], loading: false, error: errorMessage(e) })
       })
     return () => {
       cancelled = true
     }
-  }, [selectedWord, activeEvent, selectedDate, selectedCategory, openDate])
+  }, [selectedWord, activeEvent, selectedDate, selectedCategory])
+
+  // 단어의 헤드라인, **펼쳐 놓은 날마다 하나씩.**
+  //
+  // 여러 날을 한 요청으로 받지 않는다: 폭염은 아카이브 9일에 952건 / 명사행 973이라
+  // 한 번에 받으면 PostgREST의 1,000행 캡에 앉아 말없이 잘린다. 하루씩 받는 것은 캡이
+  // 구조적으로 못 걸리고, `fetchHeadlinesForWord`가 이미 날짜별로 캐시한다.
+  const wantedDates = useMemo(() => {
+    if (!selectedWord || !historyReady) return NO_DATES
+    // 그릴 줄이 하나도 없으면 — 창 안 어느 날에도 그 단어가 없다 — 패널은 화면의
+    // 날짜를 평평하게 그린다. 그때 필요한 하루가 이것이다.
+    return historyPoints.some((point) => point.present) ? openDates : new Set([selectedDate])
+  }, [selectedWord, historyReady, historyPoints, openDates, selectedDate])
+
+  useEffect(() => {
+    if (!selectedWord) {
+      setWordDays(NO_WORD_DAYS)
+      return
+    }
+    const key = `${selectedWord}|${selectedCategory ?? '*'}`
+    let cancelled = false
+
+    // 이미 받아 둔 날은 그대로 이어 쓴다. 매번 새 맵을 만들면 닫았다 다시 연 날이
+    // 캐시 히트인데도 한 프레임 "관련 헤드라인이 없습니다"를 번쩍인다.
+    //
+    // **스켈레톤은 기다릴 것이 있을 때만** 올린다. 그 판정은 프로미스가 언제 풀리는
+    // 지로 추측하지 않고 캐시에 직접 묻는다 — `loadGraph`가 같은 이유로 같은 모양을
+    // 하고 있다.
+    setWordDays((current) => {
+      const held = current.for === key ? current.days : null
+      const days = new Map<string, DayHeadlines>()
+      for (const date of wantedDates) {
+        days.set(
+          date,
+          held?.get(date) ?? {
+            headlines: [],
+            loading: !fetchHeadlinesForWord.isReady(date, selectedCategory, selectedWord),
+            error: null,
+          },
+        )
+      }
+      return { for: key, days }
+    })
+
+    function settle(date: string, day: DayHeadlines) {
+      if (cancelled) return
+      setWordDays((current) => {
+        if (current.for !== key || !current.days.has(date)) return current
+        return { for: key, days: new Map(current.days).set(date, day) }
+      })
+    }
+
+    for (const date of wantedDates) {
+      fetchHeadlinesForWord(date, selectedCategory, selectedWord)
+        .then((data) => settle(date, { headlines: data, loading: false, error: null }))
+        .catch((e) => settle(date, { headlines: [], loading: false, error: errorMessage(e) }))
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWord, selectedCategory, wantedDates])
 
   return (
     <div className="min-h-svh bg-ground text-ink">
@@ -620,13 +724,12 @@ function App() {
       <HeadlinePanel
         subject={selectedWord ?? eventSubject}
         isEvent={!selectedWord && eventSubject !== null}
-        headlines={headlinesForWord}
+        days={selectedWord ? wordDays.days : eventDays}
+        activeDate={selectedDate}
         categories={categories}
-        loading={headlinesLoading}
-        error={headlinesError}
-        history={history}
-        openDate={openDate}
-        onOpenDate={(date) => setPanelDate({ for: panelKey, date })}
+        history={historyPoints}
+        openDates={openDates}
+        onToggleDate={toggleDate}
         offCanvas={wordOffCanvas}
         onClose={() => {
           setSelectedWord(null)

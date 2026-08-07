@@ -619,9 +619,10 @@ rule is the one in bold, not the list.
 `grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
 incremented from a stale one instead of counted — `searchWords` is the eighth,
 added for word-directory search) and holds the
-**promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
-rejections evicted immediately so "다시 시도" really retries). Two things follow
-that are easy to underrate:
+**promise**, not the result, keyed on the arguments (TTL 5 minutes, 40 entries —
+24 until the headline panel learnt to hold up to `HISTORY_WINDOW` days open at
+once, which alone can exceed the old cap; rejections evicted immediately so
+"다시 시도" really retries). Two things follow that are easy to underrate:
 
 - **The point is object identity, not the network.** `App.tsx` compares
   identities everywhere — `graph`, `graphWords`, `partition.graph === graph`,
@@ -1259,41 +1260,65 @@ is `sm:w-80` less `p-4` — 288px — and a `viewBox` scaled by the default
 `preserveAspectRatio` against a fixed height renders 1:1 inside that, so those
 coordinates are real pixels.
 
-**The headline list below is the same day set, one row per collected day, one
-open at a time.** The rows are the trajectory's points read top-down instead of
-left-right, newest first, and the open one holds the articles. It is an
-accordion rather than one long date-separated list because **the list cannot
-hold the archive**: 폭염 is 952 headlines over nine days and 973 noun rows, so a
-single multi-day fetch would sit on PostgREST's 1,000-row cap and be truncated
-with nothing saying so — the failure this file already forbids twice. One day at
-a time is bounded by construction, is the fetch that already existed, and is
-already cached per day, so stepping between days is a cache hit and raises no
-skeleton (`fetchHeadlinesForWord.isReady`, the same trick `loadGraph` uses).
+**The headline list below is the same day set, one row per collected day the
+word appeared on, each opening and closing independently.** The rows are the
+trajectory's points read top-down instead of left-right, newest first, and an
+open row holds that day's articles. It is an accordion rather than one long
+date-separated list because **the list cannot hold the archive**: 폭염 is 952
+headlines over nine days and 973 noun rows, so a single multi-day fetch would sit
+on PostgREST's 1,000-row cap and be truncated with nothing saying so — the
+failure this file already forbids twice. **One request per open day** is bounded
+by construction, is the fetch that already existed, and is already cached per
+day, so reopening a day is a cache hit and raises no skeleton
+(`fetchHeadlinesForWord.isReady`, the same trick `loadGraph` uses). Loading and
+errors are per day for the same reason.
 
-**Opening another day does not move the day on screen.** Same judgement as
-search not moving it: the canvas, the date input and the URL all stay put while
-the panel reads a different day. The open day is not in the query string either,
-for the reason the event list's expansion is not — it is not a shareable claim
-about the data.
+**The panel opens with every day closed**, and that is a request rule as much as
+a display one: nothing is fetched until a day is opened. It used to open the day
+on screen automatically, which meant clicking any word cost one round trip
+whether or not the reader wanted that day's articles.
+
+**A day the word never appeared on gets no row at all** — 8월 3일 is followed
+directly by 8월 1일. This removed code rather than adding it: the disabled
+control, the "기사 없음" marker, and the exemption that had to keep an *open*
+absent day usable are all gone, because an absent day can no longer be open.
+**The trajectory still plots those days**, and that asymmetry is the point — a
+zero-share day is part of the line, and dropping it turns "the word was not there
+that day" into "that day did not happen". Only the list drops them.
+
+**Do not store the open day as a single string.** That was the shipped bug:
+pressing an open row called `onOpenDate` with the value it already held, so
+nothing changed, and the only way to close a day was to open a different one —
+there was no way to reach "all closed" at all. A set makes the toggle and the
+empty state expressible; a string cannot represent either.
+
+**"Has the trajectory arrived" is asked once**, in `historyReady`, and the
+question is load-bearing twice over: the pre-arrival empty array read as "no rows
+to draw" would both fetch the day on screen (undoing the rule above) and, for one
+frame, draw the *previous* word's date rows under the new word. It was asked in
+two places first, and a mutation test showed that either copy alone was
+unkillable because the other one covered for it.
+
+**Opening a day does not move the day on screen.** Same judgement as search not
+moving it: the canvas, the date input and the URL all stay put while the panel
+reads other days. Which days are open is not in the query string either, for the
+reason the event list's expansion is not — it is not a shareable claim about the
+data.
 
 **No count is written on a date row, and that is a scoping decision rather than
 a layout one.** The trajectory's counts are day-wide by the rule above, while
 the list is scoped to the active category tab, so a header reading "51건" over a
 40-row list is what writing it there would produce. The day-wide numbers live on
 the chart's axis, where the caption says what they count; the panel heading's
-count is always the length of what is actually listed. The one thing a date row
-does state is **absence** — `present: false` is day-wide and therefore true in
-every tab, so an empty day is marked and cannot be opened. The **open** row is
-exempt from both: the day on screen may be one the word is absent from (common
-when the word was reached by search), and a disabled control that is expanded,
-saying "기사 없음" above a body already saying "관련 헤드라인이 없습니다", is two
-faults for one fact.
+count is always **the number of rows currently laid below it** — the open days'
+lists summed, which is why it simply disappears in the all-closed default rather
+than needing a rule of its own.
 
-**A day set that holds no row for the day on screen falls back to the flat
+**A word that appeared on no collected day in the window falls back to the flat
 list.** `historyWindow` covers *collected* days and the day on screen may be
-today before the first cron, in which case no row matches and every headline
-would silently vanish. Reached only by search, so it is exactly the kind of
-state nobody clicks into by accident.
+today before the first cron, in which case there are no rows to draw and every
+headline would silently vanish. Reached only by search, so it is exactly the kind
+of state nobody clicks into by accident.
 
 **`HEADLINE_ROW_LIMIT` was 200 and had quietly stopped being a safety net.** It
 is documented as "far above any real value" because the sort runs after the

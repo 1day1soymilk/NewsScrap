@@ -30,6 +30,20 @@ export function previousDayInSeoul(): string {
   return today.toISOString().slice(0, 10)
 }
 
+/**
+ * 헤드라인 패널의 날짜 줄에 적히는 글자. `formatDate`가 ko-KR의
+ * `{ month: 'long', day: 'numeric' }`으로 만드는 것과 같다.
+ *
+ * Intl을 다시 부르지 않는 것은 이 값이 이미 서버가 정한 KST 달력 날짜이기 때문이고,
+ * 앱의 `shortDay`가 Date를 만들지 않는 이유와 같다. 여기 사는 이유는 **날 하나를
+ * 펼치는 것이 이제 패널을 읽는 모든 테스트의 앞부분**이라서다 — 세 spec이 각자
+ * 베껴 두면 갈라진다.
+ */
+export function dayLabel(iso: string): string {
+  const [, month, day] = iso.split('-')
+  return `${Number(month)}월 ${Number(day)}일`
+}
+
 // Order matches fetchCategories()'s `.order('section_id')`.
 export const CATEGORIES: CategoryRow[] = [
   { id: '00000000-0000-4000-8000-000000000100', slug: 'politics', label: '정치' },

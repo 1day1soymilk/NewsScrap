@@ -5,6 +5,7 @@ import {
   ECONOMY_GRAPH,
   EMPTY_GRAPH,
   EVENT_GRAPH,
+  dayLabel,
   todayInSeoul,
 } from './support/fixtures'
 import type { GraphNodeRow, GraphPayload } from './support/fixtures'
@@ -205,6 +206,9 @@ test('opens and closes the headline panel for a clicked word', async ({ page }) 
   const panel = page.getByRole('complementary')
   await expect(panel).toBeVisible()
   await expect(panel.getByRole('heading', { name: '"예산안" 관련 헤드라인' })).toBeVisible()
+
+  // 패널은 모든 날이 닫힌 채로 열린다. 기사를 보려면 날을 하나 펼쳐야 한다.
+  await panel.getByRole('button', { name: dayLabel(todayInSeoul()) }).click()
 
   const link = panel.getByRole('link', { name: '여야 예산안 처리 합의' })
   await expect(link).toHaveAttribute(

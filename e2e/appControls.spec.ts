@@ -3,6 +3,7 @@ import {
   DEFAULT_GRAPH,
   ECONOMY_GRAPH,
   EMPTY_GRAPH,
+  dayLabel,
   previousDayInSeoul,
   todayInSeoul,
 } from './support/fixtures'
@@ -35,7 +36,11 @@ test('opens the headline panel for a word named in the query string', async ({ p
   await mockSupabase(page)
   await page.goto(`/?word=${encodeURIComponent('예산안')}`)
 
-  await expect(page.getByRole('complementary')).toBeVisible()
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  // 펼침은 쿼리스트링에 없다 — 데이터에 대한 공유 가능한 주장이 아니라서다. 그래서
+  // 공유된 링크로 들어와도 날은 전부 닫혀 있고, 기사를 보려면 하나를 펼쳐야 한다.
+  await panel.getByRole('button', { name: dayLabel(todayInSeoul()) }).click()
   await expect(page.getByRole('link', { name: '여야 예산안 처리 합의' })).toBeVisible()
 })
 
