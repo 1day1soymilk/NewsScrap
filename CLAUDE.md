@@ -905,14 +905,32 @@ The two fixes those splits pointed at:
 character of it.** Its sweep is a staircase — 0.15/0.25/0.35 drew the days
 identically to having no planar path at all, 0.5 bought the entire move, 1.0 and
 2.0 are the same picture — so there is no middle setting and **the harness cannot
-settle it; it is a judgement about the picture.** It is 1.0. The price is height.
-It has since fired in the costly direction for the first time: 2026-08-02's
-biggest event grew by one word and three edges when the sieve improved, the area
-budget **refused** it a flat drawing, and it now draws 40 crossings against a
-floor of 2. `layoutCluster` verifies a candidate before returning it, so those 40
-cannot be a bad flat drawing — they are the force layout, which is what a refusal
-falls back to. **No constant was touched.** Open; the sweep and the numbers are in
-`scripts/layout/README.md` and `scripts/layout/OPEN.md`.
+settle it; it is a judgement about the picture.** It is 1.0, and it stays 1.0.
+
+It fired in the costly direction once: 2026-08-02's biggest event grew by one
+word and three edges when the sieve improved, the budget refused it a flat
+drawing, and it now draws 40 crossings against a floor of 2. `layoutCluster`
+verifies a candidate before returning it, so those 40 cannot be a bad flat
+drawing — they are the force layout, which is what a refusal falls back to.
+**Raising the constant was then measured and declined**, and the reason is the
+one this file already states one section down about the canvas, firing here about
+a *region*: **widening buys nothing inside a fixed container.** At any k that
+admits it, the drawing is **2,864px wide on all three views**, and the svg is
+drawn at its own size and then scaled to fit — so `MIN_FONT_SIZE` 14 renders at
+1.8px on a phone, 5.0 on desktop and 7.8 on the wide box. It removes 33 crossings
+from one event and takes the legibility of all 69 words on the day.
+
+**The harness could not see that until `scripts/layout/measure.ts` grew a `width`
+column**, which it now has. A change that widens reads as "uses more room" in a
+height-only table and as "shrinks the type" in the real browser, and those are
+different problems. Two more corrections came out of the same instrumenting: ten
+of the twelve candidates are rejected for **overlap** rather than by the budget,
+and `forced` is 52 rather than the 40 the metric reports (`xIn` counts crossings
+among *drawn* edges; `forced` counts every edge in the event), so the budget at
+1.0 already allows **46x** and the flat drawing simply wants 58x. **Whatever is
+tried next, the thing to change is not the constant but what the budget measures**
+— area against the force layout, where the price is actually width against the
+view. Numbers in `scripts/layout/README.md`, "평면화 가격 — 닫힘".
 
 **When that table went stale, the first diagnosis was the wrong one, and how it
 was settled is the reusable part.** Migration `0024` had reordered exactly-tied
