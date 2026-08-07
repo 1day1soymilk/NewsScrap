@@ -136,9 +136,15 @@ refresh_word_directory()              -- security definer, set search_path = ''
 
 The columns: `total` is `count(*)` over that word's noun rows, `days` is
 `count(distinct collected_date)`, `last_date` is `max(collected_date)`. All
-three are read by the result row in §4.6 — `last_date` is there because ranking
-by `total` alone puts a word that was large a week ago above one that is large
-today, and the directory already knows which it is.
+three are read by the result row in §4.6. `last_date` earns its place because
+`total` alone cannot tell a word that was large a week ago from one that is
+large today; it is **shown** on every row and breaks ties in the ordering, but
+it does not outrank `total` — a blended recency score would be a ranking
+invented here with nothing to measure it against, and the trajectory answers the
+recency question properly one click later.
+
+No index beyond the unique one is needed: filtering 19,767 short strings is the
+~1 ms measured in §2, and a substring match could not use a btree index anyway.
 
 **Why `security definer`, and the care it needs.** `refresh materialized view`
 is an owner-only operation; the migration runs as `postgres` and the Edge
@@ -178,6 +184,14 @@ One `refresh_word_directory()` RPC after all six sections are stored.
 - `searchWords(query)` — new. `word_directory`, `.ilike('word', '%q%')`,
   `.order('total', { ascending: false })`, `.limit(20)`, wrapped in
   `cachedQuery`.
+
+  **Wildcards are stripped from the term, not escaped.** `%` and `_` are LIKE
+  wildcards and PostgREST rewrites `*` into `%` before Postgres sees the
+  pattern, so escaping correctly means escaping at two layers with different
+  rules. Stripping costs almost nothing measurable: of 19,767 words, **two**
+  contain `%` (`0.45%포인트`, `1%포인트`) and **none** contain `_` or `*` — and
+  both of those two are still reachable by searching `포인트`. Left unhandled,
+  a lone `_` matches every one-character word in the archive.
   **`grep -c "= cachedQuery(" src/lib/queries.ts` goes 7 → 8.** CLAUDE.md's
   sentence naming that number must be fixed **by counting** — it has twice been
   incremented from a stale value instead.
