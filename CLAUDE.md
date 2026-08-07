@@ -224,12 +224,10 @@ can itself be the partner that rescues one. A recursive CTE cannot express it:
 Postgres forbids window functions in the recursive term and the ranking is
 `row_number()`. Hence a loop. **Termination is by monotonicity** — `banned` only
 grows and can only hold places — and the iteration guard is derived from the
-place count rather than hardcoded: it is `count(*) + 2` over the `place` rows of
-`word_overrides`, which at the live count of 45 places is **47**, one pass per
-place plus the confirming pass that finds nothing. A hardcoded 50 would have
-been a margin of five over that count and would go stale the moment a place is
-added. When the guard fires it `raise`s, since a silently wrong graph is worse
-than an error.
+place count rather than hardcoded: `count(*) + 2` over the `place` rows of
+`word_overrides`, which at the live count of 45 places is **47**. A hardcoded 50
+would go stale the moment a place is added. When the guard fires it `raise`s,
+since a silently wrong graph is worse than an error.
 
 **The one copy of each decision survives the loop, split by what it depends
 on.** `keyword_graph_candidates(p_date, p_category)` is expensive and
@@ -240,29 +238,26 @@ head_pos demotion, the cap and the `faded` / `is_place` flags, the only place
 that decides **which of them are drawn and in what order**.
 `keyword_graph_pick_edges(p_date, p_category, p_words)` is the only place that
 decides **what an edge is**. `keyword_graph_nodes` / `keyword_graph_edges`
-survive as thin wrappers for `scripts/analysis/`. The first version of this had
-one node helper and one edge helper taking `(date, category, banned)` and the
-loop calling them: correct, and **13 seconds with the gate on** against the
-1,417 ms that same profiling run measured for `0018` — a *pre-restructure*
-figure, which is why it appears here and nowhere near the shipped triple below —
-because `keyword_signals` (951 ms) was being paid for eight times.
-Nothing was made faster; something expensive was stopped from being asked eight
-times — the same finding the Edge Function records from the other side, one layer
-up.
+survive as thin wrappers for `scripts/analysis/`. The first version had one node
+helper and one edge helper taking `(date, category, banned)` and the loop calling
+them: correct, and **13 seconds with the gate on**, because `keyword_signals` was
+being paid for eight times. Nothing was made faster; something expensive was
+stopped from being asked eight times — the same finding the Edge Function records
+from the other side, one layer up.
 
 **Edge ordering gained `, a, b` and that was a latent bug rather than a
 refactor's cost.** `order by npmi desc, cooc desc` is not a total order — three
 pairs on 2026-07-31 carry `cooc` 3 and `npmi` 0.80097396756174372838, equal to
-the last digit — so which came first was decided by the query plan, and this file
-already claimed the picture is reproducible because ties are broken server side.
-That was true of the nodes and quietly untrue of the edges.
+the last digit — so which came first was decided by the query plan, while this
+file already claimed the picture is reproducible because ties are broken server
+side. That was true of the nodes and quietly untrue of the edges.
 
 `keyword_signals(p_date, p_alpha)` computes the per-word signals and is called by
 both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
-tuning that measures a hand-copied second copy is measuring the wrong thing, the
-same hazard as the rule above. It gained `df_balanced` and its α parameter with
-migration `0025`; α defaults to `scoring_weights.category_balance_alpha`, so the
-five existing callers were unchanged.
+tuning that measures a hand-copied second copy is measuring the wrong thing. It
+gained `df_balanced` and its α parameter with migration `0025`; α defaults to
+`scoring_weights.category_balance_alpha`, so the five existing callers were
+unchanged.
 
 `render_cap` is **70, and it is a display cap rather than a sieve threshold** —
 it does not decide which words qualify, only how many of the ranked survivors are
@@ -281,173 +276,103 @@ Ranking is by frequency, and **`demote_head_pos` is the single exception**, adde
 by migration `0015`. A word that trails its headlines sorts below every word that
 leads one, so it falls out only where the render cap is binding. Size is
 untouched and stays proportional to headline count; what moves is which words
-fill the last places under the cap. Why it is a demotion rather than a sixth
-sieve clause is measured, and is the entry below.
+fill the last places under the cap.
 
 Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
 (`exclude` / `demote` / `allow` / `place`, the last added by migration `0023`),
-so retuning needs no redeploy. **Never change a
-threshold without running `scripts/analysis/10_sieve_eval.sql` first** (or
-`11_category_eval.sql` when the question is about a category tab) — its README
-records five ways this has already gone wrong. Note that the labels go stale when
-the *data* moves and not only when the sweep widens: collecting a date twice put
-13 unlabelled words on screen and silently invalidated a run. Two findings that cost real
-time and should not be rediscovered:
+so retuning needs no redeploy. **Never change a threshold without running
+`scripts/analysis/10_sieve_eval.sql` first** (or `11_category_eval.sql` when the
+question is about a category tab) — its README records five ways this has already
+gone wrong. Note that the labels go stale when the *data* moves and not only when
+the sweep widens: collecting a date twice put 13 unlabelled words on screen and
+silently invalidated a run.
 
-- **A word is rescued for being a proper noun** (`min_proper` 0.50, migration
-  `0018`), and this is the largest single measured gain the sieve has had:
-  **+2.9 mean F1 and +3.9 precision day-wide, +11.4 mean F1 across the 24
-  category cells**, winning on all four days and never dropping the day's
-  biggest story. `proper` is the share of a word's rows the analyser tagged NNP.
+#### The five changes the in-process analyser forced, and what generalises
 
-  **What it buys is the price of `min_word_len`, which had only ever been priced
-  in one direction.** The length clause was measured as the sieve — it admits
-  most of what is drawn and its precision is the whole sieve's — but nobody had
-  costed what it *rejects*: a two-character word could not reach the canvas at
-  all, and in the archive's whole history exactly two ever had, 폭염 and 양산,
-  both by hand. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
-  애플, 구글 and 기아 were all cut with the noise. 13 to 21 words a day come in
-  through this clause now.
+Migrations `0018`–`0022` are one sequence: one new signal, two thresholds it
+invalidated, a dictionary re-derived against the screen it produced, and then the
+length bar it changed the job of. **Day-wide mean F1 49.48 → 63.70 and precision
+71.07 → 93.53; the 24 category cells 55.07 → 78.58.** The sweeps are rounds nine
+to thirteen of `scripts/analysis/README.md`. What has to survive here is what
+would be re-derived without it:
 
-  **Length was always a proxy, and the analyser answers the real question.**
-  garu tags 이란 NNP and 감찰 NNG — and 감찰, 윤리, 청문, 초등 and 순회 are
-  precisely the five words named just below as the reason the specificity clause
-  had to be turned off, every one scoring a perfect 1.00 on spec. The
-  discrimination `spec` could not make is in the tagger's output.
+- **A word is rescued for being a proper noun** (`min_proper` 0.50, `0018`),
+  the largest single measured gain the sieve has had. `proper` is the share of a
+  word's rows the analyser tagged NNP. **What it buys is the price of
+  `min_word_len`, which had only ever been priced in one direction** — the length
+  clause had been measured on what it *admits*, never on what it rejects, and it
+  was rejecting 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
+  애플, 구글 and 기아 along with the noise. **Length was always a proxy and the
+  analyser answers the real question**: garu tags 이란 NNP and 감찰 NNG, and
+  감찰·윤리·청문·초등·순회 are exactly the five words that forced the specificity
+  clause off, every one scoring a perfect 1.00 on spec. **`min_word_len 2` is the
+  control and it is why this is the tagger's win, not length's**: admitting every
+  two-character word scores 31.98 against the shipped 49.48. The cost was accepted
+  on the numbers — 닉스 (from 삼전닉스) and 어스 (from 구글 어스) come in as
+  fragments, and 유럽·남미·중동·호남 as regions.
+- **It has the opposite signature to `head_pos`, and that is the general lesson.**
+  head_pos won day-wide and lost 8 of 24 category cells while winning none,
+  because it is a *cut* and needs the cap to be binding to substitute. This is a
+  *rescue*: it only ever adds words, a tab has the room, so the tabs gain more
+  than the day does. **A day-wide win with a category loss means the mechanism
+  needs the cap to be binding; a win on both, larger on the tabs, means it does
+  not.**
+- **`min_standalone` 0.10 → 0.50 (`0019`) and `demote_head_pos` 0.70 → 0.60
+  (`0020`) both moved because the rescue invalidated them**, and by the third one
+  the pattern was the finding: **a measurement is only valid under the
+  circumstance it was taken in, and a clause that admits a *new kind* of word
+  invalidates every threshold tuned when that kind could not appear.** The three
+  good words `min_standalone` costs are the **조사 blind spot** — Korean attaches
+  a particle with no space, so 해남에 scores as a fragment exactly as 도체 inside
+  반도체 does. **Do not build a particle-aware variant**: it would rescue three
+  bad words and carries no measurement the harness can price.
+- **`demote_head_pos` 0.50 scores well and is rejected outright** because it sinks
+  폭염 off 2026-07-31's screen. 0.60 is taken over 0.65's marginally better F1
+  because it is mid-plateau and a full 0.10 clear of that cliff: **rule 5 is not a
+  tie-break to be spent.**
+- **The dictionary was re-derived against the new screen** (`0021`, 36
+  exclusions) and it is the largest and cheapest of the five, with no threshold
+  moved and no signal added. **The eight left in are the point**: 부동산, 아파트,
+  에너지, 스마트폰, 무인기, 요양병원, 재선거 and 개정안 can each head a real
+  story, and excluding them would be using the dictionary to paper over where the
+  good-word line sits — **a labelling question, not a dictionary one.**
+- **`min_word_len` rose 3 → 4** (`0022`), where the sequence closes: **the bar was
+  doing two jobs**, keeping fragments out and keeping names in, and the rescue
+  took the second away, so it can now catch the three-character common nouns it
+  had always been set too low to reach. **5 reaches 97% precision and is rejected
+  on `shown`** — at 65.8 of 70 places it cannot fill the canvas.
 
-  **`min_word_len 2` is the control and it is why this is the tagger's win, not
-  length's**: admitting every two-character word scores mean F1 **31.98** against
-  the shipped sieve's 49.48 — far worse, not better. Of the 44 words a blanket
-  `min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the
-  tabs, **31** are.
-
-  **It has the opposite signature to `head_pos`, and that is the general
-  lesson.** head_pos won day-wide and lost 8 of 24 category cells while winning
-  none, because it is a *cut* and a tab's render cap never binds, so there was
-  nothing to promote into the hole. This is a *rescue*: it only ever adds words,
-  a tab has the room, and so the tabs gain more than the day does. **A day-wide
-  win with a category loss means the mechanism needs the cap to be binding; a
-  win on both, larger on the tabs, means it does not.**
-
-  0.50 is **mid-plateau and deliberately not the best cell** — .25/.50/.75/1.00
-  give 52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs.
-  1.00 scores 0.15 higher and is the boundary: it demands every row be tagged
-  NNP, so one mistagged row in fifty disqualifies a name.
-
-  It does **not** replace the dictionary. With `word_overrides` off the rescue
-  alone scores about what the shipped sieve scores with it on — so it is not
-  merely re-catching the same words — but that configuration still drops the
-  day's biggest story on three of four days, because 폭염 is two characters and
-  **NNG**, and lives on its `allow` entry.
-
-  The cost is visible and was accepted on the numbers: 닉스 (from 삼전닉스) and
-  어스 (from 구글 어스) are tagged NNP and come in as fragments, and 유럽, 남미,
-  중동, 호남 come in as regions.
-- **The rescue gave the fragment cut new work, and `min_standalone` moved from
-  0.10 to 0.50 because of it** (migration `0019`). Round four had swept .05 to
-  .30, found them identical and recorded 0.10 as mid-plateau — a measurement
-  taken when **nothing under three characters could reach the canvas**, so the
-  cut only ever saw long words, which are rarely fragments. The rescue admits on
-  the tagger's say-so at any length, and the tagger has no opinion about whether
-  a string is part of something bigger. Re-swept: 52.40 / 52.87 / **53.12** /
-  52.55 day-wide at .10 / .30 / .50 / .70 and 66.44 → **67.02** on the tabs.
-  Wins on both, and the peak is interior.
-
-  Ten words leave the screen: seven bad (닉스 twice, 수도권, 최고위원, 경찰관,
-  한국 twice) and three good — 우크라, 충청, 해남, which are the **조사 blind
-  spot**, Korean attaching a particle with no space so 해남에 scores as a
-  fragment. Round four's instruction not to build a particle-aware variant still
-  stands; this moves a number, which the harness can price, rather than adding a
-  rule it cannot.
-
-  **The general point is worth more than the threshold**: a measurement is only
-  valid under the circumstance it was taken in, and adding a clause that admits
-  a *new kind* of word invalidates every threshold that was tuned when that kind
-  could not appear.
-- **`demote_head_pos` moved 0.70 → 0.60 for the same reason** (migration
-  `0020`), which is the third threshold the rescue invalidated and the point at
-  which the pattern became the finding rather than any one number. Re-swept:
-  53.30 / 54.12 / 54.10 / **54.18** / 53.02 / 51.40 at .50 / .55 / .60 / .65 /
-  .70 / off. 0.55–0.65 are one plateau, flat to within 0.08 and all about a
-  point of F1 and two of precision above 0.70.
-
-  **0.50 scores well and is rejected outright**, because it sinks 폭염 off
-  2026-07-31's screen — the cliff round six had already recorded, still exactly
-  where it was. What moved was the plateau, down onto the edge of it. 0.60 is
-  taken over 0.65's marginally better F1 because it is mid-plateau and a full
-  0.10 clear of that cliff: rule 5 is not a tie-break to be spent, and a
-  threshold one step from dropping the day's biggest story is not worth 0.08.
-
-  No category measurement accompanies it and that is correct rather than
-  missing. A demotion reorders and removes nothing, so it can only act where the
-  render cap binds, and a tab draws at most 46 against a cap of 70.
-
-- **The dictionary was re-derived against the new screen** (migration `0021`,
-  36 exclusions) and it is the largest and cheapest of the four: day-wide F1
-  54.10 → **62.43** and precision 77.85 → **90.35**, tabs 67.02 → **71.80**, with
-  no threshold moved and no signal added. Chosen the way `0005` chose its 26 —
-  from the query "labelled bad, drawn by the shipped sieve, not already
-  excluded", which returned 44.
-
-  **The eight left in are the point.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
-  요양병원, 재선거 and 개정안 can each head a real story, and excluding them
-  would be using the dictionary to paper over where the good-word line sits —
-  a labelling question, not a dictionary one. Same judgement `0005` made about
-  공습, 압박, 배터리 and 클라우드.
-
-  Seven entries exist *because* of the rescue, arriving through
-  `passed_by = 'proper'`: 유럽, 남미, 중동 and 한국 as backdrop, and 어스, 모스
-  and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
-  proper nouns.
-
-- **`min_word_len` rose 3 → 4** (migration `0022`), which is where the sequence
-  closes: the rescue was built to pay the length clause's price and ended up
-  changing what the clause should charge. **The bar was doing two jobs** — keeping
-  fragments out and keeping names in — and the rescue took the second away, so it
-  can now catch the three-character common nouns it had always been set too low
-  to reach. Day-wide 62.03 → **63.70** and precision 90.35 → **93.53**; tabs
-  73.21 → **78.58**. 5 reaches 97% precision and is **rejected on `shown`**: at
-  65.8 of 70 places it cannot fill the canvas, which is round seven's cost.
-
-**The render cap binds on category tabs after all, and the harness had been
-scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
-`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
-disagreement that is invisible only while a tab draws everything that qualifies.
-**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a
-cap of 70**, and 2026-08-01's society tab 77; seven of the 24 cells bind. Fixed,
-and it moved the shipped tab number from 71.80 to 73.21 — a measurement error,
-not an improvement.
-
-**That undercuts the stated reason head_pos ships as a demotion rather than a
-cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
-cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
-so a cut there would substitute too. The demotion is not thereby wrong — it still
-wins — but its reason is now only partly right, and the cut-versus-demotion
-question deserves re-measuring on fat days rather than being treated as settled.
-Round fourteen answered half of it in passing: **a demotion can only rescue a
-mechanism whose losses sit in the non-binding cells**, which is why it was not a
-candidate for the place gate. head_pos's own re-measurement on fat days is still
-open and nothing on that branch touched it.
-
-**Where the five changes leave the sieve**: day-wide mean F1 **49.48 → 63.70**
-and mean precision **71.07 → 93.53**; the 24 category cells **55.07 → 78.58**.
-
-**The decomposition matters more than the total, and it is measurable because
-`19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row.** Run
-against the *same* dictionary, the pre-`0018` sieve scores 54.52 / 78.57 and the
-shipped one 62.43 / 90.35, so the three sieve changes are worth **+7.9 F1 and
-+11.8 precision** and the dictionary the remaining **+5.0**. Neither figure is
-the one you get by reading the commits in order, because each was measured
-against the dictionary of its moment.
+**The decomposition matters more than the total**, and it is measurable only
+because `19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row:
+run against the *same* dictionary, the three sieve changes are worth +7.9 F1 and
++11.8 precision and the dictionary the remaining +5.0. **Neither figure is the one
+you get by reading the commits in order**, because each was measured against the
+dictionary of its moment.
 
 **The dictionary is still load-bearing after all of it**: turn it off and the
 shipped sieve falls to 50.97 / 73.22 *and drops the day's biggest story on three
 of four days*, because 폭염 is two characters, tagged NNG, and lives on its
 `allow` entry from `0003`.
 
-All of it is downstream of the analyser being in-process — one new signal, two
-thresholds it invalidated, and a dictionary re-derived against the screen it
-produced.
+**The render cap binds on category tabs after all, and the harness had been
+scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
+`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
+disagreement invisible only while a tab draws everything that qualifies.
+**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a cap
+of 70**; seven of the 24 cells bind. Fixing it moved the shipped tab number from
+71.80 to 73.21 — a measurement error, not an improvement.
+
+**That undercuts the stated reason head_pos ships as a demotion rather than a
+cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
+cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
+so a cut there would substitute too. The demotion is not thereby wrong — it still
+wins — but **its reason is now only partly right, and the cut-versus-demotion
+question deserves re-measuring on fat days rather than being treated as settled**
+(`OPEN.md`, item 2). Round fourteen answered half of it in passing: a demotion can
+only rescue a mechanism whose losses sit in the non-binding cells.
+
+#### The clauses that are switched off, and the signals that were tried
+
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
@@ -456,46 +381,31 @@ produced.
 - **The neighbours clause is disabled too** (`max_neighbors_per_doc` −1, below
   the signal's minimum of 0), by migration `0009`. Two of sieve 4's three
   rescues are now retired and **the length clause is the sieve**: it admits 68
-  of the 70 drawn words, and its precision, 84.3%, is the whole sieve's. Do not
-  read that as a leak to be plugged. The four signals were measured against the
-  labels inside the length group and **not one of them separates its good words
-  from its bad** — character length runs the wrong way (bad 3.59, good 3.33),
-  headline count is flat, and recurrence across the archive's days is flat too,
-  because at three days it measures "story that is still running" rather than
-  "word that recurs whatever the news".
-- **A fifth signal was found, and its shape is the lesson.** `head_pos` — where
-  in the headline the word starts, averaged over the day's headlines holding it,
-  0 leading and 1 trailing. Korean headlines are topic-first: a story's names
-  lead and generic qualifiers trail. Over the 280 drawn word-days of the four
-  labelled days the mean is 0.347 for good and 0.466 for bad, and above 0.70 it
-  catches almost exactly the family that means nothing on its own — 가능성,
-  시험대, 승부수, 변동성, 무방비, 막바지, 월요일, 테러범, 수도권.
-
-  **As a hard cut it was right day-wide and wrong on the tabs**, and both
-  measurements are real: `head_pos <= 0.70` took mean F1 from 65.05 to 67.30 over
-  four days, winning three and losing none, and then took the 24 category cells
-  from 65.08 to 63.42, **losing 8 and winning none**. The render cap explains
-  both. Day-wide it binds at 70, so cutting a word promotes a deeper one and the
-  promoted words are about as good as the screen average — **the gain was the
-  substitution, never the removal**. A tab draws at most 46 words, the cap never
-  binds, and a cut there is loss with nothing to fill the hole.
-
-  So it ships as a **demotion**, which can only act where a substitution exists.
-  Round six measured that it reproduces the cut's day-wide numbers exactly
-  (71.9 / 67.8 / 65.8 / 63.7 against 70.7 / 67.8 / 63.1 / 58.6) and leaves the
-  category mean at 65.08 to the decimal. 0.70 is interior to its sweep — 0.65
-  gives 66.68 and 0.75 gives 65.68 — and at 0.50 폭염 sinks to rank 66 on
-  2026-07-31 and off the screen on 08-03.
-
-  **Do not re-file this as a sieve clause.** A day-wide win with a category loss
-  is the signature of a mechanism that needs the cap to be binding, and the fix
-  is the mechanism rather than the threshold.
+  of the 70 drawn words, and its precision is the whole sieve's. Do not read that
+  as a leak to be plugged. The four signals were measured against the labels
+  inside the length group and **not one of them separates its good words from its
+  bad** — character length runs the wrong way (bad 3.59, good 3.33), headline
+  count is flat, and recurrence across the archive's days is flat too, because at
+  three days it measures "story that is still running" rather than "word that
+  recurs whatever the news".
+- **`head_pos` is the fifth signal and its shape is the lesson** — where in the
+  headline the word starts, averaged over the day's headlines holding it, 0
+  leading and 1 trailing. Korean headlines are topic-first: a story's names lead
+  and generic qualifiers trail. Over 280 drawn word-days the mean is 0.347 for
+  good and 0.466 for bad, and above 0.70 it catches almost exactly the family that
+  means nothing on its own — 가능성, 시험대, 승부수, 변동성, 무방비, 막바지,
+  월요일, 테러범, 수도권. **As a hard cut it was right day-wide and wrong on the
+  tabs**, and both measurements are real; it ships as a **demotion**, which
+  reproduces the cut's day-wide numbers and leaves the category mean unmoved to
+  the decimal. **Do not re-file this as a sieve clause** on the day-wide number
+  alone — a day-wide win with a category loss is the signature of a mechanism that
+  needs the cap to be binding, and the fix is the mechanism rather than the
+  threshold.
 - **The dictionary is still doing real work**, and the fifth signal does not
   replace it. With the dictionary off, the demotion is worth about 2.5 mean F1
   on its own — so it is not merely re-catching what `word_overrides` already
   catches — but every dictionary-off configuration still drops the day's biggest
-  story on three of four days, because 폭염 is two characters and lives on its
-  `allow` entry.
+  story on three of four days.
 - **`allow` entries are load-bearing, not decoration.** 폭염 and 양산 were given
   theirs in `0003` as insurance against exactly the retune `0009` performed, and
   they are now the only two words on the canvas not admitted by length.
@@ -512,7 +422,6 @@ produced.
   now decides only which of the day's words are shown and how big they are, never
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
-
 #### Round fourteen built three mechanisms, measured them, and shipped one — on a judgement, not on the numbers
 
 Migrations `0023`–`0025` wired a **place gate**, a **render cap the harness can

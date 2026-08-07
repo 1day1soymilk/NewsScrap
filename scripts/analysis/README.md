@@ -244,6 +244,39 @@ word invalidates every threshold tuned when that kind could not appear. Round
 nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
 canvas.
 
+## Round eleven — the third threshold the rescue invalidated
+
+`demote_head_pos` 0.70 → **0.60** (migration `0020`). By this round the pattern
+had become the finding rather than any one number: round nine's proper-noun
+rescue admits a *new kind* of word, so every threshold tuned before it is
+suspect, and this is the third one to move.
+
+| demote_head_pos | day-wide mean F1 |
+| --- | --- |
+| 0.50 | 53.30 |
+| 0.55 | 54.12 |
+| **0.60** | **54.10** |
+| 0.65 | 54.18 |
+| 0.70 (was) | 53.02 |
+| off | 51.40 |
+
+0.55–0.65 are one plateau, flat to within 0.08 and all about a point of F1 and
+two of precision above 0.70.
+
+**0.50 scores well and is rejected outright**, because it sinks 폭염 off
+2026-07-31's screen — the cliff round six had already recorded, still exactly
+where it was. What moved was the plateau, down onto the edge of it.
+
+**0.60 is taken over 0.65's marginally better F1** because it is mid-plateau and a
+full 0.10 clear of that cliff. Rule 5 is not a tie-break to be spent, and a
+threshold one step from dropping the day's biggest story is not worth 0.08.
+
+No category measurement accompanies this round, and that is correct rather than
+missing: a demotion reorders and removes nothing, so it can only act where the
+render cap binds. **Round thirteen then found that the cap does bind on fat days'
+tabs**, which does not change this verdict but does mean the sentence "a tab
+draws at most 46 against a cap of 70" was only true of the days measured here.
+
 ## Round thirteen — `min_word_len` 4, and a harness that was scoring the wrong screen
 
 **The lead closed, and closing it turned up a measurement bug worth more than the
