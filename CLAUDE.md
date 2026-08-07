@@ -283,7 +283,11 @@ Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
 so retuning needs no redeploy. **Never change a threshold without running
 `scripts/analysis/10_sieve_eval.sql` first** (or `11_category_eval.sql` when the
 question is about a category tab) — its README records five ways this has already
-gone wrong. Note that the labels go stale when the *data* moves and not only when
+gone wrong. And **a migration that changes `scoring_weights` has to change the
+harness's shipped config row in the same breath**: migration `0028` turned the
+place gate on and config 200 kept saying off, so for a release cycle the harness
+scored a screen the app does not draw. Round fifteen's config 300 is the
+correction. Note that the labels go stale when the *data* moves and not only when
 the sweep widens: collecting a date twice put 13 unlabelled words on screen and
 silently invalidated a run.
 
@@ -362,14 +366,25 @@ disagreement invisible only while a tab draws everything that qualifies.
 of 70**; seven of the 24 cells bind. Fixing it moved the shipped tab number from
 71.80 to 73.21 — a measurement error, not an improvement.
 
-**That undercuts the stated reason head_pos ships as a demotion rather than a
-cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
-cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
-so a cut there would substitute too. The demotion is not thereby wrong — it still
-wins — but **its reason is now only partly right, and the cut-versus-demotion
-question deserves re-measuring on fat days rather than being treated as settled**
-(`OPEN.md`, item 2). Round fourteen answered half of it in passing: a demotion can
-only rescue a mechanism whose losses sit in the non-binding cells.
+**That undercut the stated reason head_pos ships as a demotion rather than a
+cut**, and round fifteen re-measured it on a fat day. The argument had been "a
+tab draws at most 46 words, the cap never binds, so a cut there is loss with
+nothing to fill the hole"; on a fat day the cap does bind, so a cut there should
+substitute too. **Measured, it does not.** On 2026-08-04, five of six tabs at the
+cap, the cut still loses (50.18 against the demotion's 50.88), and the day-wide
+win with a category loss is exactly round five's signature again: +0.36 F1
+day-wide, −0.42 on the tabs.
+
+**The prediction failed for a reason worth more than the case.** `shown` on that
+day is 69.2 under the demotion and 67.8 under the cut — **a cut cannot rely on
+the cap binding, because cutting is what stops it binding.** Removing words
+shrinks the qualifying pool, and where the pool sat just above 70 the cut takes
+it under; from there the cut is loss with nothing to promote, on a fat day, by
+its own action. The general form: **a mechanism that removes candidates cannot be
+justified by the substitution it enables, because it is also spending the surplus
+that substitution depends on.** A demotion has no such feedback — it reorders and
+removes nothing, so the pool it draws from is the pool it found. Closed; the
+tables are in `scripts/analysis/README.md`, "Round fifteen".
 
 #### The clauses that are switched off, and the signals that were tried
 
@@ -476,19 +491,27 @@ its own knob:
   and needs `scripts/layout/` re-run. `20_unlabeled.sql` joins **each
   configuration's own `render_cap`** rather than a literal 70, or a sweep would
   promote words it is structurally unable to see.
-- **α is not measurable on this day set, which is not the same as α costing
-  something.** `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α`, so the shipped
-  configuration (α = 0) enters its own sweep as the control. The only day it
-  loses on collected 150/149/150/150/150/150 in a single capped run, so its
-  balance factors sit within 0.6% of 1 and there is nothing there to correct.
-  **The day the mechanism was built for is 2026-08-04 and it could not be an
-  evaluation day while it was still collecting** — rule 4's second trigger. Two
-  properties are worth carrying: **the denominator is the word's own section
-  distribution, not its top category** (a single denominator would charge 폭염 the
-  largest divisor and put the day's biggest story at risk), and **α is the
-  identity inside a category tab, at every α, by construction** — so
-  `11_category_eval.sql` is the round's **control**, and its 78.58 moving would
-  mean α had reached a scoped count where it should have been day-wide.
+- **α is off, and round fifteen turned "not measurable" into a reason.**
+  `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α`, so the shipped configuration
+  (α = 0) enters its own sweep as the control. Round fourteen could only say the
+  day set could not price it; with 2026-08-04 — the imbalanced day the mechanism
+  was built for — now closed and labelled, it can. **α loses at every setting,
+  and the entire loss is on the one day that needs no correction**: 2026-07-31
+  collected 150/149/150/150/150/150 in a single capped run, its balance factors
+  span 0.999–1.006, and there α does nothing but perturb a `df` tie in the third
+  decimal, at a cost of three good words. On the three days with real imbalance
+  (spread 1.49 to 2.52) α is neutral or **positive**.
+
+  **So α is not wrong; applying it to days that do not need it is.** Gating it on
+  the day's own spread scores 56.14 / 87.92 against the shipped 55.88 / 87.36 —
+  arithmetic over rows already measured, not a run of its own — and **+0.26 F1
+  does not buy a new threshold**, which would need tuning and carry its own
+  permanent rule-4 obligation. Two properties are worth carrying: **the
+  denominator is the word's own section distribution, not its top category** (a
+  single denominator would charge 폭염 the largest divisor and put the day's
+  biggest story at risk), and **α is the identity inside a category tab, at every
+  α, by construction** — so `11_category_eval.sql` is the arm's **control**
+  rather than its measurement.
 
 **Where the harness's own numbers may and may not be read.** Two rules, both
 already paid for:
@@ -1902,7 +1925,13 @@ Two habits it enforces, both learned the hard way:
   maximising it converges on dropping the day's biggest story — measured, not
   hypothetical. Judge on F1 and the `story_rank` column together. That story is
   per day and comes from `analysis.eval_days`, not from a hardcoded 폭염: it
-  leads three of the four days and 김민석 leads 2026-08-02.
+  leads four of the five days and 김민석 leads 2026-08-02.
+
+**The eval days are 2026-07-31, 08-01, 08-02, 08-03 and 08-04**, the last added
+by round fifteen because both of its questions needed a fat day — a cut needs a
+binding cap to substitute into, and α needs a day whose sections actually
+collected unequally. **They are not comparable to each other on F1** and never
+were; configurations are compared inside one run.
 
 **The days and the configurations under measurement are each named in one
 place.** `analysis.eval_days` (`12_eval_days.sql`) holds the days, and the
