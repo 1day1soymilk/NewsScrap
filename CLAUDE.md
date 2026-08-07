@@ -1573,15 +1573,10 @@ headlines to 2,197. There is no external call limit any more.
 
 **Raising the cap was re-tested, and CPU is not what stops it.** The
 300-over-12-pages failure was diagnosed twice and wrong twice — first as a wall
-near 63s, then as this function's own CPU cost. A throwaway probe that scrapes
-and analyses exactly as `index.ts` does and writes nothing, run on 2026-08-04,
-gives the **all-new** case a live run cannot be made to take on demand:
-
-| cap | headlines | analysis | wall | result |
-| --- | --- | --- | --- | --- |
-| 150 | 900 | 816ms | 2.0s | 200 |
-| 300 | 1,800 | 1,481ms | 4.2s | 200 |
-| 441 | 2,630 | 2,082ms | 5.3s | 200 |
+near 63s, then as this function's own CPU cost. A probe that scrapes and analyses
+exactly as `index.ts` does and writes nothing reaches cap 441 / 2,630 headlines in
+5.3s wall and returns 200, which is the **all-new** case a live run cannot be made
+to take on demand. The table is in `supabase/functions/collect-headlines/README.md`.
 
 #### The day boundary, and why one cap cannot serve both ends of the day
 
@@ -1592,205 +1587,125 @@ so a window wider than the day's own news files yesterday under today.
 and that — not the CPU budget, which was tested and fits — is what makes the cap
 movable.
 
-**It was not a cost of raising the cap. It was already happening at 150, by more
-than anyone had counted.** Every row stored under 2026-08-05 was classified
-against the live section lists at 12:30 KST that day, after three runs: 1,224
-rows, **129 of them published before that day**, and a further 88 sitting deeper
-than a 1,620-article scrape could reach and so almost certainly older still.
-**80 of the 129 came from the 03:00 run.**
+**It was not a cost of raising the cap. It was already happening at 150**, and
+the two ends of the day say opposite things about that one number. Before 07:00
+not one section publishes 150 articles, so at 03:00 a 150-headline window spends
+133 of its slots on yesterday in politics and 149 in `it`. Between 07:00 and
+11:00, **42.9% of the day's articles were never collected at all.** So 150 is
+simultaneously far too wide for the thin hours and less than half of what the busy
+ones need, and **the boundary stop is what lets one number stop being asked to do
+both**: in the thin hours it stops the scrape early, in the busy hours it never
+fires. The cap is then free to rise for the case that actually wants it. It went
+to **300** on 2026-08-07 — deliberately not the top of the measured column, since
+450 puts a cold all-new run past the deepest scrape ever measured here and the
+worker budget is cumulative. **The boundary stop had to be deployed first**: at
+150 the early runs already overshoot, and at 300 they would overshoot twice as far.
 
-**The 03:00 and 07:00 regime is measurable without waiting for it**, which is
-what turned a year-old "cannot be provoked on demand" into a measurement. The
-section list is ordered by publication time, so *articles published between
-midnight and T* is exactly the rank at which a run starting at T crosses into
-yesterday. Counted at 12:30 KST on 2026-08-05:
+Live before/after inside 2026-08-07: the day's four old-code crons stored 141
+rows published on another day out of 1,821 (**8.4%**), and the two runs after the
+deploy stored **0 of 937**.
 
-| section | published by 03:00 | by 07:00 | today by 11:00 |
-| --- | --- | --- | --- |
-| politics | 17 | 50 | 140 |
-| economy | 24 | 120 | 589 |
-| society | 42 | 136 | 533 |
-| culture | 15 | 52 | 131 |
-| world | 15 | 75 | 167 |
-| `it` | 1 | 23 | 81 |
+**2026-08-07 is a collection-regime boundary and days must not be compared across
+it.** A day collected at 300 is roughly half as deep again as one collected at
+150, and F1 is not comparable across days of different thickness. The four
+labelled evaluation days all predate it. The surge comparison is unaffected — it
+divides by each day's own total, which is exactly what a step change in depth
+needs.
 
-**Not one section reaches 150 before 07:00.** At 03:00 a 150-headline window
-spends 133 of its 150 slots on yesterday in politics and 149 in `it`. What kept
-the damage to 129 rows is only that most of those articles were already held:
-`UNIQUE (category_id, link)` is **global rather than per-date**, so a yesterday
-article yesterday collected cannot be re-stamped. The 129 are the ones that fell
-in a coverage hole.
+**The one thing lost is real and small.** Those ~129 rows a day are genuine
+articles, and they are now not collected at all rather than collected under the
+wrong date. **Stamping rows by publication date instead would keep them, at the
+cost of a closed day's totals changing afterwards** — which invalidates every
+measurement taken against that day and is exactly the hazard rule 4 exists for.
+Not done.
 
-**The other end of the day says the opposite thing about the same number, and
-that is the finding.** Of the articles published on 2026-08-05 before the 11:00
-run, **42.9% were never collected at all** — 704 of 1,641, 61% of economy and
-53% of society. Every one of those holes sits between 07:00 and 11:00 and **none
-at all between midnight and 05:00**. So 150 is simultaneously far too wide for
-the thin hours and less than half of what the busy ones need. **The boundary stop
-is what lets one number stop being asked to do both**: in the thin hours it stops
-the scrape early, in the busy hours it never fires, so the cap is free to rise
-for the case that actually wants it. Verified against live markup with the
-shipped parser at cap 300: economy and society stop on the cap, the other four
-stop on the boundary.
+**The date is read off the thumbnail path, not off the visible timestamp**
+(`/image/origin/{press}/2026/08/05/…`). The visible one is relative — "2시간전",
+"1일전" — so it needs a clock and a time zone to become a date, it is hour-grained,
+and past a day it stops resolving at all: three ways to be wrong about precisely
+the articles the field exists to identify. The thumbnail path is a pure function
+of the HTML, which is also what keeps `lib/headlines.ts` testable without a clock.
+Coverage is 99.7% over 676 items, and a missing date **keeps** the article — the
+same fail-open choice `canonicalLink` makes.
 
-What the 11:00 run of that day would newly have stored, boundary stop on:
+**The per-article date and the paging stop are separate mechanisms, and page 1 is
+why.** A section's first page opens with a curated headline block that is *not* in
+publication order — politics once had three 08-04 articles inside its first 46
+under a cursor still stamped 08-05 — so a rule that stopped at the first old
+article would have cut that page off at rank 3. `cursorIsBefore` stops the *paging*
+once a whole page's oldest article predates the day; `published` filters *within*
+every page, including that one.
 
-| cap | 150 | 200 | 300 | 450 | 600 |
-| --- | --- | --- | --- | --- | --- |
-| new rows | 126 | 228 | 426 | 680 | 704 |
+It was checked against the page cursor and then **against the articles
+themselves**, and only the second can establish this is a *publication* date
+rather than merely a self-consistent one: the twelve politics articles straddling
+the boundary were fetched and their own timestamps read, 12 agree and 0 disagree.
+Agreeing with the cursor would have been satisfied by any date the same pipeline
+stamped on both.
 
-**The cap went to 300 on 2026-08-07, and 300 is deliberately not the top of that
-column.** 450 puts a cold all-new run at ~2,700 headlines against the 2,630 that
-is the deepest anything here has been measured at, and the worker budget is
-cumulative. It is a `scoring_weights` value, so the raise was an `update` with no
-redeploy — but **the boundary stop had to be deployed first**, since at 150 the
-early runs already overshoot and at 300 they would overshoot twice as far.
+**Note that deeper paging widens the section gap rather than closing it**, and
+**collection cannot be equalised by paging deeper at all**: on 2026-08-04 society
+took its whole window twice while `it` never passed 98 on any of five runs. The
+thin section is not being truncated — it publishes less — so a deeper page adds
+rows where there are already rows. Migration `0025` took the balance into the
+ranking instead (`df_balanced`); round fourteen then measured that it cannot be
+priced on the day set the archive has.
 
-**Both halves were verified live the day they shipped, and the verification is a
-before/after inside one day rather than a claim.** Every row stored under
-2026-08-07 was classified against the section lists scraped past the boundary,
-one method for both groups:
+The move to six runs a day is what settled the `min_headlines` question — see the
+round-seven section of `scripts/analysis/README.md`. The short version: on a thin
+day the word at rank 70 has three headlines, so a floor is the screen; on a fat
+day it already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion
+floor is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a
+safety net for a day whose collection failed.
 
-| | rows | published today | **published another day** | |
-| --- | --- | --- | --- | --- |
-| the day's four crons, old code | 1,821 | 1,545 | **141** | **8.4%** |
-| two runs after the deploy | 937 | 881 | **0** | **0.0%** |
+Nouns are fetched *before* the headline row is inserted, so a failure leaves
+nothing behind and the next run retries naturally. The duplicate path also
+backfills headlines that somehow have no nouns.
 
-And the cap raise showed its own effect within six minutes: a cap-300 run made
-directly after a cap-150 run — with the 150-window's 150 economy and 148 society
-rows already stored — still found **125 new economy and 157 new society** rows at
-ranks 151-300. That is the 07:00-to-11:00 hole, filled while being watched.
+#### What the thicker day costs the graph, and the two errors made measuring it
 
-The run at cap 300 returned 200 in 6.5s. `culture` stopped at 236 headlines and
-`it` at 182 with 18 and 5 off-day, which is the boundary stop firing in the two
-thin sections while the four fast ones took the full 300 — the design working in
-both directions in one response.
+All-categories first paint was near-linear in the day's headline count —
+2,103 / 2,614 / 3,299 ms at 2,197 / 3,077 / 4,218 headlines before migration
+`0029`, and 1,515 / 2,080 / 2,600 ms after it. **A reader arriving today pays none
+of that**: `0031` took the computation down another 18% and `0032` stopped doing it
+per request at all, so a cached read is **1.35 ms** and a real page's first paint
+measures **~0.57 s** even on 3,224 headlines. Those figures are now the cost of a
+cache *miss*, and of `keyword_graph_compute` when the harness calls it directly.
+See "Why the graph is cached" for why that growth was not merely slow but was
+breaking the site for concurrent readers.
 
-**2026-08-07 is a collection-regime boundary and days must not be compared
-across it.** A day collected at 300 is roughly half as deep again as one
-collected at 150, and this file already records that F1 is not comparable across
-days of different thickness — the recall denominator grows while the screen stays
-at 70. The four labelled evaluation days all predate it and are unaffected. The
-surge comparison is not: it divides by each day's own total, which is exactly
-what a step change in depth needs.
+The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299, and it
+is called exactly once per request since `0024`, so there was no repeated call to
+remove. `0029` took it to 1,276 ms **without moving a single one of its ten output
+columns on any of the eight collected days** — checked by running the pre-`0029`
+definition beside the new one as `keyword_signals_old` and taking a symmetric
+`except` over all ten columns: 0 differing rows across 41,142 word-rows. **The
+useful part is which of three candidates survived measurement:**
 
-**The thicker day has a price and it is on the graph's first paint.** All-
-categories view, place gate on, near-linear in the day's headline count:
-
-| headlines | 2,197 | 3,077 | 4,218 |
-| --- | --- | --- | --- |
-| before `0029` | 2,103 ms | 2,614 ms | 3,299 ms |
-| after `0029` | **1,515 ms** | **2,080 ms** | **2,600 ms** |
-
-The "before" row is one pass per day; the "after" row is stable to ±25 ms over
-three consecutive passes, so read the direction and not the third digit.
-
-**A reader arriving today pays none of this**, and the table is kept because it
-is what forced the two changes that followed. `0031` took the computation down
-another 18% and `0032` stopped doing it per request at all — a cached read is
-**1.35 ms**, and a real page's first paint measured **~0.57 s** on both a nearly
-empty day and on 3,224 headlines. The numbers above are now the cost of a cache
-*miss*, and of `keyword_graph_compute` when the harness calls it directly. See
-"Why the graph is cached" for why the near-linear growth in that table was not
-merely slow but actually breaking the site for concurrent readers.
-
-**The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299**,
-and it is called exactly once per request — migration `0024`'s restructure —
-so there was no repeated call to remove. Migration `0029` took it to 1,276 ms
-without moving a single one of its ten output columns on any of the **eight
-collected days**, checked by running the pre-`0029` definition beside the new one
-as `keyword_signals_old` and taking a symmetric `except` over all ten columns:
-0 differing rows across 41,142 word-rows. Two changes, and **the useful part is
-which of the three candidates survived measurement**:
-
-- **The neighbour count now comes out of `pairs`** — the same self-join over
-  `doc` the association signal already runs — instead of a second one of its own.
-  `pairs` keeps `b.word > a.word` and is grouped, so each distinct partner
-  appears exactly once across the two sides of a union, which is what
-  `count(distinct b.word)` was counting. Worth **414 ms**.
+- **The neighbour count now comes out of `pairs`** — the same self-join the
+  association signal already runs — instead of a second one of its own. Worth
+  **414 ms**.
 - **`standalone` is handed its rows ordered by word.** The regex pattern is built
   per row and varies by word, and Postgres keeps only a small compiled-regex
   cache, so unordered input recompiles on nearly every row. Worth **183 ms**, and
   it is an `ORDER BY` and nothing else.
 - **Hoisting `regexp_replace` out of the row loop does nothing, and it is the
-  obvious fix.** Building the pattern once per distinct word (7,749) rather than
-  per doc row (26,341) should cut a 524 ms node by 3.4x. Measured: 1,900 ms
-  against a 1,903 ms baseline. The cost is the *match*, not the building.
+  obvious fix.** Building the pattern once per distinct word rather than per doc
+  row should cut a 524 ms node by 3.4x. Measured: 1,900 ms against a 1,903 ms
+  baseline. **The cost is the *match*, not the building.**
 
 **Two measurement errors were made getting there and both are worth not
 repeating.** The per-CTE timings were first taken by retyping each CTE as a
 standalone query — and the standalone regex came out differently escaped, so it
 measured a cheaper pattern at 103 ms where the real node is 524 ms. The same
 sitting also read a cold-cache first query (583 ms) as a signal when the warm
-value was 93 ms. Both are why the attribution that survived comes from running
-the deployed function's **own body** as a plain query — a `language sql` function
-with `RETURNS TABLE` is a black box to `EXPLAIN` otherwise — and why every timing
-here is the second of two runs.
+value was 93 ms. Both are why the attribution that survived comes from running the
+deployed function's **own body** as a plain query — a `language sql` function with
+`RETURNS TABLE` is a black box to `EXPLAIN` otherwise — and why every timing here
+is the second of two runs.
 
-Nothing on the frontend hides a wait of this size: the skeleton, the
-`preconnect` and `main.tsx`'s pre-mount request all help the *first byte* rather
-than this.
-
-**The one thing lost is real and small.** Those 129 rows a day are genuine
-articles, and they are now not collected at all rather than collected under the
-wrong date. That is the right trade — they are yesterday's holes, against 426
-correctly dated rows arriving in their place — but it is a trade. Stamping rows
-by publication date instead would keep them, at the cost of a closed day's totals
-changing afterwards, which invalidates every measurement taken against that day
-and is exactly the hazard rule 4 exists for. Not done.
-
-**The date is read off the thumbnail path, not off the visible timestamp**
-(`/image/origin/{press}/2026/08/05/…`), and the choice is not arbitrary. The
-visible one is relative — "2시간전", "1일전" — so it needs a clock and a time
-zone to become a date, it is hour-grained, and past a day it stops resolving at
-all: three ways to be wrong about precisely the articles the field exists to
-identify. The thumbnail path is a pure function of the HTML, which is also what
-keeps `lib/headlines.ts` testable without a clock. Coverage is **99.7%** over
-676 items, and a missing date **keeps** the article — the same fail-open choice
-`canonicalLink` makes.
-
-**The per-article date and the paging stop are separate mechanisms, and page 1
-is why.** A section's first page opens with a curated headline block that is
-*not* in publication order: at 12:30 KST on 2026-08-05, politics had three 08-04
-articles inside its first 46 under a cursor still stamped 08-05. A rule that
-stopped at the first old article would have cut that page off at rank 3. So
-`cursorIsBefore` stops the *paging* once a whole page's oldest article predates
-the day, and `published` filters *within* every page, including that one.
-
-**It was checked twice, and the second check is the one that matters.** Against
-the page cursor: over 30 pages of three sections, not one article carried a
-thumbnail date older than its own page's cursor stamp. And **against the articles
-themselves**, which is the only thing that can establish this is a *publication*
-date rather than merely a self-consistent one — the twelve politics articles
-straddling the 2026-08-05 boundary, six each side, were fetched and their own
-timestamps read: **12 agree, 0 disagree**, with the flip in the list falling
-exactly where the articles put it. Agreeing with the cursor would have been
-satisfied by any date the same pipeline stamped on both.
-
-**Note that deeper paging widens the section gap rather than closing it**: the
-recovery above is 359 economy and 285 society against 11 culture, 9 world and 11
-`it`. Balance is a ranking question and `df_balanced` is where it lives.
-
-**Collection cannot be equalised by paging deeper, and that is why balance was
-attempted in the ranking instead.** 2026-08-04, counted per run: society took
-the whole 150-headline window on both the 11:00 and the 15:00 run while `it`
-never passed 98 on any of the five. **The thin section is not being truncated —
-it publishes less** — so a deeper page adds rows where there are already rows.
-Migration `0025` took the balance in the ranking instead
-(`df_balanced`), and round fourteen then measured that it cannot be priced on the
-day set the archive has; both halves of that are recorded above under the sieve.
-
-The move to six runs a day is what settled the `min_headlines` question — see the
-round-seven section of `scripts/analysis/README.md`. The short version: on a thin day the
-word at rank 70 has three headlines, so a floor is the screen; on a fat day it
-already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion floor
-is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a safety
-net for a day whose collection failed.
-
-Nouns are fetched *before* the headline row is inserted, so a failure leaves
-nothing behind and the next run retries naturally. The duplicate path also
-backfills headlines that somehow have no nouns.
-
+Nothing on the frontend hides a wait of this size: the skeleton, the `preconnect`
+and `main.tsx`'s pre-mount request all help the *first byte* rather than this.
 ## External services
 
 - **Naver RSS is discontinued. Never use it.** Headlines come from parsing
