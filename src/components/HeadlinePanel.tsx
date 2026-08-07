@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import type { Category, HeadlineSummary } from '../lib/types'
 import { sectionColor } from '../lib/sectionColors'
+import { WordHistory } from './WordHistory'
+import type { HistoryPoint } from '../lib/history'
 
 interface HeadlinePanelProps {
   /** 무엇에 대한 목록인가. null이면 패널이 닫힌다. */
@@ -13,6 +15,12 @@ interface HeadlinePanelProps {
   loading: boolean
   error: string | null
   onClose: () => void
+  /**
+   * The subject word's share across the collected days. Empty for an event —
+   * event identity is not defined across days here, so there is no line to
+   * draw.
+   */
+  history?: HistoryPoint[]
 }
 
 export function HeadlinePanel({
@@ -23,6 +31,7 @@ export function HeadlinePanel({
   loading,
   error,
   onClose,
+  history = [],
 }: HeadlinePanelProps) {
   const open = subject !== null
   const heading = isEvent ? `${subject} 관련 헤드라인` : `"${subject}" 관련 헤드라인`
@@ -78,6 +87,8 @@ export function HeadlinePanel({
           닫기
         </button>
       </div>
+
+      {!isEvent && <WordHistory points={history} />}
 
       {error && (
         <p role="alert" className="text-sm text-danger">

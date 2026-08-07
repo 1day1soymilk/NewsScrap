@@ -19,6 +19,8 @@ import {
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
+import { buildHistory } from './lib/history'
+import type { HistoryPoint } from './lib/history'
 import {
   EVENT_LIST_LIMIT,
   buildEvents,
@@ -72,6 +74,7 @@ function App() {
   const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
+  const [history, setHistory] = useState<HistoryPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [headlinesLoading, setHeadlinesLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -248,6 +251,37 @@ function App() {
       cancelled = true
     }
   }, [selectedDate, previousDate, graphWords, headlinesByDate])
+
+  // 그 단어가 수집된 날들을 지나며 그날의 몇 퍼센트였는지. 사건에는 붙이지 않는다
+  // — 루뱅 분할은 하루짜리고 `mergeCommunities`도 그날 엣지 위에서만 돌아서, 어제의
+  // 사건과 오늘의 사건이 같다고 말할 근거가 이 코드베이스에 없다.
+  //
+  // 새 쿼리를 만들지 않는다. `fetchWordCountsFor`가 이미 단어를 지목해서 묻고
+  // (그래서 1,000행 상한에 안 걸리고) 이미 캐시돼 있다. 분모도 이미 손에 있는
+  // `headlinesByDate`이고, 그것은 `collected_dates`의 `count(*)`이지 응답의 합이
+  // 아니다.
+  useEffect(() => {
+    if (!selectedWord || availableDates.length === 0) {
+      setHistory([])
+      return
+    }
+    let cancelled = false
+    fetchWordCountsFor(availableDates, [selectedWord])
+      .then((counts) => {
+        if (cancelled) return
+        setHistory(
+          buildHistory(counts, headlinesByDate, availableDates, { endDate: selectedDate }),
+        )
+      })
+      .catch(() => {
+        // 급상승 표식과 같은 방식으로 삼킨다. 궤적이 없어도 헤드라인 목록은 그대로
+        // 읽히고, 없는 편이 오류 페이지보다 낫다.
+        if (!cancelled) setHistory([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWord, selectedDate, availableDates, headlinesByDate])
 
   // --- 사건 ------------------------------------------------------------------
 
@@ -529,6 +563,7 @@ function App() {
         categories={categories}
         loading={headlinesLoading}
         error={headlinesError}
+        history={history}
         onClose={() => {
           setSelectedWord(null)
           setSelectedEvent(null)
