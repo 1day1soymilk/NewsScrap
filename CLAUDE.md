@@ -1539,6 +1539,73 @@ readability cap on a 320px panel — past a couple of weeks the points stop bein
 distinguishable and the line says less rather than more — **not a measured
 number**, and it does nothing yet: the archive is 8 days long.
 
+**The axis carries each point's date and its headline count, and those numbers
+measure a different thing from the height they sit at.** That is the one
+uncomfortable fact about this chart and it is stated on screen rather than
+designed away: 폭염 is 194 headlines on 2026-08-07 and 185 on 08-04 — nearly the
+same — while those days hold 2,949 and 4,218 headlines, so the shares are 6.6%
+and 4.4% and **the smaller count sits visibly higher**. Putting counts on the y
+axis is what the rule above forbids; labelling the points with shares would stop
+answering "몇 건". So both are shown and the caption names which is which. Read a
+sparkline whose labels and heights disagree as working, not broken.
+
+Labels are **thinned rather than sized down**: `LABEL_SLOT` (34 units) is the
+narrowest column a label may occupy, and the stride is derived from it, so at
+today's 8 points every point is labelled and at `HISTORY_WINDOW`'s 14 every
+other one is. The stride is anchored on the **last** point, so the day on
+screen is labelled at any spacing. The svg is 276 units wide because the panel
+is `sm:w-80` less `p-4` — 288px — and a `viewBox` scaled by the default
+`preserveAspectRatio` against a fixed height renders 1:1 inside that, so those
+coordinates are real pixels.
+
+**The headline list below is the same day set, one row per collected day, one
+open at a time.** The rows are the trajectory's points read top-down instead of
+left-right, newest first, and the open one holds the articles. It is an
+accordion rather than one long date-separated list because **the list cannot
+hold the archive**: 폭염 is 952 headlines over nine days and 973 noun rows, so a
+single multi-day fetch would sit on PostgREST's 1,000-row cap and be truncated
+with nothing saying so — the failure this file already forbids twice. One day at
+a time is bounded by construction, is the fetch that already existed, and is
+already cached per day, so stepping between days is a cache hit and raises no
+skeleton (`fetchHeadlinesForWord.isReady`, the same trick `loadGraph` uses).
+
+**Opening another day does not move the day on screen.** Same judgement as
+search not moving it: the canvas, the date input and the URL all stay put while
+the panel reads a different day. The open day is not in the query string either,
+for the reason the event list's expansion is not — it is not a shareable claim
+about the data.
+
+**No count is written on a date row, and that is a scoping decision rather than
+a layout one.** The trajectory's counts are day-wide by the rule above, while
+the list is scoped to the active category tab, so a header reading "51건" over a
+40-row list is what writing it there would produce. The day-wide numbers live on
+the chart's axis, where the caption says what they count; the panel heading's
+count is always the length of what is actually listed. The one thing a date row
+does state is **absence** — `present: false` is day-wide and therefore true in
+every tab, so an empty day is marked and cannot be opened. The **open** row is
+exempt from both: the day on screen may be one the word is absent from (common
+when the word was reached by search), and a disabled control that is expanded,
+saying "기사 없음" above a body already saying "관련 헤드라인이 없습니다", is two
+faults for one fact.
+
+**A day set that holds no row for the day on screen falls back to the flat
+list.** `historyWindow` covers *collected* days and the day on screen may be
+today before the first cron, in which case no row matches and every headline
+would silently vanish. Reached only by search, so it is exactly the kind of
+state nobody clicks into by accident.
+
+**`HEADLINE_ROW_LIMIT` was 200 and had quietly stopped being a safety net.** It
+is documented as "far above any real value" because the sort runs after the
+fetch, so a limit that ever bites changes the list silently. Measured on the
+live archive 2026-08-08, worst `(word, day)` cell: **폭염 on 2026-08-07 returns
+198 rows** for 194 distinct headlines — two rows of headroom. Nothing had moved
+in the panel; `collect_cap` went 150 → 300 and the day went to 4,218 headlines
+under it. The biggest word takes about 4.7% of a day, so **the number that moves
+this limit is the collect cap**, and it is now 600 — three times the measured
+worst, which covers another doubling of the cap. Same shape as `MAX_LIST_PAGES`
+in the collector: a second limit nobody chose, surfacing as a short list rather
+than as anything named.
+
 ### The word directory
 
 The canvas draws at most `render_cap` (70) words a day; the archive holds
@@ -2116,6 +2183,25 @@ rather than with the browser:
 A third, smaller: **the donut made `svg path` stop meaning "an edge"**, and one
 `toHaveCount(1)` assertion had been passing only in the frame before the donut
 existed. Both bare selectors are now scoped to `svg[role="group"]`.
+
+**The sparkline's axis labels are the same hazard on the other selector**: since
+the trajectory gained date and count labels, `svg text` no longer means "a drawn
+word" whenever a headline panel is open. Every current use survives only because
+it is filtered by the word (`hasText: /^예산안$/`) or narrowed to
+`svg text[role="button"]`, and the one bare `.first()` runs with no panel open.
+A future bare `svg text` count is the third time this trap will have been set.
+
+**`headline_nouns` in the mock had to stop being a constant.** It answered the
+same rows for every date, so once the panel could open another day, "opening
+yesterday shows yesterday's articles" was an assertion nothing could break. It
+now filters on `headlines.collected_date` and `headlines.categories.slug` —
+PostgREST spells an embedded filter as the dotted path in the query string — and
+`HEADLINE_ROWS` carries one yesterday row, its count taken from what
+`WORD_COUNTS` already says about that day rather than invented. Same rule as
+`COLLECTED_DATES` and `CATEGORY_SHARE`: a fixture that describes a day
+differently from the fixture beside it describes a day that does not exist.
+Verified by mutation — dropping the date filter fails two tests, and pointing
+`App.tsx` at the day on screen instead of the day the panel has open fails one.
 
 `e2e/smoke.spec.ts` is the only file that hits the real project, and it asserts
 the seeded category tabs rather than collected words — nothing exists for the

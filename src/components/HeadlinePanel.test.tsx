@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { HeadlinePanel } from './HeadlinePanel'
+import type { HistoryPoint } from '../lib/history'
 import type { Category, HeadlineSummary } from '../lib/types'
 
 // Ordered by section_id, which is the order fetchCategories() returns.
@@ -179,5 +180,99 @@ describe('HeadlinePanel', () => {
   it('says nothing of the sort for a word that is drawn', () => {
     renderPanel({ subject: '폭염' })
     expect(screen.queryByText(/이 날 화면에는 없는 단어/)).not.toBeInTheDocument()
+  })
+})
+
+// 궤적이 지나온 날들이 그대로 목록의 칸이 된다. 한 번에 한 칸만 열리는 것은 취향이
+// 아니라 크기 때문이다 — 폭염은 아카이브 8일에 952건이라 한 번에 받을 수도, 한
+// 패널에 담을 수도 없다.
+describe('HeadlinePanel 날짜 구획', () => {
+  const DAYS: HistoryPoint[] = [
+    { date: '2026-08-05', count: 0, share: 0, present: false },
+    { date: '2026-08-06', count: 7, share: 0.1, present: true },
+    { date: '2026-08-07', count: 12, share: 0.2, present: true },
+  ]
+
+  function renderDays(props: Partial<Parameters<typeof HeadlinePanel>[0]> = {}) {
+    return renderPanel({
+      subject: '호르무즈',
+      history: DAYS,
+      openDate: '2026-08-07',
+      headlines: [headline('h1', '유가 급등', 'economy')],
+      ...props,
+    })
+  }
+
+  it('makes one row per collected day, newest first', () => {
+    renderDays()
+    // 최신이 위. 선은 왼쪽에서 오른쪽으로 흐르지만, 목록에서 먼저 읽고 싶은 것은
+    // 오늘이다.
+    const rows = screen.getAllByRole('button', { name: /월 \d+일/ })
+    expect(rows.map((row) => row.textContent?.match(/\d+월 \d+일/)?.[0])).toEqual([
+      '8월 7일',
+      '8월 6일',
+      '8월 5일',
+    ])
+    expect(rows[2]).toHaveTextContent('기사 없음')
+  })
+
+  // 열린 날의 기사만 깔린다. 다른 날의 기사가 같이 보이면 "날짜별로 구분"이 아니라
+  // 그냥 섞인 목록에 머리글만 붙은 것이 된다.
+  it('lists the headlines under the open day only', () => {
+    renderDays()
+    const open = screen.getByRole('button', { name: /8월 7일/ })
+    expect(open).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /8월 6일/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+  })
+
+  it('asks for another day when its row is clicked', () => {
+    const onOpenDate = vi.fn()
+    renderDays({ onOpenDate })
+    fireEvent.click(screen.getByRole('button', { name: /8월 6일/ }))
+    expect(onOpenDate).toHaveBeenCalledWith('2026-08-06')
+  })
+
+  // 그날 그 단어가 아예 없었으면 열 것이 없다. 이 판정은 궤적이 여섯 섹션 전부를
+  // 세어 알고 있으므로 어느 탭에서도 참이다.
+  it('will not open a day the word was absent from', () => {
+    const onOpenDate = vi.fn()
+    renderDays({ onOpenDate })
+    const empty = screen.getByRole('button', { name: /8월 5일/ })
+    expect(empty).toBeDisabled()
+    fireEvent.click(empty)
+    expect(onOpenDate).not.toHaveBeenCalled()
+  })
+
+  // 화면의 날짜가 아직 수집되지 않은 오늘이면 궤적에 그 날이 없다 — 그러면 어떤
+  // 칸도 열리지 않아 헤드라인이 통째로 사라진다. 검색으로만 닿을 수 있는 상태라
+  // 눈에 잘 띄지도 않는다.
+  it('falls back to a flat list when no collected day matches the day on screen', () => {
+    renderDays({ openDate: '2026-08-08' })
+    expect(screen.queryByRole('button', { name: /8월 7일/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '유가 급등' })).toBeInTheDocument()
+  })
+
+  // 화면의 날짜에 그 단어가 없을 수 있다 — 검색으로 닿으면 흔하다. 그 칸은 열린
+  // 채로 비어 있어야 하고, 펼쳐진 비활성 컨트롤이 되거나 "기사 없음"과 본문의
+  // "관련 헤드라인이 없습니다"가 같은 말을 두 번 해서는 안 된다.
+  it('leaves the open day usable even when the word was absent from it', () => {
+    renderDays({ openDate: '2026-08-05', headlines: [] })
+    const row = screen.getByRole('button', { name: /8월 5일/ })
+    expect(row).toBeEnabled()
+    expect(row).not.toHaveTextContent('기사 없음')
+    expect(screen.getByText('관련 헤드라인이 없습니다.')).toBeInTheDocument()
+    // 비어 있는 날은 08-05 하나뿐이고 그것이 열려 있으므로, 표식은 화면 어디에도
+    // 남아 있으면 안 된다. 닫혀 있을 때 표식이 나오는 것은 위 첫 테스트가 본다.
+    expect(screen.queryAllByText('기사 없음')).toHaveLength(0)
+  })
+
+  it('shows no date rows for an event', () => {
+    renderDays({ subject: '김민석 · 정청래', isEvent: true })
+    expect(screen.queryByRole('button', { name: /월 \d+일/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '유가 급등' })).toBeInTheDocument()
   })
 })

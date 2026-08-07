@@ -299,13 +299,18 @@ describe('fetchHeadlinesForWord', () => {
     expect(result[0].category_slug).toBe('society')
   })
 
-  it('caps the rows it will pull for one word', async () => {
+  // 이 상한은 잘리면 안 되는 안전장치라 **실제 최댓값보다 한참 위**여야 한다.
+  // 200이던 값은 그 조건을 잃은 지 오래였다: 2026-08-08에 라이브에서 재 본
+  // 최악의 (단어, 날) 칸은 2026-08-07의 폭염으로 **198행**이고, 두 줄 남은 채
+  // 아무것도 그 사실을 말하지 않았다. 움직이는 것은 단어가 아니라
+  // `scoring_weights.collect_cap`이므로 숫자와 함께 그 근거를 적어 둔다.
+  it('caps the rows it will pull for one word, far above the measured worst', async () => {
     const chain = makeQueryChain({ data: [], error: null })
     mockSupabase.from.mockReturnValue(chain)
 
     await fetchHeadlinesForWord('2026-07-31', null, '폭염')
 
-    expect(chain.limit).toHaveBeenCalledWith(200)
+    expect(chain.limit).toHaveBeenCalledWith(600)
   })
 })
 

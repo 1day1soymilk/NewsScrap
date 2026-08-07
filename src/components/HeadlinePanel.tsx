@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useId, useMemo } from 'react'
 import type { Category, HeadlineSummary } from '../lib/types'
+import { formatDate } from '../lib/formatDate'
 import { sectionColor } from '../lib/sectionColors'
 import { WordHistory } from './WordHistory'
 import type { HistoryPoint } from '../lib/history'
@@ -19,8 +20,18 @@ interface HeadlinePanelProps {
    * The subject word's share across the collected days. Empty for an event —
    * event identity is not defined across days here, so there is no line to
    * draw.
+   *
+   * 이것은 스파크라인의 입력이면서 **동시에 아래 목록의 날짜 구획이다.** 두 개가
+   * 아니라 하나인 이유는 그 둘이 같은 날 집합을 말해야 하기 때문이다: 창을 두 번
+   * 계산하면 선의 점과 목록의 칸이 어긋날 수 있고, 어긋난 것은 화면에서 틀려
+   * 보이지 않는다.
    */
   history?: HistoryPoint[]
+  /**
+   * 지금 펼쳐져 있는 날. `history`의 어느 날짜여야 하고, 기본은 화면의 날짜다.
+   */
+  openDate?: string
+  onOpenDate?: (date: string) => void
   /**
    * The subject is a word the sieve did not draw on this day — reached by
    * search rather than by clicking the canvas. Saying so is what stops the
@@ -38,10 +49,13 @@ export function HeadlinePanel({
   error,
   onClose,
   history = [],
+  openDate,
+  onOpenDate,
   offCanvas = false,
 }: HeadlinePanelProps) {
   const open = subject !== null
   const heading = isEvent ? `${subject} 관련 헤드라인` : `"${subject}" 관련 헤드라인`
+  const sectionId = useId()
 
   // Registered only while the panel is open, so Escape stays free for anything
   // else on the page the rest of the time.
@@ -64,7 +78,33 @@ export function HeadlinePanel({
     [headlines, categories],
   )
 
+  // 최신이 위. 선은 왼쪽에서 오른쪽으로 시간이 흐르고 목록은 위에서 아래로 흐르는데,
+  // 목록에서 먼저 읽고 싶은 것은 오늘이다.
+  //
+  // **사건에는 날짜 구획이 없다.** 사건의 신원은 날 사이에 정의돼 있지 않으므로
+  // (루뱅 분할은 하루짜리다) 어제의 같은 이름 사건이라는 것이 없고, 따라서 나눌
+  // 날도 없다. 궤적이 단어에만 붙는 것과 정확히 같은 이유다.
+  const days = useMemo(
+    () => (isEvent ? [] : [...history].reverse()),
+    [isEvent, history],
+  )
+
+  // **펼칠 날이 목록 안에 없으면 날짜 구획 자체를 쓰지 않는다.** 궤적은 *수집된* 날만
+  // 담는데 화면의 날짜는 아직 수집되지 않은 오늘일 수 있고 — 그날은 검색으로만 단어에
+  // 닿는다 — 그러면 어떤 칸도 열리지 않아 헤드라인이 통째로 사라진다. 그때는 예전처럼
+  // 평평한 목록을 그리고, 그 목록이 "관련 헤드라인이 없습니다"를 제대로 말한다.
+  const sectioned = days.some((day) => day.date === openDate)
+
   if (!open) return null
+
+  const list = (
+    <HeadlineList
+      headlines={sorted}
+      labels={labels}
+      loading={loading}
+      error={error}
+    />
+  )
 
   return (
     // Bottom sheet on a phone, side drawer from `sm` up. The fixed 320px drawer
@@ -84,6 +124,11 @@ export function HeadlinePanel({
       <div className="mb-4 flex items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">
           {heading}
+          {/* **여기 적히는 수는 언제나 "지금 아래에 깔린 줄 수"다.** 궤적이 아는
+              그날의 건수를 여기 적으면 섹션 탭이 켜졌을 때 — 목록은 그 섹션으로
+              좁혀지고 궤적은 규칙상 여섯 섹션 전부를 세므로 — 머리글이 목록보다
+              큰 수를 말하게 된다. 그날 전체 건수는 스파크라인의 축이 지고, 그쪽은
+              캡션이 무엇을 센 수인지 적어 둔다. 한 수는 한 곳에서만 적는다. */}
           {!loading && !error && sorted.length > 0 && (
             <span className="ml-2 font-sans text-sm font-normal text-ink-faint">
               {sorted.length}건
@@ -101,54 +146,122 @@ export function HeadlinePanel({
         </p>
       )}
 
-      {!isEvent && <WordHistory points={history} />}
+      {!isEvent && <WordHistory points={history} activeDate={openDate} />}
 
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error}
-        </p>
-      )}
-
-      {!error && loading && <HeadlineSkeleton />}
-
-      {!error && !loading && sorted.length === 0 && (
-        <p className="text-sm text-ink-muted">관련 헤드라인이 없습니다.</p>
-      )}
-
-      {!error && !loading && sorted.length > 0 && (
+      {!sectioned ? (
+        list
+      ) : (
         <ul>
-          {sorted.map((headline) => (
-            <li key={headline.id} className="border-b border-line py-3 first:pt-0 last:border-0">
-              {/* The section reads as the same dot the tab row and the canvas
-                  use, rather than as a pill of its own. On a word that ran in
-                  one section the old chips were a column of identical badges
-                  down the panel, each one louder than the headline beside it. */}
-              <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-faint">
-                <span
-                  aria-hidden="true"
-                  className="size-1.5 shrink-0 rounded-full"
-                  style={{ background: sectionColor(headline.category_slug) }}
-                />
-                {labels.get(headline.category_slug) ?? headline.category_slug}
-              </p>
-              {/* Ink, not --color-top-story. A headline is not the day's biggest
-                  event, and painting every link in that blue meant the one
-                  colour on the page that names something specific also meant
-                  "this is a link". Outside the anchor stays outside it: the
-                  accessible name has to be the headline and nothing else. */}
-              <a
-                href={headline.link}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-ink underline decoration-line underline-offset-4 hover:decoration-ink-faint"
-              >
-                {headline.title}
-              </a>
-            </li>
-          ))}
+          {days.map((day) => {
+            const isOpen = day.date === openDate
+            const id = `${sectionId}-${day.date}`
+            return (
+              <li key={day.date} className="border-b border-line last:border-0">
+                <button
+                  type="button"
+                  // 그날 그 단어가 아예 없었으면 열 것이 없다. 이 판정은 궤적이
+                  // 이미 알고 있고 — 여섯 섹션 전부를 센 값이라 — 어느 탭에서도
+                  // 참이다. 건수를 머리글에 적지 않는 이유와 대비되는 지점이다:
+                  // 0은 범위와 무관하지만 51은 그렇지 않다.
+                  //
+                  // **열려 있는 칸은 예외다.** 화면의 날짜에 그 단어가 없으면 그
+                  // 칸이 열린 채로 비어 있게 되는데, 그것을 비활성으로 그리면
+                  // 펼쳐진 비활성 컨트롤이 되고 "기사 없음"과 본문의 "관련
+                  // 헤드라인이 없습니다"가 같은 말을 두 번 한다.
+                  disabled={!day.present && !isOpen}
+                  aria-expanded={isOpen}
+                  aria-controls={id}
+                  onClick={() => onOpenDate?.(day.date)}
+                  className="flex w-full items-center gap-2 py-2.5 text-left text-sm disabled:cursor-default"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`shrink-0 text-xs text-ink-faint transition-transform ${
+                      isOpen ? 'rotate-90' : ''
+                    }`}
+                  >
+                    ▶
+                  </span>
+                  <span
+                    className={
+                      isOpen ? 'font-semibold text-ink' : day.present ? 'text-ink-muted' : 'text-ink-faint'
+                    }
+                  >
+                    {formatDate(day.date).day}
+                  </span>
+                  {!day.present && !isOpen && (
+                    <span className="ml-auto text-xs text-ink-faint">기사 없음</span>
+                  )}
+                </button>
+                {isOpen && (
+                  <div id={id} className="pb-3">
+                    {list}
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </aside>
+  )
+}
+
+function HeadlineList({
+  headlines,
+  labels,
+  loading,
+  error,
+}: {
+  headlines: HeadlineSummary[]
+  labels: Map<string, string>
+  loading: boolean
+  error: string | null
+}) {
+  if (error) {
+    return (
+      <p role="alert" className="text-sm text-danger">
+        {error}
+      </p>
+    )
+  }
+  if (loading) return <HeadlineSkeleton />
+  if (headlines.length === 0) {
+    return <p className="text-sm text-ink-muted">관련 헤드라인이 없습니다.</p>
+  }
+
+  return (
+    <ul>
+      {headlines.map((headline) => (
+        <li key={headline.id} className="border-b border-line py-3 first:pt-0 last:border-0">
+          {/* The section reads as the same dot the tab row and the canvas
+              use, rather than as a pill of its own. On a word that ran in
+              one section the old chips were a column of identical badges
+              down the panel, each one louder than the headline beside it. */}
+          <p className="mb-1 flex items-center gap-1.5 text-xs text-ink-faint">
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ background: sectionColor(headline.category_slug) }}
+            />
+            {labels.get(headline.category_slug) ?? headline.category_slug}
+          </p>
+          {/* Ink, not --color-top-story. A headline is not the day's biggest
+              event, and painting every link in that blue meant the one
+              colour on the page that names something specific also meant
+              "this is a link". Outside the anchor stays outside it: the
+              accessible name has to be the headline and nothing else. */}
+          <a
+            href={headline.link}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-ink underline decoration-line underline-offset-4 hover:decoration-ink-faint"
+          >
+            {headline.title}
+          </a>
+        </li>
+      ))}
+    </ul>
   )
 }
 

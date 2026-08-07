@@ -234,6 +234,23 @@ export const HEADLINE_ROWS: HeadlineNounRow[] = [
       categories: { slug: 'politics' },
     },
   },
+  // 어제 자 한 줄. 패널이 날짜별로 나뉘고 다른 날을 펼칠 수 있게 된 뒤로는, 두 날이
+  // **서로 다른 기사를 돌려주어야만** 그 동작을 검사할 수 있다 — 두 날이 같은 답을
+  // 하면 "어제를 열었다"는 단정이 무엇에도 걸리지 않는다.
+  //
+  // 한 줄인 것은 WORD_COUNTS가 어제의 예산안을 1건이라고 말하기 때문이다. 이 저장소가
+  // COLLECTED_DATES와 CATEGORY_SHARE를 따로 적지 않고 파생시키는 것과 같은 이유로,
+  // 두 픽스처가 같은 날을 다르게 말하면 존재하지 않는 날을 묘사하게 된다.
+  {
+    word: '예산안',
+    headlines: {
+      id: '00000000-0000-4000-8000-00000000aaa3',
+      title: '예산안 편성 지침 발표',
+      link: 'https://n.news.naver.com/article/001/0000000003',
+      collected_date: previousDayInSeoul(),
+      categories: { slug: 'politics' },
+    },
+  },
 ]
 
 // 두 사건과 그 사이의 다리 하나.
