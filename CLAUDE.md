@@ -11,6 +11,12 @@ d3-force graph filterable by date and category: words that share headlines are
 joined by an edge, size stays proportional to headline count, and clicking a word
 dims everything outside its neighbourhood and lists the headlines it came from.
 
+**`OPEN.md` at the repo root is the work queue** — what is open, what was
+measured and declined, and where in the code each open item lands. Read it
+before starting anything; a fresh session should not have to re-derive that
+from the git log. `scripts/layout/OPEN.md` is the older, layout-scoped one and
+still stands.
+
 ## Commands
 
 ```bash
