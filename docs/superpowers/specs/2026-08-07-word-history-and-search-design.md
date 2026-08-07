@@ -47,9 +47,23 @@ once for reading a cold-cache first query as a signal.
 | trajectory: `daily_word_counts` where `word = '폭염'` and `category_slug is null` | **5.7 ms / 8 rows** | bitmap scan on `headline_nouns_word_idx` |
 | search: archive-wide `word like '김%'` | **316 ms** | **seq scan** of `headline_nouns`, 114,457 rows |
 | search: same, restricted to one day | 20 ms | seq scan unchanged; only the join shrinks |
-| search: build a 19,767-row word directory on the fly, then `%민석%` | 311 ms | ~300 ms to build, ~1 ms to filter |
+| search: build a 19,767-row word directory on the fly, then `%민석%` | 311 ms | ~300 ms to build, ~1 ms to filter (inferred, not measured — see below) |
 
 Two conclusions, and they point opposite ways.
+
+**The "~1 ms" filter figure above is wrong, and it is wrong in a specific way
+worth naming: it was inferred from the query plan of the on-the-fly CTE rather
+than measured against the materialised directory that actually shipped.**
+Measured directly against `word_directory` post-migration, second of two runs
+in both cases: **60.0 ms cold, 35.0 ms warm.** `ilike` over 19,767 Korean
+strings is genuinely ~35 ms, not ~1 ms — a seq scan still has to touch every
+row, and no index (a substring pattern cannot use a btree, and `pg_trgm` was
+rejected in section 7) puts a floor under that. The conclusion this measurement
+was built to support is unchanged: 35 ms against the 316 ms archive-wide scan
+is still a **9x** improvement, and the number that matters was never the
+absolute figure but the direction each grows in — `headline_nouns` scales with
+**headline volume**, `word_directory` with **vocabulary**, and vocabulary grows
+far more slowly as the archive collects more days.
 
 **The trajectory is already indexed.** `headline_nouns_word_idx` answers it
 directly. No RPC, no new index, no migration.
@@ -60,8 +74,12 @@ cost **grows with headline volume** (~1.3M rows at 90 days). Restricting to one
 day does not help: the seq scan is the fixed cost and only the join to
 `headlines` shrinks. A word directory grows with **vocabulary** instead, which
 grows far more slowly — a new day is mostly words already present. Filtering
-19,767 short strings is ~1 ms; the 300 ms is entirely the building, so the
-directory has to be materialised rather than computed per query.
+19,767 short strings is **35.0 ms warm / 60.0 ms cold**, measured against the
+materialised directory (§2 corrects an earlier ~1 ms figure that was inferred
+from a query plan rather than measured) — still 9x faster than the
+archive-wide scan, and still dominated by the ~300 ms it costs to build the
+set on the fly, which is why the directory has to be materialised rather than
+computed per query.
 
 `pg_trgm` is not installed, and is not a candidate anyway: a 2–4 character
 Korean word yields too few trigrams for a GIN index to discriminate.
@@ -143,8 +161,10 @@ it does not outrank `total` — a blended recency score would be a ranking
 invented here with nothing to measure it against, and the trajectory answers the
 recency question properly one click later.
 
-No index beyond the unique one is needed: filtering 19,767 short strings is the
-~1 ms measured in §2, and a substring match could not use a btree index anyway.
+No index beyond the unique one is needed: filtering 19,767 short strings is
+**35.0 ms warm / 60.0 ms cold** (§2 — the ~1 ms this section used to state was
+inferred from a query plan, not measured, and was wrong), and a substring match
+could not use a btree index anyway.
 
 **Why `security definer`, and the care it needs.** `refresh materialized view`
 is an owner-only operation; the migration runs as `postgres` and the Edge

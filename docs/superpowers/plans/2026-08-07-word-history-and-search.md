@@ -1292,8 +1292,7 @@ git commit -m "Search the directory, and strip the wildcards a term should not c
 Create `src/components/WordSearch.test.tsx`:
 
 ```tsx
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WordSearch } from './WordSearch'
 
@@ -1310,13 +1309,13 @@ beforeEach(() => {
 describe('WordSearch', () => {
   it('lists what the directory returned', async () => {
     render(<WordSearch onSelect={() => {}} />)
-    await userEvent.type(screen.getByRole('searchbox'), '민석')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '민석' } })
     expect(await screen.findByRole('option', { name: /김민석/ })).toBeInTheDocument()
   })
 
   it('says how many days a word appeared on and when it last did', async () => {
     render(<WordSearch onSelect={() => {}} />)
-    await userEvent.type(screen.getByRole('searchbox'), '민석')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '민석' } })
     const option = await screen.findByRole('option', { name: /김민석/ })
     expect(option).toHaveTextContent('8일')
     expect(option).toHaveTextContent('120')
@@ -1325,21 +1324,31 @@ describe('WordSearch', () => {
   it('hands the chosen word up', async () => {
     const onSelect = vi.fn()
     render(<WordSearch onSelect={onSelect} />)
-    await userEvent.type(screen.getByRole('searchbox'), '민석')
-    await userEvent.click(await screen.findByRole('option', { name: /김민석/ }))
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '민석' } })
+    fireEvent.click(await screen.findByRole('option', { name: /김민석/ }))
     expect(onSelect).toHaveBeenCalledWith('김민석')
   })
 
-  it('asks nothing while the box is empty', async () => {
-    render(<WordSearch onSelect={() => {}} />)
-    await userEvent.click(screen.getByRole('searchbox'))
-    await waitFor(() => expect(searchWords).not.toHaveBeenCalled())
+  it('asks nothing for a whitespace-only term', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<WordSearch onSelect={() => {}} />)
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '   ' } })
+      // Assert only after the debounce has had a chance to fire. waitFor runs its
+      // first check synchronously, at t≈0, so a negative assertion wrapped in
+      // waitFor passes whether or not the component's guard actually ran — this
+      // is why fake timers are advanced explicitly before asserting.
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(searchWords).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('says so when a term matches nothing', async () => {
     searchWords.mockResolvedValue([])
     render(<WordSearch onSelect={() => {}} />)
-    await userEvent.type(screen.getByRole('searchbox'), '없는말')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '없는말' } })
     expect(await screen.findByText(/찾은 단어가 없습니다/)).toBeInTheDocument()
   })
 
@@ -1348,8 +1357,12 @@ describe('WordSearch', () => {
   it('shows no results and no error page when the search fails', async () => {
     searchWords.mockRejectedValue(new Error('nope'))
     render(<WordSearch onSelect={() => {}} />)
-    await userEvent.type(screen.getByRole('searchbox'), '민석')
-    await waitFor(() => expect(screen.queryByRole('option')).not.toBeInTheDocument())
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '민석' } })
+    // The empty-state text renders only after the rejection has been handled —
+    // waiting on it first is the evidence the catch actually ran, and only then
+    // does "no option is present" mean anything.
+    expect(await screen.findByText(/찾은 단어가 없습니다/)).toBeInTheDocument()
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
   })
 })
 ```

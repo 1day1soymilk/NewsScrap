@@ -109,10 +109,14 @@ Do not make a build pass by excluding tests from type checking, loosening
 `tsconfig`, or weakening an assertion. That has been tried here and it hides real
 errors.
 
-### The schema lives in three places
+### The schema lives in four places
 
-`supabase/migrations/*.sql`, the Edge Function's inserts, and `src/lib/queries.ts`
-all encode the same column names. Changing one means changing all three.
+`supabase/migrations/*.sql`, the Edge Function's inserts, `src/lib/queries.ts`,
+and — since migration `0030` — `word_directory`, all encode the same column
+names. Changing one means changing all four. `word_directory` is derived from
+`headline_nouns` and `headlines` rather than typed independently, so its place
+on this list is a reminder to re-derive it, and refresh it, whenever either of
+those two changes shape — see "The word directory" below.
 
 The frontend never aggregates in the client and never reads raw rows for counts —
 it queries the `keyword_graph` RPC and the `collected_dates` view, which exist so
@@ -737,9 +741,10 @@ changed.**
 
 ### Reading the same view twice costs nothing
 
-`src/lib/queryCache.ts` sits under seven of the query functions (count them —
+`src/lib/queryCache.ts` sits under eight of the query functions (count them —
 `grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
-incremented from a stale one instead of counted) and holds the
+incremented from a stale one instead of counted — `searchWords` is the eighth,
+added for word-directory search) and holds the
 **promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
 rejections evicted immediately so "다시 시도" really retries). Two things follow
 that are easy to underrate:
@@ -1382,6 +1387,111 @@ Kleinberg's burst model is the proper instrument and is what the plan reserves
 for this, but it measures against a historical baseline and the archive is two
 days long. Revisit it when there is history to measure against.
 
+### A word's trajectory
+
+Everything above terminates inside one `collected_date`. `src/lib/history.ts`
+(`buildHistory`) is the one axis that crosses days: clicking a word in the
+headline panel draws a sparkline of its share of each collected day, above the
+headline list, drawn by `src/components/WordHistory.tsx`.
+
+**The y axis is share, and this is `surge.ts`'s rule extended rather than a new
+decision.** Days run 691 to 4,218 headlines and 2026-08-07 is on top of that a
+collect-cap regime boundary (150 → 300), so a raw-count series draws collection
+depth rather than news. `src/lib/share.ts` holds `count / headlines` once,
+because `surge.ts` and `history.ts` both need it and a second copy is how they
+would drift apart — `computeSurges` was refactored to call it. Which category
+tab is on screen decides what is *shown*, never what a word *did* that day: the
+trajectory is day-wide whatever tab is active, the same rule the surge
+comparison and the sieve already follow.
+
+**It costs no migration and no new query function.** `fetchWordCountsFor(dates,
+words)` already issues `.in('collected_date', …).in('word', …).is('category_slug',
+null)` — passing every collected date and the one clicked word returns one row
+per day the word appeared on. Naming the word is what already keeps this inside
+PostgREST's 1,000-row cap ("name the words you want", above); a trajectory asks
+for exactly one, so it was never at risk. The denominators need no new request
+either — `App.tsx` already holds them, from `collected_dates`, for the surge
+comparison. Nothing here is a summed response: counts are `fetchWordCountsFor`'s
+named rows and the denominator is `collected_dates`'s `count(*)` per day.
+
+**Events get no trajectory.** Event identity across days is undefined in this
+codebase: the Louvain partition is computed fresh per day (`graphLayout.ts`) and
+`mergeCommunities` runs on one day's edge list. There is no way to say
+yesterday's 전당대회 event and today's are the same event, so nothing draws a
+line between them — the trajectory only ever attaches to a word.
+
+**It only became legitimate when the day-boundary stop shipped.** Before that
+deploy, 8.4% of a day's rows carried the wrong date (2026-08-07: 141 of 1,821
+rows from that day's four old-code crons were published on another day; 0 of
+937 after). A line drawn across days that are 8% mis-dated would have plotted
+the collector's schedule, not the news — see "The day boundary" under the Edge
+Function section.
+
+`HISTORY_WINDOW` is **14** collected days, ending at the day on screen. It is a
+readability cap on a 320px panel — past a couple of weeks the points stop being
+distinguishable and the line says less rather than more — **not a measured
+number**, and it does nothing yet: the archive is 8 days long.
+
+### The word directory
+
+The canvas draws at most `render_cap` (70) words a day; the archive holds
+19,767 distinct words across eight days. Nothing before this could confirm a
+sieve-cut word exists at all, let alone find it. `src/components/WordSearch.tsx`
+is a debounced (250 ms) substring box beside `CategoryTabs`; `searchWords` in
+`src/lib/queries.ts` reads `word_directory` (migration `0030`), a materialised
+view of one row per word ever analysed — `word`, `total` (`count(*)` over its
+noun rows), `days` (`count(distinct collected_date)`), `last_date`
+(`max(collected_date)`). Selecting a result does `setSelectedEvent(null)` then
+`setSelectedWord(word)` and **does not move the date** — the day on screen
+stays put, and if the found word is not in that day's `graph.nodes` the
+headline panel says so rather than jumping the reader's view out from under
+them; the trajectory is what tells them which day to go to.
+
+**Three measurements decided this needs a materialised view rather than a
+query.** `word like '김%'` against `headline_nouns` directly: **316 ms**, a seq
+scan of all 114,457 noun rows. Restricted to one day: **20 ms** — the seq scan
+is unchanged, only the join to `headlines` shrinks, so narrowing the date does
+not fix it. Against the materialised directory, `ilike '%민석%'`, second of two
+runs in both cases: **60.0 ms cold, 35.0 ms warm** — still a 9x win over the
+archive-wide scan, though a smaller one than an earlier draft of the design spec
+claimed (that draft's "~1 ms" was inferred from a query plan rather than
+measured, and was corrected in
+`docs/superpowers/specs/2026-08-07-word-history-and-search-design.md` once the
+live number came back; `word_directory`'s own migration header already carried
+the right figure, 34.8 ms, from the start). **The number that matters was never
+the absolute figure**: `headline_nouns` grows with **headline volume**
+(~1.3M rows at 90 days), `word_directory` grows with **vocabulary**, which grows
+far more slowly — a new day is mostly words already present. 19,767 rows at
+eight collected days. `pg_trgm` was considered and rejected: not installed, and
+weak on 2–4 character Korean words regardless.
+
+**`word_directory` has no RLS**, and that is a genuine exception to "all tables
+have RLS" — see the Access model section, which now says so too.
+`refresh_word_directory()` is `SECURITY DEFINER`; same section explains why
+that does not contradict the `keyword_graph`-chain rule.
+
+**Wildcards are stripped from a search term, never escaped.** `%` and `_` are
+LIKE wildcards, and PostgREST rewrites a literal `*` into `%` before Postgres
+ever sees the pattern, so escaping correctly would mean escaping at two layers
+with two different rulesets — one rule in one place is simpler and was checked
+rather than assumed safe: of 19,767 words, **two** contain `%` (`0.45%포인트`,
+`1%포인트`) and **none** contain `_` or `*`, and both of the affected two remain
+reachable by searching `포인트` instead. Left unstripped, a lone `_` would match
+every one-character word in the archive.
+
+**The collector refreshes the directory at the end of every run**
+(`refresh_word_directory()`, one RPC call in `index.ts` after all six sections
+are stored) and reports `directory: 'ok' | 'failed: …'` in the response
+body — the only machine-readable channel out of this function, same reason the
+per-category `(scrape Xms, process Yms)` timings ride along in that body. A
+failed refresh does not fail the run: search staying one run stale is a far
+smaller fault than a collection that silently stopped storing headlines. **This
+does not touch the CPU budget that kills the function.** A refresh is database
+work the worker waits on — wall clock, not accumulated CPU — the same
+distinction the run-budget section draws about ETRI's old wait. Verified live:
+a deployed run returned `"directory":"ok"` and took the directory from 19,767
+to 19,904 rows.
+
 ### URL state
 
 Date, category and selected word live in the query string (`src/lib/urlState.ts`),
@@ -1809,6 +1919,25 @@ the tables. `keyword_signals` and `category_balance_factors` are granted to
 its old grant; `authenticated` is an empty role here — there is no login — so
 naming it moves nothing about the access model and only keeps one chain
 consistent with itself.
+
+**`word_directory` (migration `0030`) is a genuine exception to "all tables have
+RLS", not an oversight.** It is a materialised view, and a materialised view
+cannot carry a policy at all — Postgres has no `ALTER MATERIALIZED VIEW … ENABLE
+ROW LEVEL SECURITY`. Its whole access model is therefore the grant: Supabase's
+default grants are wide, so the migration revokes everything from `public,
+anon, authenticated` first and then grants `select` back to `anon,
+authenticated` explicitly, rather than assuming the wide default is what is
+wanted. `refresh_word_directory()` is `SECURITY DEFINER`, and that does **not**
+contradict the `keyword_graph`-chain rule above: `refresh materialized view` is
+an owner-only operation, the migration runs as the owner, and the Edge Function
+connects as `service_role` rather than the owner — without the definer it could
+not refresh at all. What the chain rule protects is a function handing `anon`
+the service role's *view of the tables*; this function reads nothing and
+returns nothing, so there is no view to hand out. It still takes
+`set search_path = ''` on principle, and execute is granted to `service_role`
+alone — never `anon`, which over PostgREST would let anyone queue unbounded
+~300 ms refreshes (the cost of rebuilding the directory, not of searching it —
+see "The word directory" below for that number).
 
 ## Testing notes
 
