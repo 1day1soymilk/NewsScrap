@@ -520,239 +520,100 @@ sweep** and a **category-balance exponent α**, all three switched off pending t
 measurement, and migration `0026` is the verdict: **no `value` in
 `scoring_weights` moves.** It updates four `note` columns so the deployed
 database carries the reasoning. A round that earns nothing has to be as legible
-as one that earns something, or the next person re-runs it.
+as one that earns something, or the next person re-runs it. The measurements are
+in `scripts/analysis/README.md`, "Round fourteen"; what survives here is what
+stops a mistake without reading them.
 
 **Migration `0028` then turned the place gate on anyway, and that is the round's
 sharpest finding rather than a reversal.** The measurement stands exactly as
-`0026` recorded it — the gate costs F1 on both surfaces and every word it removes
-is labelled good. What overruled it was looking at the screen, where the gate's
+`0026` recorded it — the gate costs F1 on both surfaces (day-wide 63.70 → 62.67,
+the 24 tabs 78.58 → 75.22) and every one of the eleven words it removes is
+labelled good. What overruled it was looking at the screen, where the gate's
 absence leaves an unreadable 66-headline "서울 · 광주" as the day's fourth-largest
-event. The cap and α remain off. Details are in the place-gate entry below. All
-of what follows
-has `unlab` 0 and `story_rank` 1 on every quoted row, and both worklists returned
-nothing before the harness was read and again after.
+event — two place names joined to each other and to nothing else, so nothing on
+the page can say what those 66 articles are about. The cap and α remain off.
 
-- **The place gate loses on both surfaces, and the eleven words it removes are
-  all labelled good.** Sieve 6 draws a `word_overrides` place only when a drawn
-  line joins it to a non-place. Day-wide F1 **63.70 → 62.67** (0 wins, 3 losses,
-  1 tie); the 24 category cells **78.58 → 75.22** (1 win, 17 losses, 6 ties); at
-  cap 100 the same comparison gives 70.60 → 69.98, so a wider canvas does not
-  rescue it. The cost is one-sided: it removes 서울 ×2, 울산 ×2, 제주, 강남,
-  부산, 강원, 광주, 인천 and 포항 — **every one labelled good** — and promotes
-  ten, six good (경계작전, 공화당, 김동관, 김병기, 김용, 한반도) and four bad
-  (단일종목, 반도체주, 고속도로, 대공습).
+**The harness is the wrong instrument for the question the gate was asked, and
+that is the finding to keep.** `analysis.word_labels` answers "is this a word
+worth showing"; the gate was asked "can a reader do anything with a word no line
+touches", and no label set can price that. **Anything that changes what a word
+*means on the page* rather than whether it deserves a place has to be decided by
+looking.** It is the same mismatch that stops the harness pricing the render cap.
+`word_overrides` mode 'place' is load-bearing rather than a labelled fact in
+reserve: its 45 rows are the gate's whole input.
 
-  **The premise failed, not the threshold.** "A place with no line to a non-place
-  is backdrop" is false: a place can be the story and hold no *drawn* line
-  because its partner sits below the cap. 부산 on 2026-08-02 is the clean case —
-  a day qualifying only 69 words, where the gate drops it and promotes nothing.
-  The gate is already at its weakest setting, one edge, so there is no number to
-  retune.
+Three standing rules came out of the round, each one general rather than about
+its own knob:
 
-  **Do not re-file it as head_pos and reach for a demotion.** That signature is a
-  day-wide *win* with a category loss. This one loses on both, and day-wide it
-  loses precisely where the cap binds, which is the only place a demotion still
-  acts: arithmetically a demotion scores **62.88**, still under the shipped
-  63.70. The general form is worth more than the case — **a demotion can only
-  rescue a mechanism whose losses sit in the non-binding cells.**
-
-  **And the harness is the wrong instrument for the question that was actually
-  asked, which is the finding to keep.** `analysis.word_labels` answers "is this
-  a word worth showing". The gate was asked for on a different question — "can a
-  reader do anything with a word no line touches" — and no label set can price
-  that. It is the same mismatch that stops the harness pricing the display cap.
-  It costs about **1.5×** (one sitting, 2026-08-03, all-categories view: `0018`
-  1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be read against
-  each other and against nothing else).
-
-  **The gate is ON, since migration `0028`, and none of the above is retracted.**
-  `0026` shipped it off because a measurement is what this project moves a
-  threshold on; `0028` turns it on because the screen was then looked at and
-  showed what the labels structurally cannot. Two views of 2026-08-03 one flip
-  apart: the gate removes 서울, 광주, 인천, 포항, 울산 and 강원 and keeps 부산,
-  대구, 경남 and 충청 — and **the four it keeps are exactly the four that sit
-  inside a story** (부산 with 노무현·김용민·돌려차기, 대구 with 경산·경북, 경남
-  with 양산, 충청 with 김민석), while the six it drops touched nothing or touched
-  only each other.
-
-  **The decisive difference is in the event list, not on the canvas.** With the
-  gate off, that day's **fourth-largest event is "서울 · 광주" at 66 headlines** —
-  two place names joined to each other and to nothing else, so nothing on the page
-  can say what those 66 articles are about. With the gate on the row is gone and
-  "미국 · 중국 · 기아 · 정의선 외 2" at 57 headlines takes its place. That one can
-  be read. The F1 loss is real and is the price of removing it: 서울 and 광주 are
-  each independently worth showing, which is precisely why the labels defend them.
-
-  So the standing lesson is not "the gate was wrong" or "the harness was wrong" —
-  it is that **the two were answering different questions, and the file records
-  which one each can settle.** Anything that changes what a word *means on the
-  page* rather than whether it deserves a place is outside what
-  `analysis.word_labels` can price, and has to be decided by looking.
-
-  `word_overrides` mode 'place' is now load-bearing rather than a labelled fact
-  in reserve: the 45 rows are the gate's whole input.
-
+- **The place gate's premise failed, not its threshold.** "A place with no line
+  to a non-place is backdrop" is false: a place can be the story and hold no
+  *drawn* line because its partner sits below the cap. The gate is already at its
+  weakest setting, one edge, so there was never a number to retune. **Do not
+  re-file it as head_pos and reach for a demotion** — that signature is a
+  day-wide *win* with a category loss, this one loses on both, and arithmetically
+  a demotion scores 62.88, still under the shipped 63.70. The general form is
+  worth more than the case: **a demotion can only rescue a mechanism whose losses
+  sit in the non-binding cells.**
 - **`10_sieve_eval.sql` structurally cannot price the render cap.** F1 rises
-  monotonically with it — **63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 /
-  130** — because the recall denominator is fixed at every labelled-good word
-  with `df >= 3` while the cap *is* the screen size. Widening always buys recall,
-  and the optimum sits at the edge of any sweep; the limit of this metric is
-  "draw every word that qualifies". **Precision is what reads a fixed screen
-  honestly and it decides: 93.53 at 70 against 85.40 at 130.** The marginal bands
-  say it more sharply — over the three days where the cap binds the top 70 are
-  201 good / 9 bad (95.7%), while ranks 71–85 are 60.0%, 86–100 80.0%, 101–130
-  66.7% and 71–end **68.8%**. They are **not even monotone**, so there is no rank
-  at which the screen cleanly stops being worth widening. Bad words on the canvas
-  go 3 → 16 on 2026-07-31 and 2 → 23 on 2026-08-03. **The tell is the shape: a
-  monotone column with no interior turn.** Any future knob whose sweep looks like
-  that should be suspected of the same defect before its best cell is believed.
-  A cap change is a canvas change and needs `scripts/layout/` re-run as well,
-  which nothing here did.
-
-  A swept cap is also the one thing that reaches ranks the worklist has never
-  looked at, so `20_unlabeled.sql` joins **each configuration's own
-  `render_cap`** rather than a literal 70 — otherwise it would report 0 while
-  being structurally unable to see the words the sweep promoted. It was checked
-  the round it mattered: 144 words became newly reachable at ranks 71–130 and
-  every one of them already carried a label, so the silence was real rather than
-  rule 4's blind spot.
-
+  monotonically with it — 63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 / 130 —
+  because the recall denominator is fixed at every labelled-good word with
+  `df >= 3` while the cap *is* the screen size, so the optimum sits at the edge of
+  any sweep and the limit of the metric is "draw every word that qualifies".
+  Precision reads a fixed screen honestly and decides: **93.53 at 70 against 85.40
+  at 130.** **The tell is the shape: a monotone column with no interior turn.**
+  Any future knob whose sweep looks like that should be suspected of the same
+  defect before its best cell is believed. A cap change is also a canvas change
+  and needs `scripts/layout/` re-run. `20_unlabeled.sql` joins **each
+  configuration's own `render_cap`** rather than a literal 70, or a sweep would
+  promote words it is structurally unable to see.
 - **α is not measurable on this day set, which is not the same as α costing
-  something.** `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α` — at α = 1 the count
-  under equal collection, at α = 0 the count itself, so the shipped configuration
-  enters its own sweep as the control. Measured: **63.70 / 93.53 at 0 against
-  63.20 / 92.83 at every one of .25, .50, .75 and 1.00**, and out of band 62.55 /
-  62.38 / 61.98 at 1.50 / 2.00 / 4.00, with rule 5 biting past 2.00. But **the
-  only day it loses on is 2026-07-31, whose six sections collected
-  150/149/150/150/150/150 in a single capped run, so its balance factors sit
-  within 0.6% of 1** — there is nothing there to correct and all α does is break
-  a `df` tie in the third decimal. The two days with real imbalance (08-01
-  0.742–1.869, 08-03 0.808–1.201) are label-neutral at every α, and 08-02 draws
-  69 words against a cap of 70 so no substitution is available at all. **The day
-  the mechanism was built for is 2026-08-04 and it cannot be an evaluation day
-  while it is still collecting** — that is rule 4's second trigger, and the day
-  moved between two readings nine hours apart, from factors 0.741–1.790 and 130
-  qualifying words at 11:00 KST to 0.756–1.563 and **240** at 20:24. Re-measure
-  when it settles and can be labelled.
+  something.** `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α`, so the shipped
+  configuration (α = 0) enters its own sweep as the control. The only day it
+  loses on collected 150/149/150/150/150/150 in a single capped run, so its
+  balance factors sit within 0.6% of 1 and there is nothing there to correct.
+  **The day the mechanism was built for is 2026-08-04 and it could not be an
+  evaluation day while it was still collecting** — rule 4's second trigger. Two
+  properties are worth carrying: **the denominator is the word's own section
+  distribution, not its top category** (a single denominator would charge 폭염 the
+  largest divisor and put the day's biggest story at risk), and **α is the
+  identity inside a category tab, at every α, by construction** — so
+  `11_category_eval.sql` is the round's **control**, and its 78.58 moving would
+  mean α had reached a scoped count where it should have been day-wide.
 
-  **The denominator is the word's own section distribution, not its top
-  category**, and that is what keeps rule 5 safe: 폭염 spans sections and its top
-  category is society, the largest, so a single denominator would charge it the
-  largest divisor and put the day's biggest story at risk. A spread word gets a
-  blend, and 폭염 in fact *gains* (2026-08-03, 121 → 125.6 at α = 1) — the table
-  is in `scripts/analysis/README.md`'s round-fourteen α section, with the ranks
-  at α = 0 and α = 1 for all four eval days.
+**Where the harness's own numbers may and may not be read.** Two rules, both
+already paid for:
 
-  **α is the identity inside a category tab, at every α, by construction** —
-  every drawn row in section *c* carries the same factor, so `count_balanced` is
-  `count` times a constant. Measured as well as argued: with α flipped to 1 on
-  the live database **all 30 tab hashes stayed byte-identical and only the 5
-  all-view hashes moved**. `11_category_eval.sql` therefore needs no α variant
-  and is the round's **control** — its 78.58 moving would mean α had reached a
-  scoped count where it should have been day-wide, or the reverse.
+- **F1 is not comparable across days of different thickness.** Recall is the
+  drawn good words over every good word with `df >= 3`, so a fat day has a much
+  larger denominator while the screen still holds 70 — 2026-08-03's good pool is
+  129, against recall of 36.4%. A thick day therefore scores *worse* on F1 while
+  showing strictly more of the news.
+- **No figure here is comparable to one quoted elsewhere or to an earlier figure
+  in this file's history.** The label set has been extended eight times and each
+  extension moves every percentage. **Compare configurations against each other
+  inside one run, never against a number someone wrote down.**
 
-**Both wiring migrations were checked rather than asserted**: `keyword_graph` is
-byte-identical to what it drew before on all 35 cells (five collected days × the
-all view and six tabs) after `0024`, and again after `0025`. Only the edge
-*ordering* moved, on 18 of the 35, and running both orders through the
-frontend's own code moved the Louvain partition on **0** cells, merged events on
-**0**, and drawn geometry on 7 — six of them sub-pixel. The one real move is
-2026-08-02's all view, where one region rearranges internally and 전남 travels
-137.6 px with the same partition and the same events; the cause is `forceLink`
-applying its velocity updates in link order, not the tie rule.
-
-Measured precision of the top 70 words, four days, as of 2026-08-04 — **the
-first run on an archive analysed end to end by one analyser**:
-**75.7 / 70.0 / 70.0 / 68.6**, mean F1 55.45. The drawn set is 199 good and 81
-bad. On the 24 category cells the shipped configuration means **57.20**.
-
-**Those four numbers are the screen *before* migrations `0018`–`0022`, and they
-are kept because the paragraphs below are about that run.** The shipped sieve
-now scores per-day precision **95.7 / 94.3 / 87.0 / 97.1** and F1
-**67.3 / 66.3 / 77.9 / 43.3** on the same four days — mean 93.53 and 63.70,
-78.58 on the tabs. Note that 2026-08-02 draws **69** words and not 70: at
-`min_word_len` 4 only 69 qualify on the archive's thinnest day, so its cap does
-not bind and it is not word-count-comparable with anything above.
-
-**Every one of those numbers is lower than the ones this file used to carry
-(85.7 / 84.3 / 70.0 / 67.1, mean F1 63.2, 215 good and 65 bad), and the drop is
-mostly not a quality drop.** The archive was re-analysed when ETRI was replaced
-by garu-ko (`scripts/reanalyze/`), which put words on screen that had never been
-near it, so `20_unlabeled.sql` returned 38 and `21_unlabeled_category.sql`
-returned 232 — the sixth and largest firing of rule 4. Twenty-four of the 38 were
-labelled bad, and a newly labelled bad word lowers precision the moment it is
-labelled, whatever the analyser did.
-
-**The per-day split is what shows this rather than argues it.** 2026-08-03 drew
-no newly labelled word at all and its precision *rose*, 67.1 to 68.6, while
-07-31 and 08-01 drew 8 and 7 of them and fell hardest. The days that moved are
-the days whose screens changed.
-
-What the run does establish, because it is internal to itself: **the shipped
-configuration still wins.** It beats length-only on all four days day-wide
-(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
-floor, and on the tabs it leads at 57.20 against 48.52 for the pre-`0004` scoped
-count — so migration `0004`'s finding survives the analyser change intact.
-
-**Do not read the 2026-08-03 column against the one this file carried before
-that** (71.4, mean F1 67.3). That move was the collector going to six runs and
-the day going from 900 headlines to 2,197 — not the sieve, and not the analyser.
-
-**F1 is not comparable across days of different thickness, and this is the
-mechanism.** Recall is the drawn good words over every good word with `df >= 3`,
-so a fat day has a much larger denominator while the screen still holds 70:
-08-03's good pool is 129 against recall of 36.4%. A thick day therefore scores
-*worse* on F1 while showing strictly more of the news. Judge configurations
-against each other inside one run — the rule this file already states for label
-sets applies to collection depth too, and this is the first time it has bitten.
-
-Those figures come from
-`analysis.word_labels` and are **not comparable to any percentage quoted
-elsewhere, or to any earlier figure in this file's history** — the label set has
-been extended eight times and each extension moves them, most recently by
-`14_labels_after_reanalysis.sql` (38 words) and
-`15_labels_category_after_reanalysis.sql` (234, the largest pass there has been).
-Compare configurations against each other inside one run, never against a number
-someone wrote down.
-
-Two tells came out of that pass and both are reusable, because both name a kind
-of word rather than a word:
+Two tells about labelling came out of the largest of those extensions, and both
+are reusable because both name a *kind* of word:
 
 - **A section tag is not a subject.** 북리뷰, 주末머니, Y녹취록, 뉴시스Pic,
   배틀라인, 이슈톺, 손바닥, 종합2 all reached the screen and all are the
   newspaper's own furniture — every headline carrying one *ends* in it, in
-  brackets. The signature is `spec` 1.00 together with a shared bracketed
-  suffix, and it is worth checking before labelling a confident-looking 1.00.
-  Y녹취록 was written down as good first, on the reading that it named one
-  recording in one case; it names a standing column at YTN.
-- **The operational form of the good/bad line is a question**, and it settled
-  the hard cases where the prose definition did not: *would this word appear in
-  a randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would,
-  every week, so they are bad however particular the story that produced them.
-  문자통보, 미장착 and 보릿돌교 would not.
+  brackets. The signature is `spec` 1.00 together with a shared bracketed suffix,
+  and it is worth checking before labelling a confident-looking 1.00.
+- **The operational form of the good/bad line is a question**, and it settles the
+  hard cases where the prose definition does not: *would this word appear in a
+  randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would, every
+  week, so they are bad however particular the story that produced them.
+  문자통보, 미장착 and 보릿돌교 would not. Measured three times: moving a handful
+  of words across the line changes the percentages by one to four points and has
+  **never once changed which configuration won** — see the README's Labels
+  section for the three sittings.
 
-That claim has now been measured three times. Reversing 윤리위, 반도체 and
-李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
-63.1 and 08-03 from 52.6 to 56.1; reversing **보완수사권** to good on 2026-08-03
-moved that day from 65.7 to 67.1 precision and 46.5 to 47.2 F1 — and **neither
-moved anything in the ranking**: the same configuration won by the same margin
-each time. 보완수사권 is the sharpest version of the question so far, because it
-was labelled bad on the reasoning that a power is not an event, and 거부권 sits
-two entries away labelled good on the reasoning that it is the instrument one
-dated fight is about. Both are true of both words; the line was drawn between
-them and could not be stated, so it moved. 수사권 and 보완수사 stay bad, and the
-distinction that survives is not specificity — it is that those name the power
-in general, in any week, while 보완수사권 names the one a dated bill removed.
-Where the good-word line sits changes the
-percentages and not the verdict, which this file has always claimed and had not
-until now measured.
-
-`08_labels_after_dedup.sql` is itself the second half of rule 4 firing:
+`08_labels_after_dedup.sql` is itself rule 4 firing from the other side:
 `02_sieve_configs.sql` was untouched, but migrations `0007` and `0008` moved the
-data underneath it and `20_unlabeled.sql` returned eight words that had never
-been near the cut before. **Run it before the harness, every time, whatever
-changed.**
-
+data underneath it and `20_unlabeled.sql` returned eight words that had never been
+near the cut before. **Run it before the harness, every time, whatever changed.**
 ### Why the graph is cached, and what that costs when you retune
 
 **`keyword_graph` was failing for concurrent readers, and the failure was a

@@ -561,6 +561,86 @@ stay as columns, `analysis.day_edges` stays as a table, and re-activating a row
 is one `UPDATE`. The α arm in particular is expected to be re-run once
 2026-08-04 stops collecting and can be labelled.
 
+### Migration `0028` turned the place gate on anyway — the round's sharpest finding
+
+The heading above says "none shipped" and it was true for one release cycle.
+Migration `0028` turns the place gate **on**. **None of the measurement above is
+retracted**: the gate still costs F1 on both surfaces and every word it removes
+is still labelled good. What overruled it was looking at the screen.
+
+`0026` shipped the gate off because a measurement is what this project moves a
+threshold on. `0028` turns it on because the screen was then looked at and showed
+what the labels structurally cannot. Two views of 2026-08-03 one flip apart: the
+gate removes 서울, 광주, 인천, 포항, 울산 and 강원 and keeps 부산, 대구, 경남 and
+충청 — and **the four it keeps are exactly the four that sit inside a story**
+(부산 with 노무현·김용민·돌려차기, 대구 with 경산·경북, 경남 with 양산, 충청 with
+김민석), while the six it drops touched nothing or touched only each other.
+
+**The decisive difference is in the event list, not on the canvas.** With the
+gate off, that day's **fourth-largest event is "서울 · 광주" at 66 headlines** —
+two place names joined to each other and to nothing else, so nothing on the page
+can say what those 66 articles are about. With the gate on the row is gone and
+"미국 · 중국 · 기아 · 정의선 외 2" at 57 headlines takes its place. That one can be
+read. The F1 loss is real and is the price of removing it: 서울 and 광주 are each
+independently worth showing, which is precisely why the labels defend them.
+
+So the standing lesson is not "the gate was wrong" or "the harness was wrong" —
+it is that **the two were answering different questions, and this file records
+which one each can settle.** `analysis.word_labels` answers "is this a word worth
+showing". Anything that changes what a word *means on the page* rather than
+whether it deserves a place is outside what any label set can price, and has to
+be decided by looking. It is the same mismatch that stops the harness pricing the
+render cap, one section above.
+
+`word_overrides` mode 'place' is now load-bearing rather than a labelled fact in
+reserve: the 45 rows are the gate's whole input.
+
+The gate costs about **1.5×** on the RPC (one sitting, 2026-08-03, all-categories
+view: `0018` 1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be
+read against each other and against nothing else). Since migration `0032` the
+graph is cached, so a reader pays that on a cache miss rather than per request.
+
+### The two wiring migrations were checked rather than asserted
+
+`0024` (the plpgsql fixed-point restructure) and `0025` (`df_balanced` and its α
+parameter) both claim to change nothing while α is 0 and the gate is off, and
+both were checked: `keyword_graph` is byte-identical to what it drew before on
+all **35** cells (five collected days × the all view and six tabs) after `0024`,
+and again after `0025`.
+
+Only the edge *ordering* moved, on 18 of the 35 — `0024` added `, a, b` to the
+edge sort, and three pairs on 2026-07-31 carry `cooc` 3 and `npmi`
+0.80097396756174372838 equal to the last digit, so which came first had been
+decided by the query plan. Running both orders through the frontend's own code
+moved the Louvain partition on **0** cells, merged events on **0**, and drawn
+geometry on 7 — six of them sub-pixel. The one real move is 2026-08-02's all
+view, where one region rearranges internally and 전남 travels 137.6 px with the
+same partition and the same events; the cause is `forceLink` applying its
+velocity updates in link order, not the tie rule.
+
+### The four-day numbers before migrations `0018`–`0022`
+
+Kept because several paragraphs in this file are about that run. Top-70 precision
+over the four eval days as of 2026-08-04, the first run on an archive analysed
+end to end by one analyser: **75.7 / 70.0 / 70.0 / 68.6**, mean F1 **55.45**, the
+drawn set 199 good and 81 bad, and the 24 category cells meaning **57.20**.
+
+The shipped sieve now scores per-day precision **95.7 / 94.3 / 87.0 / 97.1** and
+F1 **67.3 / 66.3 / 77.9 / 43.3** on those same four days — mean 93.53 and 63.70,
+78.58 on the tabs. Note 2026-08-02 draws **69** words and not 70: at
+`min_word_len` 4 only 69 qualify on the archive's thinnest day, so its cap does
+not bind and it is not word-count-comparable with anything above.
+
+What that pre-`0018` run establishes, because it is internal to itself: the
+shipped configuration beat length-only on all four days day-wide
+(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
+floor, and on the tabs led at 57.20 against 48.52 for the pre-`0004` scoped
+count — so migration `0004`'s finding survived the analyser change intact.
+
+**Do not read the 2026-08-03 column against the one that preceded it** (71.4,
+mean F1 67.3). That move was the collector going to six runs a day and the day
+going from 900 headlines to 2,197 — not the sieve, and not the analyser.
+
 ## Labels
 
 891 words, covering everything drawn by every **active** configuration in
