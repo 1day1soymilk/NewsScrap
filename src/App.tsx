@@ -477,11 +477,16 @@ function App() {
           than one more control in a row of them. */}
       <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <h1 className="text-sm font-medium tracking-[0.2em] text-ink-muted uppercase">
-            뉴스 스크랩
-          </h1>
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-4">
-            <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
+          {/* lg 아래에서는 워드마크와 검색창이 한 줄을 나눠 쓴다 — 이 래퍼가 없어서
+              검색창이 CategoryTabs 아래 제 줄을 새로 차지하면 헤더가 세 줄이 되고,
+              index.css의 --header-height(lg 아래 6.5rem)는 두 줄만 계산해 둔
+              값이라 더 이상 실제 높이와 맞지 않는다 — 패널이 검색창 위에 겹친다.
+              lg부터는 `contents`로 이 래퍼가 사라져 h1과 검색창이 CategoryTabs와
+              나란히 한 줄이 된다. */}
+          <div className="flex items-center justify-between gap-3 lg:contents">
+            <h1 className="text-sm font-medium tracking-[0.2em] text-ink-muted uppercase">
+              뉴스 스크랩
+            </h1>
             <WordSearch
               onSelect={(word) => {
                 // 단어 선택과 사건 선택은 상호배제다 — 캔버스에서 무엇이 살아 있는지
@@ -491,6 +496,7 @@ function App() {
               }}
             />
           </div>
+          <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
         </div>
       </header>
 

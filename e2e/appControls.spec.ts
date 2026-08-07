@@ -182,3 +182,65 @@ test('a searched word that was drawn does not carry the note', async ({ page }) 
   await expect(panel.getByText(/2일 중 2일/)).toBeVisible()
   await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toHaveCount(0)
 })
+
+// wordOffCanvas in App.tsx is held false while graph.nodes is still empty —
+// deliberately, so a freshly opened ?word= link is not told the word is
+// missing before the graph has had a chance to arrive and say otherwise. On
+// an empty array, `.some(...)` is false and `!false` is true, so without that
+// guard the note would flash on immediately, correctly or not, on every
+// load. This delays keyword_graph to make that window observable.
+test('does not call a word missing before the graph has had a chance to load', async ({
+  page,
+}) => {
+  await mockSupabase(page, { delayOn: { endpoint: 'keyword_graph', ms: 800 } })
+  await page.goto(`/?word=${encodeURIComponent('유상증자')}`)
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  // The graph has not arrived yet — nothing yet says the word is missing.
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toHaveCount(0)
+
+  // DEFAULT_GRAPH arrives without 유상증자, so the note appears once it has.
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toBeVisible()
+})
+
+// 768px sits in the sm-to-lg band where the toolbar wraps to two rows — the
+// exact band index.css's --header-height media query exists for, and the one
+// the suite's pinned 1280x900 project viewport never reaches. WordSearch was
+// mounted nested inside CategoryTabs' own lg:flex-row wrapper, which folded
+// the header to three rows in this band and left the token (tuned for two)
+// too short, so HeadlinePanel's `sm:top-(--header-height)` started the panel
+// on top of the search row instead of below it.
+test('keeps the header at two rows below lg, and the panel starts exactly beneath it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 768, height: 900 })
+  await mockSupabase(page)
+  await page.goto('/')
+
+  const header = page.locator('header')
+  await expect(header).toBeVisible()
+  const headerBox = (await header.boundingBox())!
+
+  // The value HeadlinePanel's `sm:top-(--header-height)` actually resolves to
+  // at this viewport, read off a probe element rather than parsed out of the
+  // raw custom-property text (which can be an unresolved token like "6.5rem").
+  const tokenPx = await page.evaluate(() => {
+    const probe = document.createElement('div')
+    probe.style.height = 'var(--header-height)'
+    document.body.appendChild(probe)
+    const px = parseFloat(getComputedStyle(probe).height)
+    probe.remove()
+    return px
+  })
+
+  expect(Math.abs(headerBox.height - tokenPx)).toBeLessThanOrEqual(1)
+
+  await page.getByRole('searchbox').fill('유상증자')
+  await page.getByRole('option', { name: /유상증자/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  const panelBox = (await panel.boundingBox())!
+  expect(Math.abs(panelBox.y - (headerBox.y + headerBox.height))).toBeLessThanOrEqual(1)
+})

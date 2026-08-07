@@ -79,9 +79,24 @@
      otherwise agree only by coincidence: the toolbar wraps to two rows below
      lg, and a panel pinned to a single hard-coded offset covers the tab row in
      exactly the sm-to-lg range. The breakpoint below must stay equal to the
-     toolbar's lg:flex-row in src/App.tsx. */
+     toolbar's lg:flex-row in src/App.tsx.
+
+     Below lg the two rows are [h1 · WordSearch] and [CategoryTabs] — the
+     search box shares the wordmark's row rather than getting a row of its
+     own, which is what keeps this at two rows rather than three. 5.8125rem
+     (93px) is a measurement, not a round number chosen for looks: py-3
+     (12px top + 12px bottom) + row 1 (34px, the taller of h1's 20px and the
+     search input's 34px) + gap-2 (8px) + row 2 (26px, CategoryTabs' single
+     line at this width) = 92px, plus the same 1px the assertion below
+     tolerates for subpixel layout. Measured with Playwright at 768x900 —
+     e2e/appControls.spec.ts's "keeps the header at two rows below lg" test
+     — after every category tab and the search box had rendered. If the
+     search box, the wordmark, or CategoryTabs' row height changes, this
+     number goes stale exactly the way the old 6.5rem did the day WordSearch
+     was added to a row of its own: re-measure with that test rather than
+     recomputing by hand. */
   :root {
-    --header-height: 6.5rem;
+    --header-height: 5.8125rem;
   }
 
   @media (width >= 64rem) {
