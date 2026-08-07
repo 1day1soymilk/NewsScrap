@@ -110,17 +110,34 @@ describe('WordHistory', () => {
 
   // 강조된 점은 아래 목록에서 펼쳐 놓은 날이다. 그 둘이 어긋나면 선과 목록이 서로
   // 다른 날을 가리키면서도 화면에서는 멀쩡해 보인다.
-  it('emphasises the day the list has open rather than always the last', () => {
+  it('emphasises the days the list has open', () => {
     const { container } = render(
-      <WordHistory points={points([0.1, 0.2, 0.3])} activeDate="2026-08-02" />,
+      <WordHistory points={points([0.1, 0.2, 0.3])} openDates={new Set(['2026-08-02'])} />,
     )
     const radii = [...container.querySelectorAll('circle')].map((c) => c.getAttribute('r'))
     expect(radii).toEqual(['1.75', '3', '1.75'])
   })
 
-  it('falls back to the last day when nothing is open', () => {
+  // 목록이 여러 날을 동시에 열 수 있으므로 선도 그렇다. 하나만 강조하면 선이 목록보다
+  // 적게 말한다.
+  it('emphasises more than one at a time', () => {
+    const { container } = render(
+      <WordHistory
+        points={points([0.1, 0.2, 0.3])}
+        openDates={new Set(['2026-08-01', '2026-08-03'])}
+      />,
+    )
+    const radii = [...container.querySelectorAll('circle')].map((c) => c.getAttribute('r'))
+    expect(radii).toEqual(['3', '1.75', '3'])
+  })
+
+  // **기본은 아무 점도 강조하지 않는 것이다.** 예전 기본값은 마지막 점이었는데, 그것은
+  // "화면의 날짜가 곧 펼쳐진 날"이라는 전제에서 나온 값이고 목록이 전부 닫힌 채로
+  // 열리게 되면서 그 전제가 사라졌다. 아무것도 안 열렸는데 한 점이 굵으면 그 날이
+  // 열려 있다고 거짓말하는 것이 된다.
+  it('emphasises nothing when nothing is open', () => {
     const { container } = render(<WordHistory points={points([0.1, 0.2, 0.3])} />)
     const radii = [...container.querySelectorAll('circle')].map((c) => c.getAttribute('r'))
-    expect(radii).toEqual(['1.75', '1.75', '3'])
+    expect(radii).toEqual(['1.75', '1.75', '1.75'])
   })
 })

@@ -224,12 +224,10 @@ can itself be the partner that rescues one. A recursive CTE cannot express it:
 Postgres forbids window functions in the recursive term and the ranking is
 `row_number()`. Hence a loop. **Termination is by monotonicity** — `banned` only
 grows and can only hold places — and the iteration guard is derived from the
-place count rather than hardcoded: it is `count(*) + 2` over the `place` rows of
-`word_overrides`, which at the live count of 45 places is **47**, one pass per
-place plus the confirming pass that finds nothing. A hardcoded 50 would have
-been a margin of five over that count and would go stale the moment a place is
-added. When the guard fires it `raise`s, since a silently wrong graph is worse
-than an error.
+place count rather than hardcoded: `count(*) + 2` over the `place` rows of
+`word_overrides`, which at the live count of 45 places is **47**. A hardcoded 50
+would go stale the moment a place is added. When the guard fires it `raise`s,
+since a silently wrong graph is worse than an error.
 
 **The one copy of each decision survives the loop, split by what it depends
 on.** `keyword_graph_candidates(p_date, p_category)` is expensive and
@@ -240,29 +238,26 @@ head_pos demotion, the cap and the `faded` / `is_place` flags, the only place
 that decides **which of them are drawn and in what order**.
 `keyword_graph_pick_edges(p_date, p_category, p_words)` is the only place that
 decides **what an edge is**. `keyword_graph_nodes` / `keyword_graph_edges`
-survive as thin wrappers for `scripts/analysis/`. The first version of this had
-one node helper and one edge helper taking `(date, category, banned)` and the
-loop calling them: correct, and **13 seconds with the gate on** against the
-1,417 ms that same profiling run measured for `0018` — a *pre-restructure*
-figure, which is why it appears here and nowhere near the shipped triple below —
-because `keyword_signals` (951 ms) was being paid for eight times.
-Nothing was made faster; something expensive was stopped from being asked eight
-times — the same finding the Edge Function records from the other side, one layer
-up.
+survive as thin wrappers for `scripts/analysis/`. The first version had one node
+helper and one edge helper taking `(date, category, banned)` and the loop calling
+them: correct, and **13 seconds with the gate on**, because `keyword_signals` was
+being paid for eight times. Nothing was made faster; something expensive was
+stopped from being asked eight times — the same finding the Edge Function records
+from the other side, one layer up.
 
 **Edge ordering gained `, a, b` and that was a latent bug rather than a
 refactor's cost.** `order by npmi desc, cooc desc` is not a total order — three
 pairs on 2026-07-31 carry `cooc` 3 and `npmi` 0.80097396756174372838, equal to
-the last digit — so which came first was decided by the query plan, and this file
-already claimed the picture is reproducible because ties are broken server side.
-That was true of the nodes and quietly untrue of the edges.
+the last digit — so which came first was decided by the query plan, while this
+file already claimed the picture is reproducible because ties are broken server
+side. That was true of the nodes and quietly untrue of the edges.
 
 `keyword_signals(p_date, p_alpha)` computes the per-word signals and is called by
 both the RPC and `scripts/analysis/`. **Do not reimplement those formulas** —
-tuning that measures a hand-copied second copy is measuring the wrong thing, the
-same hazard as the rule above. It gained `df_balanced` and its α parameter with
-migration `0025`; α defaults to `scoring_weights.category_balance_alpha`, so the
-five existing callers were unchanged.
+tuning that measures a hand-copied second copy is measuring the wrong thing. It
+gained `df_balanced` and its α parameter with migration `0025`; α defaults to
+`scoring_weights.category_balance_alpha`, so the five existing callers were
+unchanged.
 
 `render_cap` is **70, and it is a display cap rather than a sieve threshold** —
 it does not decide which words qualify, only how many of the ranked survivors are
@@ -281,173 +276,118 @@ Ranking is by frequency, and **`demote_head_pos` is the single exception**, adde
 by migration `0015`. A word that trails its headlines sorts below every word that
 leads one, so it falls out only where the render cap is binding. Size is
 untouched and stays proportional to headline count; what moves is which words
-fill the last places under the cap. Why it is a demotion rather than a sixth
-sieve clause is measured, and is the entry below.
+fill the last places under the cap.
 
 Thresholds live in `scoring_weights` and the dictionary in `word_overrides`
 (`exclude` / `demote` / `allow` / `place`, the last added by migration `0023`),
-so retuning needs no redeploy. **Never change a
-threshold without running `scripts/analysis/10_sieve_eval.sql` first** (or
-`11_category_eval.sql` when the question is about a category tab) — its README
-records five ways this has already gone wrong. Note that the labels go stale when
-the *data* moves and not only when the sweep widens: collecting a date twice put
-13 unlabelled words on screen and silently invalidated a run. Two findings that cost real
-time and should not be rediscovered:
+so retuning needs no redeploy. **Never change a threshold without running
+`scripts/analysis/10_sieve_eval.sql` first** (or `11_category_eval.sql` when the
+question is about a category tab) — its README records five ways this has already
+gone wrong. And **a migration that changes `scoring_weights` has to change the
+harness's shipped config row in the same breath**: migration `0028` turned the
+place gate on and config 200 kept saying off, so for a release cycle the harness
+scored a screen the app does not draw. Round fifteen's config 300 is the
+correction. Note that the labels go stale when the *data* moves and not only when
+the sweep widens: collecting a date twice put 13 unlabelled words on screen and
+silently invalidated a run.
 
-- **A word is rescued for being a proper noun** (`min_proper` 0.50, migration
-  `0018`), and this is the largest single measured gain the sieve has had:
-  **+2.9 mean F1 and +3.9 precision day-wide, +11.4 mean F1 across the 24
-  category cells**, winning on all four days and never dropping the day's
-  biggest story. `proper` is the share of a word's rows the analyser tagged NNP.
+#### The five changes the in-process analyser forced, and what generalises
 
-  **What it buys is the price of `min_word_len`, which had only ever been priced
-  in one direction.** The length clause was measured as the sieve — it admits
-  most of what is drawn and its precision is the whole sieve's — but nobody had
-  costed what it *rejects*: a two-character word could not reach the canvas at
-  all, and in the archive's whole history exactly two ever had, 폭염 and 양산,
-  both by hand. 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
-  애플, 구글 and 기아 were all cut with the noise. 13 to 21 words a day come in
-  through this clause now.
+Migrations `0018`–`0022` are one sequence: one new signal, two thresholds it
+invalidated, a dictionary re-derived against the screen it produced, and then the
+length bar it changed the job of. **Day-wide mean F1 49.48 → 63.70 and precision
+71.07 → 93.53; the 24 category cells 55.07 → 78.58.** The sweeps are rounds nine
+to thirteen of `scripts/analysis/README.md`. What has to survive here is what
+would be re-derived without it:
 
-  **Length was always a proxy, and the analyser answers the real question.**
-  garu tags 이란 NNP and 감찰 NNG — and 감찰, 윤리, 청문, 초등 and 순회 are
-  precisely the five words named just below as the reason the specificity clause
-  had to be turned off, every one scoring a perfect 1.00 on spec. The
-  discrimination `spec` could not make is in the tagger's output.
+- **A word is rescued for being a proper noun** (`min_proper` 0.50, `0018`),
+  the largest single measured gain the sieve has had. `proper` is the share of a
+  word's rows the analyser tagged NNP. **What it buys is the price of
+  `min_word_len`, which had only ever been priced in one direction** — the length
+  clause had been measured on what it *admits*, never on what it rejects, and it
+  was rejecting 이란, 미국, 중국, 일본, 북한, 한국, 서울, 부산, 대구, 인천, 삼성,
+  애플, 구글 and 기아 along with the noise. **Length was always a proxy and the
+  analyser answers the real question**: garu tags 이란 NNP and 감찰 NNG, and
+  감찰·윤리·청문·초등·순회 are exactly the five words that forced the specificity
+  clause off, every one scoring a perfect 1.00 on spec. **`min_word_len 2` is the
+  control and it is why this is the tagger's win, not length's**: admitting every
+  two-character word scores 31.98 against the shipped 49.48. The cost was accepted
+  on the numbers — 닉스 (from 삼전닉스) and 어스 (from 구글 어스) come in as
+  fragments, and 유럽·남미·중동·호남 as regions.
+- **It has the opposite signature to `head_pos`, and that is the general lesson.**
+  head_pos won day-wide and lost 8 of 24 category cells while winning none,
+  because it is a *cut* and needs the cap to be binding to substitute. This is a
+  *rescue*: it only ever adds words, a tab has the room, so the tabs gain more
+  than the day does. **A day-wide win with a category loss means the mechanism
+  needs the cap to be binding; a win on both, larger on the tabs, means it does
+  not.**
+- **`min_standalone` 0.10 → 0.50 (`0019`) and `demote_head_pos` 0.70 → 0.60
+  (`0020`) both moved because the rescue invalidated them**, and by the third one
+  the pattern was the finding: **a measurement is only valid under the
+  circumstance it was taken in, and a clause that admits a *new kind* of word
+  invalidates every threshold tuned when that kind could not appear.** The three
+  good words `min_standalone` costs are the **조사 blind spot** — Korean attaches
+  a particle with no space, so 해남에 scores as a fragment exactly as 도체 inside
+  반도체 does. **Do not build a particle-aware variant**: it would rescue three
+  bad words and carries no measurement the harness can price.
+- **`demote_head_pos` 0.50 scores well and is rejected outright** because it sinks
+  폭염 off 2026-07-31's screen. 0.60 is taken over 0.65's marginally better F1
+  because it is mid-plateau and a full 0.10 clear of that cliff: **rule 5 is not a
+  tie-break to be spent.**
+- **The dictionary was re-derived against the new screen** (`0021`, 36
+  exclusions) and it is the largest and cheapest of the five, with no threshold
+  moved and no signal added. **The eight left in are the point**: 부동산, 아파트,
+  에너지, 스마트폰, 무인기, 요양병원, 재선거 and 개정안 can each head a real
+  story, and excluding them would be using the dictionary to paper over where the
+  good-word line sits — **a labelling question, not a dictionary one.**
+- **`min_word_len` rose 3 → 4** (`0022`), where the sequence closes: **the bar was
+  doing two jobs**, keeping fragments out and keeping names in, and the rescue
+  took the second away, so it can now catch the three-character common nouns it
+  had always been set too low to reach. **5 reaches 97% precision and is rejected
+  on `shown`** — at 65.8 of 70 places it cannot fill the canvas.
 
-  **`min_word_len 2` is the control and it is why this is the tagger's win, not
-  length's**: admitting every two-character word scores mean F1 **31.98** against
-  the shipped sieve's 49.48 — far worse, not better. Of the 44 words a blanket
-  `min_word_len 2` promotes, 8 are good; of the 36 the tagger promotes on the
-  tabs, **31** are.
-
-  **It has the opposite signature to `head_pos`, and that is the general
-  lesson.** head_pos won day-wide and lost 8 of 24 category cells while winning
-  none, because it is a *cut* and a tab's render cap never binds, so there was
-  nothing to promote into the hole. This is a *rescue*: it only ever adds words,
-  a tab has the room, and so the tabs gain more than the day does. **A day-wide
-  win with a category loss means the mechanism needs the cap to be binding; a
-  win on both, larger on the tabs, means it does not.**
-
-  0.50 is **mid-plateau and deliberately not the best cell** — .25/.50/.75/1.00
-  give 52.15/52.40/52.40/52.55 day-wide and 66.28/66.44/66.48/66.37 on the tabs.
-  1.00 scores 0.15 higher and is the boundary: it demands every row be tagged
-  NNP, so one mistagged row in fifty disqualifies a name.
-
-  It does **not** replace the dictionary. With `word_overrides` off the rescue
-  alone scores about what the shipped sieve scores with it on — so it is not
-  merely re-catching the same words — but that configuration still drops the
-  day's biggest story on three of four days, because 폭염 is two characters and
-  **NNG**, and lives on its `allow` entry.
-
-  The cost is visible and was accepted on the numbers: 닉스 (from 삼전닉스) and
-  어스 (from 구글 어스) are tagged NNP and come in as fragments, and 유럽, 남미,
-  중동, 호남 come in as regions.
-- **The rescue gave the fragment cut new work, and `min_standalone` moved from
-  0.10 to 0.50 because of it** (migration `0019`). Round four had swept .05 to
-  .30, found them identical and recorded 0.10 as mid-plateau — a measurement
-  taken when **nothing under three characters could reach the canvas**, so the
-  cut only ever saw long words, which are rarely fragments. The rescue admits on
-  the tagger's say-so at any length, and the tagger has no opinion about whether
-  a string is part of something bigger. Re-swept: 52.40 / 52.87 / **53.12** /
-  52.55 day-wide at .10 / .30 / .50 / .70 and 66.44 → **67.02** on the tabs.
-  Wins on both, and the peak is interior.
-
-  Ten words leave the screen: seven bad (닉스 twice, 수도권, 최고위원, 경찰관,
-  한국 twice) and three good — 우크라, 충청, 해남, which are the **조사 blind
-  spot**, Korean attaching a particle with no space so 해남에 scores as a
-  fragment. Round four's instruction not to build a particle-aware variant still
-  stands; this moves a number, which the harness can price, rather than adding a
-  rule it cannot.
-
-  **The general point is worth more than the threshold**: a measurement is only
-  valid under the circumstance it was taken in, and adding a clause that admits
-  a *new kind* of word invalidates every threshold that was tuned when that kind
-  could not appear.
-- **`demote_head_pos` moved 0.70 → 0.60 for the same reason** (migration
-  `0020`), which is the third threshold the rescue invalidated and the point at
-  which the pattern became the finding rather than any one number. Re-swept:
-  53.30 / 54.12 / 54.10 / **54.18** / 53.02 / 51.40 at .50 / .55 / .60 / .65 /
-  .70 / off. 0.55–0.65 are one plateau, flat to within 0.08 and all about a
-  point of F1 and two of precision above 0.70.
-
-  **0.50 scores well and is rejected outright**, because it sinks 폭염 off
-  2026-07-31's screen — the cliff round six had already recorded, still exactly
-  where it was. What moved was the plateau, down onto the edge of it. 0.60 is
-  taken over 0.65's marginally better F1 because it is mid-plateau and a full
-  0.10 clear of that cliff: rule 5 is not a tie-break to be spent, and a
-  threshold one step from dropping the day's biggest story is not worth 0.08.
-
-  No category measurement accompanies it and that is correct rather than
-  missing. A demotion reorders and removes nothing, so it can only act where the
-  render cap binds, and a tab draws at most 46 against a cap of 70.
-
-- **The dictionary was re-derived against the new screen** (migration `0021`,
-  36 exclusions) and it is the largest and cheapest of the four: day-wide F1
-  54.10 → **62.43** and precision 77.85 → **90.35**, tabs 67.02 → **71.80**, with
-  no threshold moved and no signal added. Chosen the way `0005` chose its 26 —
-  from the query "labelled bad, drawn by the shipped sieve, not already
-  excluded", which returned 44.
-
-  **The eight left in are the point.** 부동산, 아파트, 에너지, 스마트폰, 무인기,
-  요양병원, 재선거 and 개정안 can each head a real story, and excluding them
-  would be using the dictionary to paper over where the good-word line sits —
-  a labelling question, not a dictionary one. Same judgement `0005` made about
-  공습, 압박, 배터리 and 클라우드.
-
-  Seven entries exist *because* of the rescue, arriving through
-  `passed_by = 'proper'`: 유럽, 남미, 중동 and 한국 as backdrop, and 어스, 모스
-  and 민주 — the halves of 구글 어스, 모스크바 and 민주당 that the tagger calls
-  proper nouns.
-
-- **`min_word_len` rose 3 → 4** (migration `0022`), which is where the sequence
-  closes: the rescue was built to pay the length clause's price and ended up
-  changing what the clause should charge. **The bar was doing two jobs** — keeping
-  fragments out and keeping names in — and the rescue took the second away, so it
-  can now catch the three-character common nouns it had always been set too low
-  to reach. Day-wide 62.03 → **63.70** and precision 90.35 → **93.53**; tabs
-  73.21 → **78.58**. 5 reaches 97% precision and is **rejected on `shown`**: at
-  65.8 of 70 places it cannot fill the canvas, which is round seven's cost.
-
-**The render cap binds on category tabs after all, and the harness had been
-scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
-`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
-disagreement that is invisible only while a tab draws everything that qualifies.
-**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a
-cap of 70**, and 2026-08-01's society tab 77; seven of the 24 cells bind. Fixed,
-and it moved the shipped tab number from 71.80 to 73.21 — a measurement error,
-not an improvement.
-
-**That undercuts the stated reason head_pos ships as a demotion rather than a
-cut.** The argument was "a tab draws at most 46 words, the cap never binds, so a
-cut there is loss with nothing to fill the hole". On a fat day the cap does bind,
-so a cut there would substitute too. The demotion is not thereby wrong — it still
-wins — but its reason is now only partly right, and the cut-versus-demotion
-question deserves re-measuring on fat days rather than being treated as settled.
-Round fourteen answered half of it in passing: **a demotion can only rescue a
-mechanism whose losses sit in the non-binding cells**, which is why it was not a
-candidate for the place gate. head_pos's own re-measurement on fat days is still
-open and nothing on that branch touched it.
-
-**Where the five changes leave the sieve**: day-wide mean F1 **49.48 → 63.70**
-and mean precision **71.07 → 93.53**; the 24 category cells **55.07 → 78.58**.
-
-**The decomposition matters more than the total, and it is measurable because
-`19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row.** Run
-against the *same* dictionary, the pre-`0018` sieve scores 54.52 / 78.57 and the
-shipped one 62.43 / 90.35, so the three sieve changes are worth **+7.9 F1 and
-+11.8 precision** and the dictionary the remaining **+5.0**. Neither figure is
-the one you get by reading the commits in order, because each was measured
-against the dictionary of its moment.
+**The decomposition matters more than the total**, and it is measurable only
+because `19_rounds_ten_to_twelve_configs.sql` keeps the old sieve as a live row:
+run against the *same* dictionary, the three sieve changes are worth +7.9 F1 and
++11.8 precision and the dictionary the remaining +5.0. **Neither figure is the one
+you get by reading the commits in order**, because each was measured against the
+dictionary of its moment.
 
 **The dictionary is still load-bearing after all of it**: turn it off and the
 shipped sieve falls to 50.97 / 73.22 *and drops the day's biggest story on three
 of four days*, because 폭염 is two characters, tagged NNG, and lives on its
 `allow` entry from `0003`.
 
-All of it is downstream of the analyser being in-process — one new signal, two
-thresholds it invalidated, and a dictionary re-derived against the screen it
-produced.
+**The render cap binds on category tabs after all, and the harness had been
+scoring a screen the app does not draw.** `11_category_eval.sql` ranked by
+`df desc, word` while `keyword_graph` ranks by the head_pos demotion first — a
+disagreement invisible only while a tab draws everything that qualifies.
+**2026-08-03 puts 95 to 163 qualifying words on each of its six tabs against a cap
+of 70**; seven of the 24 cells bind. Fixing it moved the shipped tab number from
+71.80 to 73.21 — a measurement error, not an improvement.
+
+**That undercut the stated reason head_pos ships as a demotion rather than a
+cut**, and round fifteen re-measured it on a fat day. The argument had been "a
+tab draws at most 46 words, the cap never binds, so a cut there is loss with
+nothing to fill the hole"; on a fat day the cap does bind, so a cut there should
+substitute too. **Measured, it does not.** On 2026-08-04, five of six tabs at the
+cap, the cut still loses (50.18 against the demotion's 50.88), and the day-wide
+win with a category loss is exactly round five's signature again: +0.36 F1
+day-wide, −0.42 on the tabs.
+
+**The prediction failed for a reason worth more than the case.** `shown` on that
+day is 69.2 under the demotion and 67.8 under the cut — **a cut cannot rely on
+the cap binding, because cutting is what stops it binding.** Removing words
+shrinks the qualifying pool, and where the pool sat just above 70 the cut takes
+it under; from there the cut is loss with nothing to promote, on a fat day, by
+its own action. The general form: **a mechanism that removes candidates cannot be
+justified by the substitution it enables, because it is also spending the surplus
+that substitution depends on.** A demotion has no such feedback — it reorders and
+removes nothing, so the pool it draws from is the pool it found. Closed; the
+tables are in `scripts/analysis/README.md`, "Round fifteen".
+
+#### The clauses that are switched off, and the signals that were tried
+
 - **The specificity clause is disabled on purpose** (`min_spec` 9.9, above the
   signal's maximum of 1). Rescuing a word for being confined to one section
   admits exactly the words that mean nothing on their own — 감찰, 윤리, 청문, 초등
@@ -456,46 +396,31 @@ produced.
 - **The neighbours clause is disabled too** (`max_neighbors_per_doc` −1, below
   the signal's minimum of 0), by migration `0009`. Two of sieve 4's three
   rescues are now retired and **the length clause is the sieve**: it admits 68
-  of the 70 drawn words, and its precision, 84.3%, is the whole sieve's. Do not
-  read that as a leak to be plugged. The four signals were measured against the
-  labels inside the length group and **not one of them separates its good words
-  from its bad** — character length runs the wrong way (bad 3.59, good 3.33),
-  headline count is flat, and recurrence across the archive's days is flat too,
-  because at three days it measures "story that is still running" rather than
-  "word that recurs whatever the news".
-- **A fifth signal was found, and its shape is the lesson.** `head_pos` — where
-  in the headline the word starts, averaged over the day's headlines holding it,
-  0 leading and 1 trailing. Korean headlines are topic-first: a story's names
-  lead and generic qualifiers trail. Over the 280 drawn word-days of the four
-  labelled days the mean is 0.347 for good and 0.466 for bad, and above 0.70 it
-  catches almost exactly the family that means nothing on its own — 가능성,
-  시험대, 승부수, 변동성, 무방비, 막바지, 월요일, 테러범, 수도권.
-
-  **As a hard cut it was right day-wide and wrong on the tabs**, and both
-  measurements are real: `head_pos <= 0.70` took mean F1 from 65.05 to 67.30 over
-  four days, winning three and losing none, and then took the 24 category cells
-  from 65.08 to 63.42, **losing 8 and winning none**. The render cap explains
-  both. Day-wide it binds at 70, so cutting a word promotes a deeper one and the
-  promoted words are about as good as the screen average — **the gain was the
-  substitution, never the removal**. A tab draws at most 46 words, the cap never
-  binds, and a cut there is loss with nothing to fill the hole.
-
-  So it ships as a **demotion**, which can only act where a substitution exists.
-  Round six measured that it reproduces the cut's day-wide numbers exactly
-  (71.9 / 67.8 / 65.8 / 63.7 against 70.7 / 67.8 / 63.1 / 58.6) and leaves the
-  category mean at 65.08 to the decimal. 0.70 is interior to its sweep — 0.65
-  gives 66.68 and 0.75 gives 65.68 — and at 0.50 폭염 sinks to rank 66 on
-  2026-07-31 and off the screen on 08-03.
-
-  **Do not re-file this as a sieve clause.** A day-wide win with a category loss
-  is the signature of a mechanism that needs the cap to be binding, and the fix
-  is the mechanism rather than the threshold.
+  of the 70 drawn words, and its precision is the whole sieve's. Do not read that
+  as a leak to be plugged. The four signals were measured against the labels
+  inside the length group and **not one of them separates its good words from its
+  bad** — character length runs the wrong way (bad 3.59, good 3.33), headline
+  count is flat, and recurrence across the archive's days is flat too, because at
+  three days it measures "story that is still running" rather than "word that
+  recurs whatever the news".
+- **`head_pos` is the fifth signal and its shape is the lesson** — where in the
+  headline the word starts, averaged over the day's headlines holding it, 0
+  leading and 1 trailing. Korean headlines are topic-first: a story's names lead
+  and generic qualifiers trail. Over 280 drawn word-days the mean is 0.347 for
+  good and 0.466 for bad, and above 0.70 it catches almost exactly the family that
+  means nothing on its own — 가능성, 시험대, 승부수, 변동성, 무방비, 막바지,
+  월요일, 테러범, 수도권. **As a hard cut it was right day-wide and wrong on the
+  tabs**, and both measurements are real; it ships as a **demotion**, which
+  reproduces the cut's day-wide numbers and leaves the category mean unmoved to
+  the decimal. **Do not re-file this as a sieve clause** on the day-wide number
+  alone — a day-wide win with a category loss is the signature of a mechanism that
+  needs the cap to be binding, and the fix is the mechanism rather than the
+  threshold.
 - **The dictionary is still doing real work**, and the fifth signal does not
   replace it. With the dictionary off, the demotion is worth about 2.5 mean F1
   on its own — so it is not merely re-catching what `word_overrides` already
   catches — but every dictionary-off configuration still drops the day's biggest
-  story on three of four days, because 폭염 is two characters and lives on its
-  `allow` entry.
+  story on three of four days.
 - **`allow` entries are load-bearing, not decoration.** 폭염 and 양산 were given
   theirs in `0003` as insurance against exactly the retune `0009` performed, and
   they are now the only two words on the canvas not admitted by length.
@@ -520,239 +445,108 @@ sweep** and a **category-balance exponent α**, all three switched off pending t
 measurement, and migration `0026` is the verdict: **no `value` in
 `scoring_weights` moves.** It updates four `note` columns so the deployed
 database carries the reasoning. A round that earns nothing has to be as legible
-as one that earns something, or the next person re-runs it.
+as one that earns something, or the next person re-runs it. The measurements are
+in `scripts/analysis/README.md`, "Round fourteen"; what survives here is what
+stops a mistake without reading them.
 
 **Migration `0028` then turned the place gate on anyway, and that is the round's
 sharpest finding rather than a reversal.** The measurement stands exactly as
-`0026` recorded it — the gate costs F1 on both surfaces and every word it removes
-is labelled good. What overruled it was looking at the screen, where the gate's
+`0026` recorded it — the gate costs F1 on both surfaces (day-wide 63.70 → 62.67,
+the 24 tabs 78.58 → 75.22) and every one of the eleven words it removes is
+labelled good. What overruled it was looking at the screen, where the gate's
 absence leaves an unreadable 66-headline "서울 · 광주" as the day's fourth-largest
-event. The cap and α remain off. Details are in the place-gate entry below. All
-of what follows
-has `unlab` 0 and `story_rank` 1 on every quoted row, and both worklists returned
-nothing before the harness was read and again after.
+event — two place names joined to each other and to nothing else, so nothing on
+the page can say what those 66 articles are about. The cap and α remain off.
 
-- **The place gate loses on both surfaces, and the eleven words it removes are
-  all labelled good.** Sieve 6 draws a `word_overrides` place only when a drawn
-  line joins it to a non-place. Day-wide F1 **63.70 → 62.67** (0 wins, 3 losses,
-  1 tie); the 24 category cells **78.58 → 75.22** (1 win, 17 losses, 6 ties); at
-  cap 100 the same comparison gives 70.60 → 69.98, so a wider canvas does not
-  rescue it. The cost is one-sided: it removes 서울 ×2, 울산 ×2, 제주, 강남,
-  부산, 강원, 광주, 인천 and 포항 — **every one labelled good** — and promotes
-  ten, six good (경계작전, 공화당, 김동관, 김병기, 김용, 한반도) and four bad
-  (단일종목, 반도체주, 고속도로, 대공습).
+**The harness is the wrong instrument for the question the gate was asked, and
+that is the finding to keep.** `analysis.word_labels` answers "is this a word
+worth showing"; the gate was asked "can a reader do anything with a word no line
+touches", and no label set can price that. **Anything that changes what a word
+*means on the page* rather than whether it deserves a place has to be decided by
+looking.** It is the same mismatch that stops the harness pricing the render cap.
+`word_overrides` mode 'place' is load-bearing rather than a labelled fact in
+reserve: its 45 rows are the gate's whole input.
 
-  **The premise failed, not the threshold.** "A place with no line to a non-place
-  is backdrop" is false: a place can be the story and hold no *drawn* line
-  because its partner sits below the cap. 부산 on 2026-08-02 is the clean case —
-  a day qualifying only 69 words, where the gate drops it and promotes nothing.
-  The gate is already at its weakest setting, one edge, so there is no number to
-  retune.
+Three standing rules came out of the round, each one general rather than about
+its own knob:
 
-  **Do not re-file it as head_pos and reach for a demotion.** That signature is a
-  day-wide *win* with a category loss. This one loses on both, and day-wide it
-  loses precisely where the cap binds, which is the only place a demotion still
-  acts: arithmetically a demotion scores **62.88**, still under the shipped
-  63.70. The general form is worth more than the case — **a demotion can only
-  rescue a mechanism whose losses sit in the non-binding cells.**
-
-  **And the harness is the wrong instrument for the question that was actually
-  asked, which is the finding to keep.** `analysis.word_labels` answers "is this
-  a word worth showing". The gate was asked for on a different question — "can a
-  reader do anything with a word no line touches" — and no label set can price
-  that. It is the same mismatch that stops the harness pricing the display cap.
-  It costs about **1.5×** (one sitting, 2026-08-03, all-categories view: `0018`
-  1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be read against
-  each other and against nothing else).
-
-  **The gate is ON, since migration `0028`, and none of the above is retracted.**
-  `0026` shipped it off because a measurement is what this project moves a
-  threshold on; `0028` turns it on because the screen was then looked at and
-  showed what the labels structurally cannot. Two views of 2026-08-03 one flip
-  apart: the gate removes 서울, 광주, 인천, 포항, 울산 and 강원 and keeps 부산,
-  대구, 경남 and 충청 — and **the four it keeps are exactly the four that sit
-  inside a story** (부산 with 노무현·김용민·돌려차기, 대구 with 경산·경북, 경남
-  with 양산, 충청 with 김민석), while the six it drops touched nothing or touched
-  only each other.
-
-  **The decisive difference is in the event list, not on the canvas.** With the
-  gate off, that day's **fourth-largest event is "서울 · 광주" at 66 headlines** —
-  two place names joined to each other and to nothing else, so nothing on the page
-  can say what those 66 articles are about. With the gate on the row is gone and
-  "미국 · 중국 · 기아 · 정의선 외 2" at 57 headlines takes its place. That one can
-  be read. The F1 loss is real and is the price of removing it: 서울 and 광주 are
-  each independently worth showing, which is precisely why the labels defend them.
-
-  So the standing lesson is not "the gate was wrong" or "the harness was wrong" —
-  it is that **the two were answering different questions, and the file records
-  which one each can settle.** Anything that changes what a word *means on the
-  page* rather than whether it deserves a place is outside what
-  `analysis.word_labels` can price, and has to be decided by looking.
-
-  `word_overrides` mode 'place' is now load-bearing rather than a labelled fact
-  in reserve: the 45 rows are the gate's whole input.
-
+- **The place gate's premise failed, not its threshold.** "A place with no line
+  to a non-place is backdrop" is false: a place can be the story and hold no
+  *drawn* line because its partner sits below the cap. The gate is already at its
+  weakest setting, one edge, so there was never a number to retune. **Do not
+  re-file it as head_pos and reach for a demotion** — that signature is a
+  day-wide *win* with a category loss, this one loses on both, and arithmetically
+  a demotion scores 62.88, still under the shipped 63.70. The general form is
+  worth more than the case: **a demotion can only rescue a mechanism whose losses
+  sit in the non-binding cells.**
 - **`10_sieve_eval.sql` structurally cannot price the render cap.** F1 rises
-  monotonically with it — **63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 /
-  130** — because the recall denominator is fixed at every labelled-good word
-  with `df >= 3` while the cap *is* the screen size. Widening always buys recall,
-  and the optimum sits at the edge of any sweep; the limit of this metric is
-  "draw every word that qualifies". **Precision is what reads a fixed screen
-  honestly and it decides: 93.53 at 70 against 85.40 at 130.** The marginal bands
-  say it more sharply — over the three days where the cap binds the top 70 are
-  201 good / 9 bad (95.7%), while ranks 71–85 are 60.0%, 86–100 80.0%, 101–130
-  66.7% and 71–end **68.8%**. They are **not even monotone**, so there is no rank
-  at which the screen cleanly stops being worth widening. Bad words on the canvas
-  go 3 → 16 on 2026-07-31 and 2 → 23 on 2026-08-03. **The tell is the shape: a
-  monotone column with no interior turn.** Any future knob whose sweep looks like
-  that should be suspected of the same defect before its best cell is believed.
-  A cap change is a canvas change and needs `scripts/layout/` re-run as well,
-  which nothing here did.
+  monotonically with it — 63.70 / 66.38 / 70.60 / 73.80 at 70 / 85 / 100 / 130 —
+  because the recall denominator is fixed at every labelled-good word with
+  `df >= 3` while the cap *is* the screen size, so the optimum sits at the edge of
+  any sweep and the limit of the metric is "draw every word that qualifies".
+  Precision reads a fixed screen honestly and decides: **93.53 at 70 against 85.40
+  at 130.** **The tell is the shape: a monotone column with no interior turn.**
+  Any future knob whose sweep looks like that should be suspected of the same
+  defect before its best cell is believed. A cap change is also a canvas change
+  and needs `scripts/layout/` re-run. `20_unlabeled.sql` joins **each
+  configuration's own `render_cap`** rather than a literal 70, or a sweep would
+  promote words it is structurally unable to see.
+- **α is off, and round fifteen turned "not measurable" into a reason.**
+  `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α`, so the shipped configuration
+  (α = 0) enters its own sweep as the control. Round fourteen could only say the
+  day set could not price it; with 2026-08-04 — the imbalanced day the mechanism
+  was built for — now closed and labelled, it can. **α loses at every setting,
+  and the entire loss is on the one day that needs no correction**: 2026-07-31
+  collected 150/149/150/150/150/150 in a single capped run, its balance factors
+  span 0.999–1.006, and there α does nothing but perturb a `df` tie in the third
+  decimal, at a cost of three good words. On the three days with real imbalance
+  (spread 1.49 to 2.52) α is neutral or **positive**.
 
-  A swept cap is also the one thing that reaches ranks the worklist has never
-  looked at, so `20_unlabeled.sql` joins **each configuration's own
-  `render_cap`** rather than a literal 70 — otherwise it would report 0 while
-  being structurally unable to see the words the sweep promoted. It was checked
-  the round it mattered: 144 words became newly reachable at ranks 71–130 and
-  every one of them already carried a label, so the silence was real rather than
-  rule 4's blind spot.
+  **So α is not wrong; applying it to days that do not need it is.** Gating it on
+  the day's own spread scores 56.14 / 87.92 against the shipped 55.88 / 87.36 —
+  arithmetic over rows already measured, not a run of its own — and **+0.26 F1
+  does not buy a new threshold**, which would need tuning and carry its own
+  permanent rule-4 obligation. Two properties are worth carrying: **the
+  denominator is the word's own section distribution, not its top category** (a
+  single denominator would charge 폭염 the largest divisor and put the day's
+  biggest story at risk), and **α is the identity inside a category tab, at every
+  α, by construction** — so `11_category_eval.sql` is the arm's **control**
+  rather than its measurement.
 
-- **α is not measurable on this day set, which is not the same as α costing
-  something.** `df_balanced(α) = Σ_c df_c × (N̄ / N_c)^α` — at α = 1 the count
-  under equal collection, at α = 0 the count itself, so the shipped configuration
-  enters its own sweep as the control. Measured: **63.70 / 93.53 at 0 against
-  63.20 / 92.83 at every one of .25, .50, .75 and 1.00**, and out of band 62.55 /
-  62.38 / 61.98 at 1.50 / 2.00 / 4.00, with rule 5 biting past 2.00. But **the
-  only day it loses on is 2026-07-31, whose six sections collected
-  150/149/150/150/150/150 in a single capped run, so its balance factors sit
-  within 0.6% of 1** — there is nothing there to correct and all α does is break
-  a `df` tie in the third decimal. The two days with real imbalance (08-01
-  0.742–1.869, 08-03 0.808–1.201) are label-neutral at every α, and 08-02 draws
-  69 words against a cap of 70 so no substitution is available at all. **The day
-  the mechanism was built for is 2026-08-04 and it cannot be an evaluation day
-  while it is still collecting** — that is rule 4's second trigger, and the day
-  moved between two readings nine hours apart, from factors 0.741–1.790 and 130
-  qualifying words at 11:00 KST to 0.756–1.563 and **240** at 20:24. Re-measure
-  when it settles and can be labelled.
+**Where the harness's own numbers may and may not be read.** Two rules, both
+already paid for:
 
-  **The denominator is the word's own section distribution, not its top
-  category**, and that is what keeps rule 5 safe: 폭염 spans sections and its top
-  category is society, the largest, so a single denominator would charge it the
-  largest divisor and put the day's biggest story at risk. A spread word gets a
-  blend, and 폭염 in fact *gains* (2026-08-03, 121 → 125.6 at α = 1) — the table
-  is in `scripts/analysis/README.md`'s round-fourteen α section, with the ranks
-  at α = 0 and α = 1 for all four eval days.
+- **F1 is not comparable across days of different thickness.** Recall is the
+  drawn good words over every good word with `df >= 3`, so a fat day has a much
+  larger denominator while the screen still holds 70 — 2026-08-03's good pool is
+  129, against recall of 36.4%. A thick day therefore scores *worse* on F1 while
+  showing strictly more of the news.
+- **No figure here is comparable to one quoted elsewhere or to an earlier figure
+  in this file's history.** The label set has been extended eight times and each
+  extension moves every percentage. **Compare configurations against each other
+  inside one run, never against a number someone wrote down.**
 
-  **α is the identity inside a category tab, at every α, by construction** —
-  every drawn row in section *c* carries the same factor, so `count_balanced` is
-  `count` times a constant. Measured as well as argued: with α flipped to 1 on
-  the live database **all 30 tab hashes stayed byte-identical and only the 5
-  all-view hashes moved**. `11_category_eval.sql` therefore needs no α variant
-  and is the round's **control** — its 78.58 moving would mean α had reached a
-  scoped count where it should have been day-wide, or the reverse.
-
-**Both wiring migrations were checked rather than asserted**: `keyword_graph` is
-byte-identical to what it drew before on all 35 cells (five collected days × the
-all view and six tabs) after `0024`, and again after `0025`. Only the edge
-*ordering* moved, on 18 of the 35, and running both orders through the
-frontend's own code moved the Louvain partition on **0** cells, merged events on
-**0**, and drawn geometry on 7 — six of them sub-pixel. The one real move is
-2026-08-02's all view, where one region rearranges internally and 전남 travels
-137.6 px with the same partition and the same events; the cause is `forceLink`
-applying its velocity updates in link order, not the tie rule.
-
-Measured precision of the top 70 words, four days, as of 2026-08-04 — **the
-first run on an archive analysed end to end by one analyser**:
-**75.7 / 70.0 / 70.0 / 68.6**, mean F1 55.45. The drawn set is 199 good and 81
-bad. On the 24 category cells the shipped configuration means **57.20**.
-
-**Those four numbers are the screen *before* migrations `0018`–`0022`, and they
-are kept because the paragraphs below are about that run.** The shipped sieve
-now scores per-day precision **95.7 / 94.3 / 87.0 / 97.1** and F1
-**67.3 / 66.3 / 77.9 / 43.3** on the same four days — mean 93.53 and 63.70,
-78.58 on the tabs. Note that 2026-08-02 draws **69** words and not 70: at
-`min_word_len` 4 only 69 qualify on the archive's thinnest day, so its cap does
-not bind and it is not word-count-comparable with anything above.
-
-**Every one of those numbers is lower than the ones this file used to carry
-(85.7 / 84.3 / 70.0 / 67.1, mean F1 63.2, 215 good and 65 bad), and the drop is
-mostly not a quality drop.** The archive was re-analysed when ETRI was replaced
-by garu-ko (`scripts/reanalyze/`), which put words on screen that had never been
-near it, so `20_unlabeled.sql` returned 38 and `21_unlabeled_category.sql`
-returned 232 — the sixth and largest firing of rule 4. Twenty-four of the 38 were
-labelled bad, and a newly labelled bad word lowers precision the moment it is
-labelled, whatever the analyser did.
-
-**The per-day split is what shows this rather than argues it.** 2026-08-03 drew
-no newly labelled word at all and its precision *rose*, 67.1 to 68.6, while
-07-31 and 08-01 drew 8 and 7 of them and fell hardest. The days that moved are
-the days whose screens changed.
-
-What the run does establish, because it is internal to itself: **the shipped
-configuration still wins.** It beats length-only on all four days day-wide
-(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
-floor, and on the tabs it leads at 57.20 against 48.52 for the pre-`0004` scoped
-count — so migration `0004`'s finding survives the analyser change intact.
-
-**Do not read the 2026-08-03 column against the one this file carried before
-that** (71.4, mean F1 67.3). That move was the collector going to six runs and
-the day going from 900 headlines to 2,197 — not the sieve, and not the analyser.
-
-**F1 is not comparable across days of different thickness, and this is the
-mechanism.** Recall is the drawn good words over every good word with `df >= 3`,
-so a fat day has a much larger denominator while the screen still holds 70:
-08-03's good pool is 129 against recall of 36.4%. A thick day therefore scores
-*worse* on F1 while showing strictly more of the news. Judge configurations
-against each other inside one run — the rule this file already states for label
-sets applies to collection depth too, and this is the first time it has bitten.
-
-Those figures come from
-`analysis.word_labels` and are **not comparable to any percentage quoted
-elsewhere, or to any earlier figure in this file's history** — the label set has
-been extended eight times and each extension moves them, most recently by
-`14_labels_after_reanalysis.sql` (38 words) and
-`15_labels_category_after_reanalysis.sql` (234, the largest pass there has been).
-Compare configurations against each other inside one run, never against a number
-someone wrote down.
-
-Two tells came out of that pass and both are reusable, because both name a kind
-of word rather than a word:
+Two tells about labelling came out of the largest of those extensions, and both
+are reusable because both name a *kind* of word:
 
 - **A section tag is not a subject.** 북리뷰, 주末머니, Y녹취록, 뉴시스Pic,
   배틀라인, 이슈톺, 손바닥, 종합2 all reached the screen and all are the
   newspaper's own furniture — every headline carrying one *ends* in it, in
-  brackets. The signature is `spec` 1.00 together with a shared bracketed
-  suffix, and it is worth checking before labelling a confident-looking 1.00.
-  Y녹취록 was written down as good first, on the reading that it named one
-  recording in one case; it names a standing column at YTN.
-- **The operational form of the good/bad line is a question**, and it settled
-  the hard cases where the prose definition did not: *would this word appear in
-  a randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would,
-  every week, so they are bad however particular the story that produced them.
-  문자통보, 미장착 and 보릿돌교 would not.
+  brackets. The signature is `spec` 1.00 together with a shared bracketed suffix,
+  and it is worth checking before labelling a confident-looking 1.00.
+- **The operational form of the good/bad line is a question**, and it settles the
+  hard cases where the prose definition does not: *would this word appear in a
+  randomly chosen other week's news?* 압수수색, 유상증자 and 본회의 would, every
+  week, so they are bad however particular the story that produced them.
+  문자통보, 미장착 and 보릿돌교 would not. Measured three times: moving a handful
+  of words across the line changes the percentages by one to four points and has
+  **never once changed which configuration won** — see the README's Labels
+  section for the three sittings.
 
-That claim has now been measured three times. Reversing 윤리위, 반도체 and
-李대통령 to good and 여의도 and 형사사법체계 to bad moved 2026-08-02 from 61.6 to
-63.1 and 08-03 from 52.6 to 56.1; reversing **보완수사권** to good on 2026-08-03
-moved that day from 65.7 to 67.1 precision and 46.5 to 47.2 F1 — and **neither
-moved anything in the ranking**: the same configuration won by the same margin
-each time. 보완수사권 is the sharpest version of the question so far, because it
-was labelled bad on the reasoning that a power is not an event, and 거부권 sits
-two entries away labelled good on the reasoning that it is the instrument one
-dated fight is about. Both are true of both words; the line was drawn between
-them and could not be stated, so it moved. 수사권 and 보완수사 stay bad, and the
-distinction that survives is not specificity — it is that those name the power
-in general, in any week, while 보완수사권 names the one a dated bill removed.
-Where the good-word line sits changes the
-percentages and not the verdict, which this file has always claimed and had not
-until now measured.
-
-`08_labels_after_dedup.sql` is itself the second half of rule 4 firing:
+`08_labels_after_dedup.sql` is itself rule 4 firing from the other side:
 `02_sieve_configs.sql` was untouched, but migrations `0007` and `0008` moved the
-data underneath it and `20_unlabeled.sql` returned eight words that had never
-been near the cut before. **Run it before the harness, every time, whatever
-changed.**
-
+data underneath it and `20_unlabeled.sql` returned eight words that had never been
+near the cut before. **Run it before the harness, every time, whatever changed.**
 ### Why the graph is cached, and what that costs when you retune
 
 **`keyword_graph` was failing for concurrent readers, and the failure was a
@@ -848,9 +642,10 @@ rule is the one in bold, not the list.
 `grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
 incremented from a stale one instead of counted — `searchWords` is the eighth,
 added for word-directory search) and holds the
-**promise**, not the result, keyed on the arguments (TTL 5 minutes, 24 entries,
-rejections evicted immediately so "다시 시도" really retries). Two things follow
-that are easy to underrate:
+**promise**, not the result, keyed on the arguments (TTL 5 minutes, 40 entries —
+24 until the headline panel learnt to hold up to `HISTORY_WINDOW` days open at
+once, which alone can exceed the old cap; rejections evicted immediately so
+"다시 시도" really retries). Two things follow that are easy to underrate:
 
 - **The point is object identity, not the network.** `App.tsx` compares
   identities everywhere — `graph`, `graphWords`, `partition.graph === graph`,
@@ -985,14 +780,19 @@ split is what makes the layout testable: jsdom has no canvas, so anything callin
 `computeFontSizes` the graph still reuses unchanged — the sieve decides who is
 drawn, never how big.
 
+**Every number in this section comes from `scripts/layout/`, and its README is
+where the tables live.** What is kept here is what stops a mistake without
+reading one. That README is also stamped with the sitting each table was taken
+in, because this branch was bitten three times by figures written down without
+theirs — **numbers from that harness are comparable only to other runs of it.**
+
 **The layout is two stages, and there is no global simulation.** This was one
 `forceSimulation` over all 70 words, and the trouble with it was structural
 rather than a matter of tuning. A day is not a hairball: it is eight to a dozen
-constellations of three to eight words plus 14–26 words holding no edge at all
-(`scripts/layout/README.md` has the counts for four days). The global sim knew
-none of that, and `isolatedRings` sent the edgeless words to rings at 0.36–0.52
-of the *short side* — inside the canvas — so unrelated words sat between the
-events and every edge had to cross somebody else's story.
+constellations of three to eight words plus 14–26 words holding no edge at all.
+The global sim knew none of that, and `isolatedRings` sent the edgeless words to
+rings at 0.36–0.52 of the *short side* — inside the canvas — so unrelated words
+sat between the events and every edge had to cross somebody else's story.
 
 - **Stage A lays each event out in its own box** (`layoutEvent`), and **stage B
   packs those boxes into the given width** (`shelfPack`). Separation now comes
@@ -1015,9 +815,9 @@ events and every edge had to cross somebody else's story.
   label areas times 3.5. At 1.0 the collision pass cannot resolve — 12 to 19
   overlapping label pairs on every day, against an invariant of 0 — and two
   labels that end up touching leave no room for a stroke, so edges vanish
-  silently: 22 of 37 drawn. That is CLAUDE.md's cohesion-at-0.35 failure
-  returning by a different door. Slack is cheap because `crop` sizes the region,
-  not the box.
+  silently: 22 of 37 drawn. That is the cohesion-at-0.35 failure below returning
+  by a different door. Slack is cheap because `crop` sizes the region, not the
+  box.
 - **Edgeless words are scattered into the gaps between the regions, and the
   invariant that makes that safe is an ordering rather than a tuning**
   (`scatterLoose`). They used to go to a band *below* the packed regions — never
@@ -1025,213 +825,162 @@ events and every edge had to cross somebody else's story.
   there as the graceful degradation. What changed is that **edges are routed
   first and their curves are then obstacles**: each curve's `CURVE_STEPS` samples
   are stamped into an 8px occupancy grid alongside the anchored labels, and a
-  loose word may sit anywhere its label box touches no marked cell, ties going to
-  the cell farthest from anything already placed. **`crowded` therefore cannot
-  rise**, and that is provable rather than measured: `routeEdge` now receives a
-  strict *subset* of the obstacle list it used to get — the removed members are
-  exactly the band words, and the band sat entirely below every region — so no
-  route could change. Measured accordingly: `crowded`, `crossings`, `xIn`, `xBr`,
-  `bridges` and `lenMax` are byte-identical in all eight cells. **What is bought
-  is height, down 5.6–17.4% everywhere** (9.4 / 6.4 / 15.0 / 5.6 desktop and
-  9.7 / 8.7 / 17.4 / 6.6 phone, computed from the before/after pairs in
-  `scripts/layout/README.md`'s `scatterLoose` table), which is the band's whole
-  vertical cost. If
-  `crowded` ever does rise here, that is a broken implementation and not a trade.
-  This is the same problem the old inner-ring placement failed at, solved by
-  ordering rather than by a force balance.
+  loose word may sit anywhere its label box touches no marked cell. **`crowded`
+  therefore cannot rise**, and that is provable rather than measured: `routeEdge`
+  now receives a strict *subset* of the obstacle list it used to get, so no route
+  could change. **If `crowded` ever does rise here, that is a broken
+  implementation and not a trade.** What is bought is height, down 5.6–17.4%
+  everywhere. The curves are not re-routed around the scattered words, and that
+  is symmetric rather than a shortcut: those words were placed to miss the
+  curves, so the curves already miss them.
 
-  The curves are not re-routed around the scattered words, and that is symmetric
-  rather than a shortcut: those words were placed to miss the curves, so the
-  curves already miss them.
-
-  **Every edgeless word is placed on all eight cells and the band takes zero**,
-  including on the phone, which the design did not expect: a narrow canvas stacks
-  its regions vertically and so is *taller*, and the 48px shelf gutter is wider
-  than the smallest label needs. The band path stays live and is unit-tested at
-  200px, where six of six loose words are stranded — it is the kind of path that
-  rots, so do not "simplify" `flowRows` away.
-
+  The band path takes zero words on all eight cells but stays live and is
+  unit-tested at 200px, where six of six loose words are stranded — it is the
+  kind of path that rots, so do not "simplify" `flowRows` away.
 - **A stranger may not sit inside somebody else's story, and the numbers rather
-  than taste settled that.** With in-region placement allowed, `inRegion` was 5 /
-  8 / 3 / 7 on desktop and 4 / 7 / 5 / 4 on the phone, and **on every one of the
-  eight cells the strangers concentrated in the day's biggest event** (7 of 7 in
-  2026-08-03's twelve-word one). That follows from the mechanism — the largest
-  crop box holds the most interior slack — and it is **the convex-hull failure
-  running backwards**: the blobs were removed because a hull swallows whatever
-  lies between an event's members, and here the words were being put there on
-  purpose. A region is read from the whitespace around it and nothing else, so a
-  foreign word in that whitespace erases the only thing saying "different story".
-  Region rectangles are now stamped into the same occupancy grid, `inRegion` is 0
-  everywhere, and **blocking them cost nothing**: every column and every height
-  identical to the decimal, all 14–26 loose words still placed, the only movement
-  a cropped svg width of 1040 → 1034 on two cells. `inRegion` stays in the
-  harness at 0 for the same reason the sieve harness prints `unlabeled`.
+  than taste settled that.** With in-region placement allowed the strangers
+  concentrated in the day's biggest event on **every one of the eight cells** —
+  the largest crop box holds the most interior slack. That is **the convex-hull
+  failure running backwards**: the blobs were removed because a hull swallows
+  whatever lies between an event's members, and here the words were being put
+  there on purpose. A region is read from the whitespace around it and nothing
+  else, so a foreign word in that whitespace erases the only thing saying
+  "different story". Region rectangles are stamped into the same occupancy grid,
+  and **blocking them cost nothing** — every column and every height identical to
+  the decimal. `inRegion` stays in the harness at 0 for the same reason the sieve
+  harness prints `unlabeled`.
 - **Bridged events are packed next to each other** (`orderForPacking`). Ordering
-  by area alone sent one bridge diagonally across the frame: edge length maxed
-  at 719px against 208 before the rewrite. Ordering greedily by ties to what is
+  by area alone sent one bridge diagonally across the frame: edge length maxed at
+  719px against 208 before the rewrite. Ordering greedily by ties to what is
   already placed brought it back to 228–337.
 - **Height is an output, not an input.** `LayoutOptions` has no `height`;
-  `bounds.height` is the answer. `MIN_HEIGHT`/`MAX_HEIGHT`/`HEIGHT_RATIO` and
-  the whole `NARROW_WIDTH`/`NARROW_HEIGHT_PER_WORD` branch are gone. That branch
+  `bounds.height` is the answer. `MIN_HEIGHT`/`MAX_HEIGHT`/`HEIGHT_RATIO` and the
+  whole `NARROW_WIDTH`/`NARROW_HEIGHT_PER_WORD` branch are gone. That branch
   existed because inventing a height from the width gives a phone a box far too
-  small — 358×279, which the collision pass cannot resolve, and 2026-07-31
-  really did draw one overlapping pair there. Not inventing a height removes the
-  problem rather than compensating for it.
-- **`crowded` fell on all eight measured cells; `crossings` did not.** It fell on
-  five, rose on three, and the rises are worth knowing: desktop 08-01 went 0 → 1
-  because 34 edges are sparse enough that the old global sim happened to find a
-  crossing-free arrangement, and 08-03 rose because **the remaining crossings are
-  now almost entirely inside one dense event** (`xIn` 18, `xBr` 0). Crossings
-  between unrelated stories are gone. Do not read the flat total as "no change";
-  read the `xIn`/`xBr` split, which is why the harness prints it.
-- **`xBr` is not one thing either, and splitting it overturned the diagnosis.**
-  Once collection went to six runs a day, 2026-08-03 doubled and its bridges went
-  2 → 7 with `xBr` 0 → 14, which reads as "the greedy ordering can no longer put
-  every bridge next to its partner". `scripts/layout/bridges.ts` breaks that
-  column into bridge×bridge, bridge×**own** region's inner edges, and
-  bridge×another region's inner edges. Across eight cells the first is **1** and
-  the third is **3** (all from one 703px bridge on a day with two bridges and no
-  reordering freedom); everything else — 14 of 14 on desktop 08-03 — is a bridge
-  cutting its **own** event's spokes on the way out. `orderForPacking` cannot
-  touch that. A word sitting mid-box crosses its event whichever way it leaves.
-- **The fix is a mirror, and it was chosen for a property rather than a score.**
-  `faceBridges` flips each region within its own box (identity / horizontal /
-  vertical / both, cheapest total bridge length, iterated to a fixed point).
-  Reflection is an isometry, so the box keeps its size — no re-packing — and it
-  **cannot change `xIn` or `overlap` at all**, since those depend only on
-  distances inside the region. It is a lever that can only move the thing it was
-  built for, which is why there is no regression surface to guard. Measured:
-  `xBr` 24 → 13 over eight cells, desktop 08-03 14 → 5, `xIn` and `overlap`
-  identical everywhere. It converges in **one** round; `FACE_ROUNDS` (4) is slack,
-  not a tuned number — 1, 2, 3, 4 and 8 all give the same picture.
-  One cell regresses and it is instructive: phone 08-03 goes 4 → 5 because the
-  cost is **length, not crossings**, so shortening one bridge can drag another's
-  exit across more spokes. Switching the objective to a crossing count would buy
-  one crossing on one of eight cells and cost the geometry of every inner edge at
-  flip time. Not done.
-- **`xIn` was not one thing either, and the same split settled it.** A story's
-  lines crossing each other may be forced by its graph or left there by the
-  layout, and only the second kind can be fixed. `scripts/layout/planarity.ts`
-  reports, per event, whether it is planar and — if not — its **skewness**, the
-  fewest edges that have to go, which is also the floor on that event's
-  crossings under *any* drawing. Six events drew a crossing, their floors summed
-  to 2 and they produced 30. Only 2026-08-02's thirteen-word 전당대회 is
-  non-planar at all, and five of the six were flat-drawable all along, which is
-  why sweeping `LOCAL_SLACK` and running `untangle` had moved none of them: the
-  tool was wrong, not the setting. Neither edge counting nor subgraph search
-  answers this — K3,3 clears the 3n−6 bound comfortably, and the Petersen graph
-  is non-planar while holding K5 and K3,3 only as subdivisions. Both are in
-  `planar.test.ts` for that reason.
-- **`layoutCluster` draws an event flat when it can**, via `src/components/planar.ts`:
-  Tutte's barycentric solve over a fixed convex outer boundary, with the
-  non-planar case handled by dropping the smallest edge set that makes the rest
-  planar and laying those edges back on top. **It computes no planar embedding**
-  — it tries short cycles as candidate boundaries and returns a drawing only
-  after verifying on the original edges that nothing crosses and no two points
-  coincide. Failing to find a drawing that exists costs nothing, since the force
-  layout is still there; returning a wrong one would, and this way round cannot.
-  Three things had to be measured rather than reasoned:
-  - **Tutte coordinates are unusable as drawn.** They need 3-connectivity, and a
-    day's events are sparse, so the graph is triangulated first — which makes
-    every face a triangle, hangs ten points inside one, and wants **31x** the
-    area (13 words) or **199x** (11 words). Scaling to separate labels is safe,
-    since crossings are similarity-invariant, but 865px became **7,377px**.
+  small — 358×279, which the collision pass cannot resolve, and 2026-07-31 really
+  did draw one overlapping pair there. Not inventing a height removes the problem
+  rather than compensating for it.
+
+**Three columns were each found not to be one thing, and every one of those
+splits overturned the diagnosis it was made under.** This is the section's
+recurring lesson, and it is why the harness prints the splits at all:
+
+- **`crossings` splits into `xIn`/`xBr`.** The region rewrite dropped `crowded`
+  on all eight cells while raising total `crossings` on three — because the
+  remaining crossings had moved *inside* single dense events, and crossings
+  between unrelated stories were gone. **Do not read the flat total as "no
+  change".**
+- **`xBr` splits three ways** (`scripts/layout/bridges.ts`): bridge×bridge,
+  bridge×**own** region's inner edges, bridge×another region's. Across eight
+  cells nearly all of it is the middle one — a bridge cutting its own event's
+  spokes on the way out, which `orderForPacking` cannot touch, because a word
+  sitting mid-box crosses its event whichever way it leaves. **A change that
+  claims to move `xBr` has to show the split**, or it has not shown the cause.
+- **`xIn` splits into forced and left-there** (`scripts/layout/planarity.ts`,
+  which reports each event's planarity and, if not, its **skewness** — the floor
+  on that event's crossings under *any* drawing). Six events once drew 30
+  crossings against a summed floor of 2, and five of the six were flat-drawable
+  all along, which is why sweeping `LOCAL_SLACK` and running `untangle` had moved
+  none of them: **the tool was wrong, not the setting.** Neither edge counting
+  nor subgraph search answers this — K3,3 clears the 3n−6 bound comfortably, and
+  the Petersen graph is non-planar while holding K5 and K3,3 only as
+  subdivisions. Both are in `planar.test.ts` for that reason.
+
+The two fixes those splits pointed at:
+
+- **`faceBridges` is a mirror, and it was chosen for a property rather than a
+  score.** It flips each region within its own box (identity / horizontal /
+  vertical / both, cheapest total bridge length, to a fixed point). Reflection is
+  an isometry, so the box keeps its size — no re-packing — and it **cannot change
+  `xIn` or `overlap` at all**, since those depend only on distances inside the
+  region. A lever that can only move the thing it was built for has no regression
+  surface to guard. `FACE_ROUNDS` (4) is slack, not a tuned number: it converges
+  in one. One cell regresses, instructively — the cost is **length, not
+  crossings**, so shortening one bridge can drag another's exit across more
+  spokes. Switching the objective to a crossing count was measured and declined.
+- **`layoutCluster` draws an event flat when it can**, via
+  `src/components/planar.ts`: Tutte's barycentric solve over a fixed convex outer
+  boundary, with the non-planar case handled by dropping the smallest edge set
+  that makes the rest planar and laying those edges back on top. **It computes no
+  planar embedding** — it tries short cycles as candidate boundaries and returns a
+  drawing only after verifying on the original edges that nothing crosses and no
+  two points coincide. Failing to find a drawing that exists costs nothing, since
+  the force layout is still there; returning a wrong one would, and this way round
+  cannot. Three things had to be measured rather than reasoned:
+  - **Tutte coordinates are unusable as drawn.** They need 3-connectivity, so the
+    graph is triangulated first — which hangs ten points inside one face and wants
+    31x the area at 13 words. Scaling to separate labels is safe, since crossings
+    are similarity-invariant, but 865px became **7,377px**.
   - **Seeding the force simulation from the flat drawing does nothing at all.**
-    300 ticks walk back to the same minimum and all four days returned to their
-    old numbers. A force layout does not remember where it started. Do not
-    re-run this experiment.
+    300 ticks walk back to the same minimum. A force layout does not remember
+    where it started. **Do not re-run this experiment.**
   - **Bounding each step does work.** Cap a vertex's move at a third of its
     distance to the nearest edge it does not touch and no edge can cross another
-    (PrEd's argument). And spreading and scaling **solve different days** —
-    spreading unlocked 08-02, scaling unlocked 08-03 — so both are candidates
-    and the winner is measured per event.
-  The area a flat drawing may cost is priced **per crossing removed**, and that
-  price must be a condition of entry: applied to the winner instead, the
-  candidate that removes the most crossings wins and is then disqualified,
-  taking the affordable one with it (08-02 went back from 5 to 15 that way).
-  Measured at the time: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0
-  throughout, events drawing a crossing 6 → 3 against a floor of 2.
+    (PrEd's argument). And spreading and scaling **solve different days**, so both
+    are candidates and the winner is measured per event.
 
-  **Those figures are from the canvas of 2026-08-03 and the canvas has moved
-  several times since** — the analyser change, migrations `0018`–`0021`, and then
-  `0022`. `scripts/layout/README.md` carries the current table, taken from a
-  fixture stamped **2026-08-04 21:44 KST**, and it is stamped because this branch
-  was bitten three times by numbers written down without their sitting.
+  The area a flat drawing may cost is priced **per crossing removed, and that
+  price must be a condition of entry**: applied to the winner instead, the
+  candidate that removes the most crossings wins and is then disqualified, taking
+  the affordable one with it.
 
-  The short version of that table: `overlap` is 0 in all eight cells, `drawn`
-  equals `edges` in all eight, and **twenty-six of the day's twenty-seven events
-  are planar and draw no crossing at all**. `xBr` rose 4 → 12 and every one of
-  the twelve is `brOwn` under the three-way split, with `brBr`, `brOther` and
-  `overBoxes` 0 everywhere — a bridge cutting its own event's spokes on the way
-  out, the kind neither `orderForPacking` nor `faceBridges` can touch. **Read the
-  totals with 2026-08-02 removed and the direction reverses**: on the other three
-  days `xIn` is **0** and `crowded` went 12 → 2.
+**`PLANAR_AREA_PER_CROSSING` is a threshold, not a dial, and that is the whole
+character of it.** Its sweep is a staircase — 0.15/0.25/0.35 drew the days
+identically to having no planar path at all, 0.5 bought the entire move, 1.0 and
+2.0 are the same picture — so there is no middle setting and **the harness cannot
+settle it; it is a judgement about the picture.** It is 1.0, and it stays 1.0.
 
-  **The one event is a regression, it is large, and it is open.** 2026-08-02's
-  김민석·정청래·민주당 grew from 12 words / 26 edges to **13 / 29** when the
-  sieve improved, and at `PLANAR_AREA_PER_CROSSING` 1.0 the area budget
-  **refused** it a flat drawing — desktop height 2100 → **780**, below even the
-  1285 it had at price 0.5 — so it now draws **40** crossings against a floor of
-  2, with `crowded` 0 → 10 and `lenMax` 1769 → 217. `layoutCluster` verifies a
-  candidate before returning it, so 40 crossings cannot be a bad flat drawing; it
-  is the force layout, which is what the refusal falls back to. This is the
-  property already recorded here — **the area budget is a threshold, not a dial**
-  — firing for the first time in the direction that costs something, and one word
-  and three edges flipped it. **No constant was touched.** Also note that phone
-  08-02's svg falling to 402px looks like a fix for the "30% shrink" finding and
-  is not one: the box is small because the event lost its flat drawing, and if it
-  is ever let back in the shrink returns with it.
+It fired in the costly direction once: 2026-08-02's biggest event grew by one
+word and three edges when the sieve improved, the budget refused it a flat
+drawing, and it now draws 40 crossings against a floor of 2. `layoutCluster`
+verifies a candidate before returning it, so those 40 cannot be a bad flat
+drawing — they are the force layout, which is what a refusal falls back to.
+**Raising the constant was then measured and declined**, and the reason is the
+one this file already states one section down about the canvas, firing here about
+a *region*: **widening buys nothing inside a fixed container.** At any k that
+admits it, the drawing is **2,864px wide on all three views**, and the svg is
+drawn at its own size and then scaled to fit — so `MIN_FONT_SIZE` 14 renders at
+1.8px on a phone, 5.0 on desktop and 7.8 on the wide box. It removes 33 crossings
+from one event and takes the legibility of all 69 words on the day.
 
-  `PLANAR_AREA_PER_CROSSING` had been re-swept on the previous canvas and was
-  **still a staircase**: 0.5 gave `xIn` 34, 1.0 and 2.0 both gave 24 for 11% more
-  height with no other column moving, 4.0 gave 12 for 47% more height and pushed
-  `xBr` back to 7. **Raised to 1.0** on that sweep. The price is a cliff, so it
-  is a judgement about the picture rather than something the harness settles, and
-  the judgement went this way because the crossings it removes are all inside
-  **the day's biggest story** — the place a reader is most likely to be tracing a
-  line — while `overlap`, `xBr` and `crowded` did not move at all, so there was
-  no regression surface. On that canvas only 2026-08-02 changed: `xIn` 13 → 8,
-  height 1285 → 2100 desktop, `lenMax` 823 → 1769, accepted knowingly because the
-  event's region grows and the edges crossing it grow with it. **The price is
-  height** — 08-02 desktop 651 → 1544px — **and the per-crossing price is a
-  cliff, not a dial**: 0.15, 0.25 and 0.35 drew the four days identically to
-  having no planar path at all, and 0.5 bought the whole move. There is no middle
-  setting. That "no regression surface" is exactly what the paragraph above
-  overturned, on a canvas one word wider.
+**The harness could not see that until `scripts/layout/measure.ts` grew a `width`
+column**, which it now has. A change that widens reads as "uses more room" in a
+height-only table and as "shrinks the type" in the real browser, and those are
+different problems. Two more corrections came out of the same instrumenting: ten
+of the twelve candidates are rejected for **overlap** rather than by the budget,
+and `forced` is 52 rather than the 40 the metric reports (`xIn` counts crossings
+among *drawn* edges; `forced` counts every edge in the event), so the budget at
+1.0 already allows **46x** and the flat drawing simply wants 58x. **Whatever is
+tried next, the thing to change is not the constant but what the budget measures**
+— area against the force layout, where the price is actually width against the
+view. Numbers in `scripts/layout/README.md`, "평면화 가격 — 닫힘".
 
-  **The table went stale because of `0022`, not because of `0024`, and this
-  branch's own first conclusion was the wrong one.** `0024` reordered
-  exactly-tied edges, so it looked like the culprit. **The leg that settles it is
-  the one that does not depend on sampling**: no edge reordering can add a *word*
-  to an event, and 2026-08-02's largest event went 12 words / 26 edges to 13 / 29,
-  so a reorder cannot be what moved it. The old order was decided by a query plan
-  and cannot be replayed, so the sampled leg was run alongside it — permute the
-  tied edges eight ways per cell, which is **a sample of the space the reorder
-  could have moved through, not a span of it** — and **every metric column is
-  unmoved in all eight cells**, with only 2026-08-02's coordinate sum wobbling by
-  0.03%. What invalidated the table is `min_word_len` 3 → 4 changing
-  which 70 words are drawn — and the two halves of that, "which words" and
-  "therefore which edges", cannot be separated, because edges exist only between
-  drawn words. That is migration `0007`'s recorded trap, unchanged.
+**When that table went stale, the first diagnosis was the wrong one, and how it
+was settled is the reusable part.** Migration `0024` had reordered exactly-tied
+edges, so it looked like the culprit. **The leg that settles it is the one that
+does not depend on sampling**: no edge reordering can add a *word* to an event,
+and the event had gained one. The old order was decided by a query plan and
+cannot be replayed, so the sampled leg — permuting the tied edges eight ways per
+cell — is **a sample of the space, not a span of it**, and it moved no metric
+column anywhere. What actually invalidated the table is `min_word_len` 3 → 4
+changing which 70 words are drawn, and "which words" and "therefore which edges"
+cannot be separated, because edges exist only between drawn words. That is
+migration `0007`'s recorded trap, unchanged.
+
 - **Shelves wrap like a snake, and the packing order was never the problem.**
   `orderForPacking` puts bridged events next to each other, and the shelf wrap
-  then splits that pair across the full width of the canvas — the two boxes
-  deliberately made adjacent end up as far apart as possible. That was the 703px
-  bridge on desktop 08-01 that `OPEN.md` had written off as unfixable because
-  the day holds only two bridges. Mirroring odd shelves takes it to 274px and
-  its `xBr` to 0, with no constant involved. **First-fit packing is measured and
-  declined**: reclaiming the row a two-word event wastes saves 5–11% of the
-  phone's height but takes phone 08-03 from 6 bridge crossings to 9, because
-  going back to fill an earlier shelf is the same act as separating the
-  neighbours `orderForPacking` just placed. A wasted row is cosmetic; a bridge
-  cutting through another story is not.
+  then split that pair across the full width of the canvas — the two boxes
+  deliberately made adjacent ending up as far apart as possible. That was a 703px
+  bridge that `OPEN.md` had written off as unfixable. Mirroring odd shelves takes
+  it to 274px and its `xBr` to 0, with no constant involved. **First-fit packing
+  is measured and declined**: reclaiming the row a two-word event wastes saves
+  5–11% of the phone's height but raises bridge crossings, because going back to
+  fill an earlier shelf is the same act as separating the neighbours
+  `orderForPacking` just placed. A wasted row is cosmetic; a bridge cutting
+  through another story is not.
 - **The pass condition is written in terms of `xIn`/`xBr`, never total
-  `crossings`** (`scripts/layout/README.md`). The region rewrite dropped `crowded`
-  on all eight cells while raising total `crossings` on three, so the total called
-  a better picture a failure. `overlap` is the only column with an absolute rule:
-  never above 0. And a change that claims to move `xBr` has to show the
-  three-way split, because the total does not say whether the cause was guessed
-  right — the paragraph above is what that costs when it is skipped.
+  `crossings`.** `overlap` is the only column with an absolute rule: never above
+  0.
 
 Still true, and still arrived at by looking at real days:
 
@@ -1252,54 +1001,42 @@ Still true, and still arrived at by looking at real days:
 - **Widening buys nothing — *inside a fixed container*.** The svg is drawn at its
   own cropped size and then `max-w-full` scales it down to the container, so
   spreading sideways shrinks everything by the same factor. **Growing the
-  container is a different act and it does buy something**, which is why the
-  graph now has its own `max-w-[1600px]` box while the prose keeps its measure:
-  the layout runs at a larger width, so there are fewer shelf rows and less is
-  scaled away. Measured at 1600 against 1024, every column about the lines is
-  identical and `overlap` is 0, and height falls **26–41%** on all four days.
-  `<main>`'s `max-w-6xl` moved down onto the masthead and the error block,
+  container is a different act and it does buy something**, which is why the graph
+  has its own `max-w-[1600px]` box while the prose keeps its measure: the layout
+  runs at a larger width, so there are fewer shelf rows and less is scaled away.
+  Measured at 1600 against 1024, every column about the lines is identical,
+  `overlap` is 0, and height falls **26–41%** on all four days. `<main>`'s
+  `max-w-6xl` moved down onto the masthead and the error block,
   `KeywordGraph.tsx`'s own `max-w-5xl` had to come off too or the change would
-  have been a no-op, and the event list keeps 1024 from the header block inside
-  it. Verified in Chromium at a 1700px viewport: graph 1600, masthead 1152, list
-  1024. **1600 is not a measured number** — height falls monotonically with
-  width, so this harness cannot choose a stopping point; past it the minimum font
-  size and the reading distance decide, and that is a judgement about the picture.
+  have been a no-op, and the event list keeps 1024. **1600 is not a measured
+  number** — height falls monotonically with width, so this harness cannot choose
+  a stopping point; past it the minimum font size and the reading distance decide.
   `GraphSkeleton` carries the same cap, because when the two disagreed the canvas
   jumped ~570px wider the moment loading ended — the exact page-jump the skeleton
   exists to prevent.
 - **`h-auto` on the svg, not `max-w-full` alone.** The element carries `width`
   and `height` attributes, so capping the width leaves the height at the box the
-  layout ran in and the drawing is letterboxed inside it. That put a 141px
-  band of empty canvas above and below the graph on a phone.
-
+  layout ran in and the drawing is letterboxed inside it. That put a 141px band
+  of empty canvas above and below the graph on a phone.
 - **A resize under 8px does not re-run the layout** (`nextLayoutWidth`), and the
   width feeding it goes through `useDeferredValue` so a re-layout does not block
-  paint. One layout of 70 words and 60 edges measures **48ms**, and the cost is
-  the simulation rather than the edge routing — with the edges removed entirely
-  it is still 37.5ms, while 20 words with the same 60 edges is 5.5ms. Dragging a
-  window edge from 1280 to 358 at 6px a frame ran 154 layouts and now runs 76.
-  The 8px is invisible because the svg is drawn at its own size and then scaled
-  by `max-w-full`.
-- **`rectCollide` is not where that 48ms goes**, and it looks like it should be.
-  Hoisting the outer node's fields out of the inner loop and dropping the `?? 0`
-  guards (every node is seeded with x/y/vx/vy, so they never fired) produced a
-  bit-identical picture — coordinate sums matched to four decimals — and a time
-  inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
-  d3's own forces across 300 ticks, so anything that actually moves this number
-  changes the picture. Do not re-run this experiment.
-- **Both figures above predate the region rewrite, and the rewrite did make it
-  cheaper.** The simulation runs per event instead of over the whole day, so the
-  biggest collision pass is 14 nodes and 91 pairs a tick rather than 70 and
-  2,415. `scripts/layout/measure.ts` now prints `ms` per cell: the region layout
-  alone is **6.8–20.9 ms** across the eight cells, against the 48 ms this file
-  recorded for one global layout. The scatter is a fixed
-  O(cells × loose words) cost on top of that and takes it to **13.5–24.0 ms** —
-  the first draft was 26–42 ms, brought back by two exact optimisations that move
-  no pixel (a 2-D prefix sum so `fits` is four reads rather than a walk, and one
-  `Int32Array` BFS queue instead of a fresh array per layer). It grows with
-  canvas *area*, so the 1600px box is the sensitivity to watch, and the resize
-  path still re-runs the whole layout every 8px. Numbers from this harness are
-  comparable only to other runs of it.
+  paint. Dragging a window edge from 1280 to 358 at 6px a frame ran 154 layouts
+  and now runs 76. The 8px is invisible because the svg is drawn at its own size
+  and then scaled by `max-w-full`.
+- **`rectCollide` is not where the layout's time goes**, and it looks like it
+  should be. Hoisting the outer node's fields out of the inner loop and dropping
+  the `?? 0` guards (every node is seeded with x/y/vx/vy, so they never fired)
+  produced a bit-identical picture — coordinate sums matched to four decimals —
+  and a time inside the noise, 38.3ms against 38.7ms on the same fixture. The cost
+  is d3's own forces across 300 ticks, so **anything that actually moves this
+  number changes the picture. Do not re-run this experiment.**
+- **The region rewrite is what made it cheaper**, and by construction rather than
+  by tuning: the simulation runs per event instead of over the whole day, so the
+  biggest collision pass is 14 nodes and 91 pairs a tick rather than 70 and 2,415.
+  One global layout was 48 ms; the region layout is 6.8–20.9 ms across the eight
+  cells and 13.5–24.0 ms with the scatter. The scatter grows with canvas *area*,
+  so the 1600px box is the sensitivity to watch, and the resize path still re-runs
+  the whole layout every 8px.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
@@ -1564,41 +1301,65 @@ is `sm:w-80` less `p-4` — 288px — and a `viewBox` scaled by the default
 `preserveAspectRatio` against a fixed height renders 1:1 inside that, so those
 coordinates are real pixels.
 
-**The headline list below is the same day set, one row per collected day, one
-open at a time.** The rows are the trajectory's points read top-down instead of
-left-right, newest first, and the open one holds the articles. It is an
-accordion rather than one long date-separated list because **the list cannot
-hold the archive**: 폭염 is 952 headlines over nine days and 973 noun rows, so a
-single multi-day fetch would sit on PostgREST's 1,000-row cap and be truncated
-with nothing saying so — the failure this file already forbids twice. One day at
-a time is bounded by construction, is the fetch that already existed, and is
-already cached per day, so stepping between days is a cache hit and raises no
-skeleton (`fetchHeadlinesForWord.isReady`, the same trick `loadGraph` uses).
+**The headline list below is the same day set, one row per collected day the
+word appeared on, each opening and closing independently.** The rows are the
+trajectory's points read top-down instead of left-right, newest first, and an
+open row holds that day's articles. It is an accordion rather than one long
+date-separated list because **the list cannot hold the archive**: 폭염 is 952
+headlines over nine days and 973 noun rows, so a single multi-day fetch would sit
+on PostgREST's 1,000-row cap and be truncated with nothing saying so — the
+failure this file already forbids twice. **One request per open day** is bounded
+by construction, is the fetch that already existed, and is already cached per
+day, so reopening a day is a cache hit and raises no skeleton
+(`fetchHeadlinesForWord.isReady`, the same trick `loadGraph` uses). Loading and
+errors are per day for the same reason.
 
-**Opening another day does not move the day on screen.** Same judgement as
-search not moving it: the canvas, the date input and the URL all stay put while
-the panel reads a different day. The open day is not in the query string either,
-for the reason the event list's expansion is not — it is not a shareable claim
-about the data.
+**The panel opens with every day closed**, and that is a request rule as much as
+a display one: nothing is fetched until a day is opened. It used to open the day
+on screen automatically, which meant clicking any word cost one round trip
+whether or not the reader wanted that day's articles.
+
+**A day the word never appeared on gets no row at all** — 8월 3일 is followed
+directly by 8월 1일. This removed code rather than adding it: the disabled
+control, the "기사 없음" marker, and the exemption that had to keep an *open*
+absent day usable are all gone, because an absent day can no longer be open.
+**The trajectory still plots those days**, and that asymmetry is the point — a
+zero-share day is part of the line, and dropping it turns "the word was not there
+that day" into "that day did not happen". Only the list drops them.
+
+**Do not store the open day as a single string.** That was the shipped bug:
+pressing an open row called `onOpenDate` with the value it already held, so
+nothing changed, and the only way to close a day was to open a different one —
+there was no way to reach "all closed" at all. A set makes the toggle and the
+empty state expressible; a string cannot represent either.
+
+**"Has the trajectory arrived" is asked once**, in `historyReady`, and the
+question is load-bearing twice over: the pre-arrival empty array read as "no rows
+to draw" would both fetch the day on screen (undoing the rule above) and, for one
+frame, draw the *previous* word's date rows under the new word. It was asked in
+two places first, and a mutation test showed that either copy alone was
+unkillable because the other one covered for it.
+
+**Opening a day does not move the day on screen.** Same judgement as search not
+moving it: the canvas, the date input and the URL all stay put while the panel
+reads other days. Which days are open is not in the query string either, for the
+reason the event list's expansion is not — it is not a shareable claim about the
+data.
 
 **No count is written on a date row, and that is a scoping decision rather than
 a layout one.** The trajectory's counts are day-wide by the rule above, while
 the list is scoped to the active category tab, so a header reading "51건" over a
 40-row list is what writing it there would produce. The day-wide numbers live on
 the chart's axis, where the caption says what they count; the panel heading's
-count is always the length of what is actually listed. The one thing a date row
-does state is **absence** — `present: false` is day-wide and therefore true in
-every tab, so an empty day is marked and cannot be opened. The **open** row is
-exempt from both: the day on screen may be one the word is absent from (common
-when the word was reached by search), and a disabled control that is expanded,
-saying "기사 없음" above a body already saying "관련 헤드라인이 없습니다", is two
-faults for one fact.
+count is always **the number of rows currently laid below it** — the open days'
+lists summed, which is why it simply disappears in the all-closed default rather
+than needing a rule of its own.
 
-**A day set that holds no row for the day on screen falls back to the flat
+**A word that appeared on no collected day in the window falls back to the flat
 list.** `historyWindow` covers *collected* days and the day on screen may be
-today before the first cron, in which case no row matches and every headline
-would silently vanish. Reached only by search, so it is exactly the kind of
-state nobody clicks into by accident.
+today before the first cron, in which case there are no rows to draw and every
+headline would silently vanish. Reached only by search, so it is exactly the kind
+of state nobody clicks into by accident.
 
 **`HEADLINE_ROW_LIMIT` was 200 and had quietly stopped being a safety net.** It
 is documented as "far above any real value" because the sort runs after the
@@ -1788,15 +1549,10 @@ headlines to 2,197. There is no external call limit any more.
 
 **Raising the cap was re-tested, and CPU is not what stops it.** The
 300-over-12-pages failure was diagnosed twice and wrong twice — first as a wall
-near 63s, then as this function's own CPU cost. A throwaway probe that scrapes
-and analyses exactly as `index.ts` does and writes nothing, run on 2026-08-04,
-gives the **all-new** case a live run cannot be made to take on demand:
-
-| cap | headlines | analysis | wall | result |
-| --- | --- | --- | --- | --- |
-| 150 | 900 | 816ms | 2.0s | 200 |
-| 300 | 1,800 | 1,481ms | 4.2s | 200 |
-| 441 | 2,630 | 2,082ms | 5.3s | 200 |
+near 63s, then as this function's own CPU cost. A probe that scrapes and analyses
+exactly as `index.ts` does and writes nothing reaches cap 441 / 2,630 headlines in
+5.3s wall and returns 200, which is the **all-new** case a live run cannot be made
+to take on demand. The table is in `supabase/functions/collect-headlines/README.md`.
 
 #### The day boundary, and why one cap cannot serve both ends of the day
 
@@ -1807,204 +1563,125 @@ so a window wider than the day's own news files yesterday under today.
 and that — not the CPU budget, which was tested and fits — is what makes the cap
 movable.
 
-**It was not a cost of raising the cap. It was already happening at 150, by more
-than anyone had counted.** Every row stored under 2026-08-05 was classified
-against the live section lists at 12:30 KST that day, after three runs: 1,224
-rows, **129 of them published before that day**, and a further 88 sitting deeper
-than a 1,620-article scrape could reach and so almost certainly older still.
-**80 of the 129 came from the 03:00 run.**
+**It was not a cost of raising the cap. It was already happening at 150**, and
+the two ends of the day say opposite things about that one number. Before 07:00
+not one section publishes 150 articles, so at 03:00 a 150-headline window spends
+133 of its slots on yesterday in politics and 149 in `it`. Between 07:00 and
+11:00, **42.9% of the day's articles were never collected at all.** So 150 is
+simultaneously far too wide for the thin hours and less than half of what the busy
+ones need, and **the boundary stop is what lets one number stop being asked to do
+both**: in the thin hours it stops the scrape early, in the busy hours it never
+fires. The cap is then free to rise for the case that actually wants it. It went
+to **300** on 2026-08-07 — deliberately not the top of the measured column, since
+450 puts a cold all-new run past the deepest scrape ever measured here and the
+worker budget is cumulative. **The boundary stop had to be deployed first**: at
+150 the early runs already overshoot, and at 300 they would overshoot twice as far.
 
-**The 03:00 and 07:00 regime is measurable without waiting for it**, which is
-what turned a year-old "cannot be provoked on demand" into a measurement. The
-section list is ordered by publication time, so *articles published between
-midnight and T* is exactly the rank at which a run starting at T crosses into
-yesterday. Counted at 12:30 KST on 2026-08-05:
+Live before/after inside 2026-08-07: the day's four old-code crons stored 141
+rows published on another day out of 1,821 (**8.4%**), and the two runs after the
+deploy stored **0 of 937**.
 
-| section | published by 03:00 | by 07:00 | today by 11:00 |
-| --- | --- | --- | --- |
-| politics | 17 | 50 | 140 |
-| economy | 24 | 120 | 589 |
-| society | 42 | 136 | 533 |
-| culture | 15 | 52 | 131 |
-| world | 15 | 75 | 167 |
-| `it` | 1 | 23 | 81 |
+**2026-08-07 is a collection-regime boundary and days must not be compared across
+it.** A day collected at 300 is roughly half as deep again as one collected at
+150, and F1 is not comparable across days of different thickness. The four
+labelled evaluation days all predate it. The surge comparison is unaffected — it
+divides by each day's own total, which is exactly what a step change in depth
+needs.
 
-**Not one section reaches 150 before 07:00.** At 03:00 a 150-headline window
-spends 133 of its 150 slots on yesterday in politics and 149 in `it`. What kept
-the damage to 129 rows is only that most of those articles were already held:
-`UNIQUE (category_id, link)` is **global rather than per-date**, so a yesterday
-article yesterday collected cannot be re-stamped. The 129 are the ones that fell
-in a coverage hole.
+**The one thing lost is real and small.** Those ~129 rows a day are genuine
+articles, and they are now not collected at all rather than collected under the
+wrong date. **Stamping rows by publication date instead would keep them, at the
+cost of a closed day's totals changing afterwards** — which invalidates every
+measurement taken against that day and is exactly the hazard rule 4 exists for.
+Not done.
 
-**The other end of the day says the opposite thing about the same number, and
-that is the finding.** Of the articles published on 2026-08-05 before the 11:00
-run, **42.9% were never collected at all** — 704 of 1,641, 61% of economy and
-53% of society. Every one of those holes sits between 07:00 and 11:00 and **none
-at all between midnight and 05:00**. So 150 is simultaneously far too wide for
-the thin hours and less than half of what the busy ones need. **The boundary stop
-is what lets one number stop being asked to do both**: in the thin hours it stops
-the scrape early, in the busy hours it never fires, so the cap is free to rise
-for the case that actually wants it. Verified against live markup with the
-shipped parser at cap 300: economy and society stop on the cap, the other four
-stop on the boundary.
+**The date is read off the thumbnail path, not off the visible timestamp**
+(`/image/origin/{press}/2026/08/05/…`). The visible one is relative — "2시간전",
+"1일전" — so it needs a clock and a time zone to become a date, it is hour-grained,
+and past a day it stops resolving at all: three ways to be wrong about precisely
+the articles the field exists to identify. The thumbnail path is a pure function
+of the HTML, which is also what keeps `lib/headlines.ts` testable without a clock.
+Coverage is 99.7% over 676 items, and a missing date **keeps** the article — the
+same fail-open choice `canonicalLink` makes.
 
-What the 11:00 run of that day would newly have stored, boundary stop on:
+**The per-article date and the paging stop are separate mechanisms, and page 1 is
+why.** A section's first page opens with a curated headline block that is *not* in
+publication order — politics once had three 08-04 articles inside its first 46
+under a cursor still stamped 08-05 — so a rule that stopped at the first old
+article would have cut that page off at rank 3. `cursorIsBefore` stops the *paging*
+once a whole page's oldest article predates the day; `published` filters *within*
+every page, including that one.
 
-| cap | 150 | 200 | 300 | 450 | 600 |
-| --- | --- | --- | --- | --- | --- |
-| new rows | 126 | 228 | 426 | 680 | 704 |
+It was checked against the page cursor and then **against the articles
+themselves**, and only the second can establish this is a *publication* date
+rather than merely a self-consistent one: the twelve politics articles straddling
+the boundary were fetched and their own timestamps read, 12 agree and 0 disagree.
+Agreeing with the cursor would have been satisfied by any date the same pipeline
+stamped on both.
 
-**The cap went to 300 on 2026-08-07, and 300 is deliberately not the top of that
-column.** 450 puts a cold all-new run at ~2,700 headlines against the 2,630 that
-is the deepest anything here has been measured at, and the worker budget is
-cumulative. It is a `scoring_weights` value, so the raise was an `update` with no
-redeploy — but **the boundary stop had to be deployed first**, since at 150 the
-early runs already overshoot and at 300 they would overshoot twice as far.
+**Note that deeper paging widens the section gap rather than closing it**, and
+**collection cannot be equalised by paging deeper at all**: on 2026-08-04 society
+took its whole window twice while `it` never passed 98 on any of five runs. The
+thin section is not being truncated — it publishes less — so a deeper page adds
+rows where there are already rows. Migration `0025` took the balance into the
+ranking instead (`df_balanced`); round fourteen then measured that it cannot be
+priced on the day set the archive has.
 
-**Both halves were verified live the day they shipped, and the verification is a
-before/after inside one day rather than a claim.** Every row stored under
-2026-08-07 was classified against the section lists scraped past the boundary,
-one method for both groups:
+The move to six runs a day is what settled the `min_headlines` question — see the
+round-seven section of `scripts/analysis/README.md`. The short version: on a thin
+day the word at rank 70 has three headlines, so a floor is the screen; on a fat
+day it already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion
+floor is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a
+safety net for a day whose collection failed.
 
-| | rows | published today | **published another day** | |
-| --- | --- | --- | --- | --- |
-| the day's four crons, old code | 1,821 | 1,545 | **141** | **8.4%** |
-| two runs after the deploy | 937 | 881 | **0** | **0.0%** |
+Nouns are fetched *before* the headline row is inserted, so a failure leaves
+nothing behind and the next run retries naturally. The duplicate path also
+backfills headlines that somehow have no nouns.
 
-And the cap raise showed its own effect within six minutes: a cap-300 run made
-directly after a cap-150 run — with the 150-window's 150 economy and 148 society
-rows already stored — still found **125 new economy and 157 new society** rows at
-ranks 151-300. That is the 07:00-to-11:00 hole, filled while being watched.
+#### What the thicker day costs the graph, and the two errors made measuring it
 
-The run at cap 300 returned 200 in 6.5s. `culture` stopped at 236 headlines and
-`it` at 182 with 18 and 5 off-day, which is the boundary stop firing in the two
-thin sections while the four fast ones took the full 300 — the design working in
-both directions in one response.
+All-categories first paint was near-linear in the day's headline count —
+2,103 / 2,614 / 3,299 ms at 2,197 / 3,077 / 4,218 headlines before migration
+`0029`, and 1,515 / 2,080 / 2,600 ms after it. **A reader arriving today pays none
+of that**: `0031` took the computation down another 18% and `0032` stopped doing it
+per request at all, so a cached read is **1.35 ms** and a real page's first paint
+measures **~0.57 s** even on 3,224 headlines. Those figures are now the cost of a
+cache *miss*, and of `keyword_graph_compute` when the harness calls it directly.
+See "Why the graph is cached" for why that growth was not merely slow but was
+breaking the site for concurrent readers.
 
-**2026-08-07 is a collection-regime boundary and days must not be compared
-across it.** A day collected at 300 is roughly half as deep again as one
-collected at 150, and this file already records that F1 is not comparable across
-days of different thickness — the recall denominator grows while the screen stays
-at 70. The four labelled evaluation days all predate it and are unaffected. The
-surge comparison is not: it divides by each day's own total, which is exactly
-what a step change in depth needs.
+The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299, and it
+is called exactly once per request since `0024`, so there was no repeated call to
+remove. `0029` took it to 1,276 ms **without moving a single one of its ten output
+columns on any of the eight collected days** — checked by running the pre-`0029`
+definition beside the new one as `keyword_signals_old` and taking a symmetric
+`except` over all ten columns: 0 differing rows across 41,142 word-rows. **The
+useful part is which of three candidates survived measurement:**
 
-**The thicker day has a price and it is on the graph's first paint.** All-
-categories view, place gate on, near-linear in the day's headline count:
-
-| headlines | 2,197 | 3,077 | 4,218 |
-| --- | --- | --- | --- |
-| before `0029` | 2,103 ms | 2,614 ms | 3,299 ms |
-| after `0029` | **1,515 ms** | **2,080 ms** | **2,600 ms** |
-
-The "before" row is one pass per day; the "after" row is stable to ±25 ms over
-three consecutive passes, so read the direction and not the third digit.
-
-**A reader arriving today pays none of this**, and the table is kept because it
-is what forced the two changes that followed. `0031` took the computation down
-another 18% and `0032` stopped doing it per request at all — a cached read is
-**1.35 ms**, and a real page's first paint measured **~0.57 s** on both a nearly
-empty day and on 3,224 headlines. The numbers above are now the cost of a cache
-*miss*, and of `keyword_graph_compute` when the harness calls it directly. See
-"Why the graph is cached" for why the near-linear growth in that table was not
-merely slow but actually breaking the site for concurrent readers.
-
-**The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299**,
-and it is called exactly once per request — migration `0024`'s restructure —
-so there was no repeated call to remove. Migration `0029` took it to 1,276 ms
-without moving a single one of its ten output columns on any of the **eight
-collected days**, checked by running the pre-`0029` definition beside the new one
-as `keyword_signals_old` and taking a symmetric `except` over all ten columns:
-0 differing rows across 41,142 word-rows. Two changes, and **the useful part is
-which of the three candidates survived measurement**:
-
-- **The neighbour count now comes out of `pairs`** — the same self-join over
-  `doc` the association signal already runs — instead of a second one of its own.
-  `pairs` keeps `b.word > a.word` and is grouped, so each distinct partner
-  appears exactly once across the two sides of a union, which is what
-  `count(distinct b.word)` was counting. Worth **414 ms**.
+- **The neighbour count now comes out of `pairs`** — the same self-join the
+  association signal already runs — instead of a second one of its own. Worth
+  **414 ms**.
 - **`standalone` is handed its rows ordered by word.** The regex pattern is built
   per row and varies by word, and Postgres keeps only a small compiled-regex
   cache, so unordered input recompiles on nearly every row. Worth **183 ms**, and
   it is an `ORDER BY` and nothing else.
 - **Hoisting `regexp_replace` out of the row loop does nothing, and it is the
-  obvious fix.** Building the pattern once per distinct word (7,749) rather than
-  per doc row (26,341) should cut a 524 ms node by 3.4x. Measured: 1,900 ms
-  against a 1,903 ms baseline. The cost is the *match*, not the building.
+  obvious fix.** Building the pattern once per distinct word rather than per doc
+  row should cut a 524 ms node by 3.4x. Measured: 1,900 ms against a 1,903 ms
+  baseline. **The cost is the *match*, not the building.**
 
 **Two measurement errors were made getting there and both are worth not
 repeating.** The per-CTE timings were first taken by retyping each CTE as a
 standalone query — and the standalone regex came out differently escaped, so it
 measured a cheaper pattern at 103 ms where the real node is 524 ms. The same
 sitting also read a cold-cache first query (583 ms) as a signal when the warm
-value was 93 ms. Both are why the attribution that survived comes from running
-the deployed function's **own body** as a plain query — a `language sql` function
-with `RETURNS TABLE` is a black box to `EXPLAIN` otherwise — and why every timing
-here is the second of two runs.
+value was 93 ms. Both are why the attribution that survived comes from running the
+deployed function's **own body** as a plain query — a `language sql` function with
+`RETURNS TABLE` is a black box to `EXPLAIN` otherwise — and why every timing here
+is the second of two runs.
 
-Nothing on the frontend hides a wait of this size: the skeleton, the
-`preconnect` and `main.tsx`'s pre-mount request all help the *first byte* rather
-than this.
-
-**The one thing lost is real and small.** Those 129 rows a day are genuine
-articles, and they are now not collected at all rather than collected under the
-wrong date. That is the right trade — they are yesterday's holes, against 426
-correctly dated rows arriving in their place — but it is a trade. Stamping rows
-by publication date instead would keep them, at the cost of a closed day's totals
-changing afterwards, which invalidates every measurement taken against that day
-and is exactly the hazard rule 4 exists for. Not done.
-
-**The date is read off the thumbnail path, not off the visible timestamp**
-(`/image/origin/{press}/2026/08/05/…`), and the choice is not arbitrary. The
-visible one is relative — "2시간전", "1일전" — so it needs a clock and a time
-zone to become a date, it is hour-grained, and past a day it stops resolving at
-all: three ways to be wrong about precisely the articles the field exists to
-identify. The thumbnail path is a pure function of the HTML, which is also what
-keeps `lib/headlines.ts` testable without a clock. Coverage is **99.7%** over
-676 items, and a missing date **keeps** the article — the same fail-open choice
-`canonicalLink` makes.
-
-**The per-article date and the paging stop are separate mechanisms, and page 1
-is why.** A section's first page opens with a curated headline block that is
-*not* in publication order: at 12:30 KST on 2026-08-05, politics had three 08-04
-articles inside its first 46 under a cursor still stamped 08-05. A rule that
-stopped at the first old article would have cut that page off at rank 3. So
-`cursorIsBefore` stops the *paging* once a whole page's oldest article predates
-the day, and `published` filters *within* every page, including that one.
-
-**It was checked twice, and the second check is the one that matters.** Against
-the page cursor: over 30 pages of three sections, not one article carried a
-thumbnail date older than its own page's cursor stamp. And **against the articles
-themselves**, which is the only thing that can establish this is a *publication*
-date rather than merely a self-consistent one — the twelve politics articles
-straddling the 2026-08-05 boundary, six each side, were fetched and their own
-timestamps read: **12 agree, 0 disagree**, with the flip in the list falling
-exactly where the articles put it. Agreeing with the cursor would have been
-satisfied by any date the same pipeline stamped on both.
-
-**Note that deeper paging widens the section gap rather than closing it**: the
-recovery above is 359 economy and 285 society against 11 culture, 9 world and 11
-`it`. Balance is a ranking question and `df_balanced` is where it lives.
-
-**Collection cannot be equalised by paging deeper, and that is why balance was
-attempted in the ranking instead.** 2026-08-04, counted per run: society took
-the whole 150-headline window on both the 11:00 and the 15:00 run while `it`
-never passed 98 on any of the five. **The thin section is not being truncated —
-it publishes less** — so a deeper page adds rows where there are already rows.
-Migration `0025` took the balance in the ranking instead
-(`df_balanced`), and round fourteen then measured that it cannot be priced on the
-day set the archive has; both halves of that are recorded above under the sieve.
-
-The move to six runs a day is what settled the `min_headlines` question — see the
-round-seven section of `scripts/analysis/README.md`. The short version: on a thin day the
-word at rank 70 has three headlines, so a floor is the screen; on a fat day it
-already has eight, so a floor of 4, 5 or 6 never reaches it. **A promotion floor
-is unnecessary rather than deferred**, and `min_headlines` stays at 3 as a safety
-net for a day whose collection failed.
-
-Nouns are fetched *before* the headline row is inserted, so a failure leaves
-nothing behind and the next run retries naturally. The duplicate path also
-backfills headlines that somehow have no nouns.
+Nothing on the frontend hides a wait of this size: the skeleton, the `preconnect`
+and `main.tsx`'s pre-mount request all help the *first byte* rather than this.
 
 ## External services
 
@@ -2248,7 +1925,13 @@ Two habits it enforces, both learned the hard way:
   maximising it converges on dropping the day's biggest story — measured, not
   hypothetical. Judge on F1 and the `story_rank` column together. That story is
   per day and comes from `analysis.eval_days`, not from a hardcoded 폭염: it
-  leads three of the four days and 김민석 leads 2026-08-02.
+  leads four of the five days and 김민석 leads 2026-08-02.
+
+**The eval days are 2026-07-31, 08-01, 08-02, 08-03 and 08-04**, the last added
+by round fifteen because both of its questions needed a fat day — a cut needs a
+binding cap to substitute into, and α needs a day whose sections actually
+collected unequally. **They are not comparable to each other on F1** and never
+were; configurations are compared inside one run.
 
 **The days and the configurations under measurement are each named in one
 place.** `analysis.eval_days` (`12_eval_days.sql`) holds the days, and the

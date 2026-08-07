@@ -34,11 +34,32 @@ create table analysis.eval_days (
 );
 
 -- Each top_story is the day's most frequent word under the shipped sieve,
--- read off the ranking rather than chosen: 폭염 45, 폭염 47, 김민석 45, 폭염 60.
+-- read off the ranking rather than chosen: 폭염 45, 폭염 47, 김민석 45, 폭염 60,
+-- 폭염 194.
+--
+-- **2026-08-04 is here for round fifteen and it is a different kind of day.**
+-- The four days above are 691 to 2,197 headlines; this one is 4,218, which is
+-- what both of round fifteen's questions need. head_pos as a cut was declined on
+-- the reading that a tab's render cap never binds, and on a fat day it does;
+-- α was measured as unpriceable because the only day it lost on had collected
+-- 150/149/150/150/150/150 in a single capped run, and this is the imbalanced day
+-- the mechanism was built for.
+--
+-- **It does not make the days F1-comparable with each other, and they never
+-- were.** Recall's denominator is every labelled-good word with df >= 3, which
+-- grows with the day while the screen stays at 70, so a fat day scores worse on
+-- F1 while showing strictly more of the news. Configurations are compared
+-- against each other inside one run; that is what this table is for.
+--
+-- It is deliberately the last day before the collection-regime boundary.
+-- 2026-08-07 raised collect_cap 150 → 300, and 08-08 was still collecting when
+-- this row went in — rule 4's second trigger, and the reason 08-04 could not be
+-- added when round fourteen wanted it.
 insert into analysis.eval_days (d, top_story) values
   ('2026-07-31', '폭염'),
   ('2026-08-01', '폭염'),
   ('2026-08-02', '김민석'),
-  ('2026-08-03', '폭염');
+  ('2026-08-03', '폭염'),
+  ('2026-08-04', '폭염');
 
 select d::text as day, top_story from analysis.eval_days order by d;

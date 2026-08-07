@@ -28,7 +28,15 @@ export const CACHE_TTL_MS = 5 * 60 * 1000
 // insertion order alone would throw away the keyword_graph/share promises the
 // "6 requests on return became 0" measurement rests on, in favour of keeping
 // whatever was searched most recently.
-export const CACHE_MAX_ENTRIES = 24
+//
+// **24 → 40 when the headline panel learnt to hold several days open at once.**
+// One word with every day expanded is up to HISTORY_WINDOW (14) entries of its
+// own, which on top of a day's seven views is already past 24 — so the eviction
+// rule above would have started throwing away exactly the promises it was
+// rewritten to protect. Like the 24 it replaces this is a bound on growth rather
+// than a measured optimum; what makes it the right *kind* of number is that it
+// clears the largest state the UI can now be put into.
+export const CACHE_MAX_ENTRIES = 40
 
 interface Entry {
   /**

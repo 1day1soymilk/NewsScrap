@@ -244,6 +244,39 @@ word invalidates every threshold tuned when that kind could not appear. Round
 nine should have triggered this re-sweep on its own; it took noticing 닉스 on the
 canvas.
 
+## Round eleven — the third threshold the rescue invalidated
+
+`demote_head_pos` 0.70 → **0.60** (migration `0020`). By this round the pattern
+had become the finding rather than any one number: round nine's proper-noun
+rescue admits a *new kind* of word, so every threshold tuned before it is
+suspect, and this is the third one to move.
+
+| demote_head_pos | day-wide mean F1 |
+| --- | --- |
+| 0.50 | 53.30 |
+| 0.55 | 54.12 |
+| **0.60** | **54.10** |
+| 0.65 | 54.18 |
+| 0.70 (was) | 53.02 |
+| off | 51.40 |
+
+0.55–0.65 are one plateau, flat to within 0.08 and all about a point of F1 and
+two of precision above 0.70.
+
+**0.50 scores well and is rejected outright**, because it sinks 폭염 off
+2026-07-31's screen — the cliff round six had already recorded, still exactly
+where it was. What moved was the plateau, down onto the edge of it.
+
+**0.60 is taken over 0.65's marginally better F1** because it is mid-plateau and a
+full 0.10 clear of that cliff. Rule 5 is not a tie-break to be spent, and a
+threshold one step from dropping the day's biggest story is not worth 0.08.
+
+No category measurement accompanies this round, and that is correct rather than
+missing: a demotion reorders and removes nothing, so it can only act where the
+render cap binds. **Round thirteen then found that the cap does bind on fat days'
+tabs**, which does not change this verdict but does mean the sentence "a tab
+draws at most 46 against a cap of 70" was only true of the days measured here.
+
 ## Round thirteen — `min_word_len` 4, and a harness that was scoring the wrong screen
 
 **The lead closed, and closing it turned up a measurement bug worth more than the
@@ -560,6 +593,222 @@ Nothing is deleted from the database either. `place_gate` and `balance_alpha`
 stay as columns, `analysis.day_edges` stays as a table, and re-activating a row
 is one `UPDATE`. The α arm in particular is expected to be re-run once
 2026-08-04 stops collecting and can be labelled.
+
+### Migration `0028` turned the place gate on anyway — the round's sharpest finding
+
+The heading above says "none shipped" and it was true for one release cycle.
+Migration `0028` turns the place gate **on**. **None of the measurement above is
+retracted**: the gate still costs F1 on both surfaces and every word it removes
+is still labelled good. What overruled it was looking at the screen.
+
+`0026` shipped the gate off because a measurement is what this project moves a
+threshold on. `0028` turns it on because the screen was then looked at and showed
+what the labels structurally cannot. Two views of 2026-08-03 one flip apart: the
+gate removes 서울, 광주, 인천, 포항, 울산 and 강원 and keeps 부산, 대구, 경남 and
+충청 — and **the four it keeps are exactly the four that sit inside a story**
+(부산 with 노무현·김용민·돌려차기, 대구 with 경산·경북, 경남 with 양산, 충청 with
+김민석), while the six it drops touched nothing or touched only each other.
+
+**The decisive difference is in the event list, not on the canvas.** With the
+gate off, that day's **fourth-largest event is "서울 · 광주" at 66 headlines** —
+two place names joined to each other and to nothing else, so nothing on the page
+can say what those 66 articles are about. With the gate on the row is gone and
+"미국 · 중국 · 기아 · 정의선 외 2" at 57 headlines takes its place. That one can be
+read. The F1 loss is real and is the price of removing it: 서울 and 광주 are each
+independently worth showing, which is precisely why the labels defend them.
+
+So the standing lesson is not "the gate was wrong" or "the harness was wrong" —
+it is that **the two were answering different questions, and this file records
+which one each can settle.** `analysis.word_labels` answers "is this a word worth
+showing". Anything that changes what a word *means on the page* rather than
+whether it deserves a place is outside what any label set can price, and has to
+be decided by looking. It is the same mismatch that stops the harness pricing the
+render cap, one section above.
+
+`word_overrides` mode 'place' is now load-bearing rather than a labelled fact in
+reserve: the 45 rows are the gate's whole input.
+
+The gate costs about **1.5×** on the RPC (one sitting, 2026-08-03, all-categories
+view: `0018` 1,403 ms, gate off 1,342 ms, gate on 2,056 ms — those three may be
+read against each other and against nothing else). Since migration `0032` the
+graph is cached, so a reader pays that on a cache miss rather than per request.
+
+### The two wiring migrations were checked rather than asserted
+
+`0024` (the plpgsql fixed-point restructure) and `0025` (`df_balanced` and its α
+parameter) both claim to change nothing while α is 0 and the gate is off, and
+both were checked: `keyword_graph` is byte-identical to what it drew before on
+all **35** cells (five collected days × the all view and six tabs) after `0024`,
+and again after `0025`.
+
+Only the edge *ordering* moved, on 18 of the 35 — `0024` added `, a, b` to the
+edge sort, and three pairs on 2026-07-31 carry `cooc` 3 and `npmi`
+0.80097396756174372838 equal to the last digit, so which came first had been
+decided by the query plan. Running both orders through the frontend's own code
+moved the Louvain partition on **0** cells, merged events on **0**, and drawn
+geometry on 7 — six of them sub-pixel. The one real move is 2026-08-02's all
+view, where one region rearranges internally and 전남 travels 137.6 px with the
+same partition and the same events; the cause is `forceLink` applying its
+velocity updates in link order, not the tie rule.
+
+### The four-day numbers before migrations `0018`–`0022`
+
+Kept because several paragraphs in this file are about that run. Top-70 precision
+over the four eval days as of 2026-08-04, the first run on an archive analysed
+end to end by one analyser: **75.7 / 70.0 / 70.0 / 68.6**, mean F1 **55.45**, the
+drawn set 199 good and 81 bad, and the 24 category cells meaning **57.20**.
+
+The shipped sieve now scores per-day precision **95.7 / 94.3 / 87.0 / 97.1** and
+F1 **67.3 / 66.3 / 77.9 / 43.3** on those same four days — mean 93.53 and 63.70,
+78.58 on the tabs. Note 2026-08-02 draws **69** words and not 70: at
+`min_word_len` 4 only 69 qualify on the archive's thinnest day, so its cap does
+not bind and it is not word-count-comparable with anything above.
+
+What that pre-`0018` run establishes, because it is internal to itself: the
+shipped configuration beat length-only on all four days day-wide
+(57.3/51.6/65.8/47.1 against 55.1/48.4/61.7/45.1) and every `min_headlines`
+floor, and on the tabs led at 57.20 against 48.52 for the pre-`0004` scoped
+count — so migration `0004`'s finding survived the analyser change intact.
+
+**Do not read the 2026-08-03 column against the one that preceded it** (71.4,
+mean F1 67.3). That move was the collector going to six runs a day and the day
+going from 900 headlines to 2,197 — not the sieve, and not the analyser.
+
+## Round fifteen — both open questions answered, and neither changes a value
+
+`OPEN.md` items 2 and 3 were both blocked on the same thing: a fat, closed,
+labelled day. 2026-08-04 is now all three, so it joined `analysis.eval_days` and
+both arms ran. **No `scoring_weights` value moves.** What the round produces is
+two sharper statements of rules this file already carried, and one correction.
+
+`unlab` is 0 on every row quoted here, on all three surfaces —
+`10_sieve_eval.sql`, all 270 cells of `11_category_eval.sql`, and both
+worklists — after two labelling passes (`26_labels_round_fifteen.sql`, 224
+words).
+
+### The correction: the harness's shipped row had the place gate off
+
+Migration `0028` turned the gate on. Config 200, named `r14: SHIPPED (cap 70)`,
+still carried `place_gate false`. **Since that migration the harness had been
+scoring a screen the app does not draw** — the same defect round thirteen found
+in this file's own ranking, in a different place. Config **300** is the shipped
+sieve as `scoring_weights` actually holds it, and every number below is against
+that. 200 is left unedited as "round fourteen's control, gate off", because
+several recorded comparisons were taken against it.
+
+This is worth stating as a habit rather than as an incident: **a migration that
+changes `scoring_weights` has to change the harness's shipped row in the same
+breath**, or the next round measures against a control that no longer exists.
+
+### Question 1 — head_pos as a cut, re-measured on fat days. The demotion stays.
+
+Round five shipped the demotion because the cut won day-wide and lost 8 of 24
+category cells, and explained the split by the render cap: a tab drew at most 46
+words against a cap of 70, so a cut there was loss with nothing to promote.
+Round thirteen then found **the cap does bind on a fat day's tabs**, which
+undercut that explanation and reopened the question.
+
+Day-wide, 5 days:
+
+| configuration | mean F1 | mean precision |
+| --- | --- | --- |
+| **300 SHIPPED (demote .60)** | 55.88 | 87.36 |
+| cut .60, no demote | 55.98 | 88.38 |
+| cut .65, no demote | 56.20 | 88.66 |
+| **cut .70, no demote** | **56.24** | 88.42 |
+| head_pos off entirely | 55.80 | 87.36 |
+
+Category tabs, 30 cells (5 days × 6 sections):
+
+| configuration | mean F1 | mean precision | mean shown |
+| --- | --- | --- | --- |
+| **300 SHIPPED (demote .60)** | **73.04** | 79.55 | 43.8 |
+| cut .70, no demote | 72.62 | 81.06 | 42.3 |
+| cut .65, no demote | 72.08 | 81.52 | 41.5 |
+| cut .60, no demote | 71.59 | 82.25 | 40.4 |
+| head_pos off entirely | 71.87 | 78.21 | 43.8 |
+
+**The signature is exactly round five's — a day-wide win with a category loss —
+and it survives the fat day.** The cut takes +0.36 F1 day-wide and gives back
+0.42 on the tabs.
+
+**But the reason round five gave is not the reason it happens**, and this is the
+finding. Per day on the tabs, cut .70 against the shipped demotion:
+
+| day | cells at the cap | cut .70 | ships | |
+| --- | --- | --- | --- | --- |
+| 2026-07-31 | 0/6 | 80.80 | 81.62 | cut loses |
+| 2026-08-01 | 0/6 | 79.73 | 80.57 | cut loses |
+| 2026-08-02 | 0/6 | 80.60 | 80.40 | cut wins |
+| 2026-08-03 | 3/6 | 71.77 | 71.72 | cut wins |
+| **2026-08-04** | **5/6** | **50.18** | **50.88** | **cut loses** |
+
+On the fattest day, where five of six tabs fill the cap, the cut still loses.
+The prediction "give the cut a binding cap and it will win on the tabs too" is
+**measured and false**, and `shown` says why: 69.2 under the demotion against
+67.8 under the cut. **A cut cannot rely on the cap binding, because cutting is
+what stops it binding.** Removing words shrinks the qualifying pool; where the
+pool sat just above 70, the cut takes it under, and from there the cut is pure
+loss with nothing to promote — the same mechanism as a thin day, now arriving on
+a fat one through the cut's own action.
+
+That is the general form worth keeping, and it is stronger than the render-cap
+argument it replaces: **a mechanism that removes candidates cannot be justified
+by the substitution it enables, because it is also spending the surplus that
+substitution depends on.** A demotion has no such feedback — it reorders and
+removes nothing, so the pool it draws from is the pool it found.
+
+### Question 2 — α on the day it was built for. Still does not ship, and now we know why.
+
+Round fourteen recorded α as *not measurable on this day set*. It is measurable
+now, and the answer is specific.
+
+| α | mean F1 | mean precision |
+| --- | --- | --- |
+| **0 (ships)** | **55.88** | **87.36** |
+| .25 | 55.28 | 86.50 |
+| .50 | 55.28 | 86.50 |
+| .75 | 55.40 | 86.78 |
+| 1.00 | 55.54 | 87.06 |
+
+α loses at every setting. **And the whole loss is on one day — the one day with
+nothing to correct.** Balance factors per eval day, at α = 1:
+
+| day | min | max | spread | F1 at α 0 → α 1 |
+| --- | --- | --- | --- | --- |
+| 2026-07-31 | 0.999 | 1.006 | **1.01** | 67.3 → **64.3** |
+| 2026-08-01 | 0.742 | 1.869 | 2.52 | 64.3 → 64.3 |
+| 2026-08-02 | 0.773 | 1.294 | 1.67 | 77.1 → 77.1 |
+| 2026-08-03 | 0.808 | 1.201 | 1.49 | 42.0 → **42.7** |
+| 2026-08-04 | 0.690 | 1.686 | 2.44 | 28.7 → **29.3** |
+
+2026-07-31 collected 150/149/150/150/150/150 in a single capped run, so its
+factors sit within 0.6% of 1 and α has nothing to do there but perturb a `df`
+tie in the third decimal — and it costs three good words. On the three days with
+real imbalance α is neutral or **positive**, including the day the mechanism was
+built for.
+
+**So α is not wrong; applying it to days that do not need it is.** Gating it on
+the day's own spread scores **56.14 / 87.92** against the shipped 55.88 / 87.36
+— but that figure is *arithmetic over rows already measured*, the way round
+fourteen scored the demotion at 62.88, not a run of its own. **+0.26 F1 does not
+buy a new threshold**: the spread cut-off would need tuning, would carry its own
+permanent rule-4 obligation, and sits inside the noise of a five-day mean. The
+shape is recorded so the next attempt starts from it rather than from α applied
+flat.
+
+### Two notes on the instruments
+
+`11_category_eval.sql` gained a head_pos axis — `max_hp` and `demote_hp` per
+variant, both null meaning "whatever ships" — because the cut and the demotion
+had only ever been readable from `scoring_weights`, so no variant could move
+them. The five pre-existing variants are **byte-identical** before and after the
+patch, checked row by row.
+
+**It still has no sieve 6**, so every row in it is gate-free. That is sound for
+this round's question, where both arms are equally gate-free and the comparison
+is internal, but it is not the shipped screen. The gate's own tab numbers came
+from the deployed RPC for that reason, and still would.
 
 ## Labels
 

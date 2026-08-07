@@ -1,14 +1,18 @@
 import { summariseHistory } from '../lib/history'
 import type { HistoryPoint } from '../lib/history'
 
+const NO_OPEN: ReadonlySet<string> = new Set()
+
 interface WordHistoryProps {
   points: HistoryPoint[]
   /**
-   * 아래 목록에서 지금 펼쳐져 있는 날. 그 날의 점이 강조된다.
+   * 아래 목록에서 지금 펼쳐져 있는 날들. 그 날들의 점이 강조된다.
    *
-   * 기본값은 마지막 점이다 — 창의 끝은 화면의 날짜이고, 목록도 그 날부터 열린다.
+   * **비어 있으면 아무 점도 강조하지 않는다**, 그리고 그것이 기본 상태다. 예전에는
+   * 기본값이 마지막 점이었는데, 그 값은 "화면의 날짜가 곧 펼쳐진 날"이라는 전제에서
+   * 나온 것이고 그 전제가 사라졌다 — 목록은 이제 전부 닫힌 채로 열린다.
    */
-  activeDate?: string
+  openDates?: ReadonlySet<string>
 }
 
 // Drawn in its own coordinate space and scaled by CSS, exactly as the donut is.
@@ -65,7 +69,7 @@ const LABEL_SLOT = 34
  * 만들지 않는 것은 그래서다: `aria-hidden` 안에 초점 받는 요소를 두는 것이 되고,
  * 목록 머리글이 이미 같은 일을 접근 가능하게 한다.
  */
-export function WordHistory({ points, activeDate }: WordHistoryProps) {
+export function WordHistory({ points, openDates = NO_OPEN }: WordHistoryProps) {
   // 점 하나는 궤적이 아니다. 평평한 점 하나는 "이 단어는 내내 그대로였다"고
   // 주장하는데, 실제로 일어난 일은 비교할 것이 없다는 것이다.
   if (points.length < 2) return null
@@ -91,10 +95,9 @@ export function WordHistory({ points, activeDate }: WordHistoryProps) {
     x: PAD_X + index * step,
     y: y(point.share),
     labelled: (lastIndex - index) % stride === 0,
+    open: openDates.has(point.date),
   }))
   const line = placed.map((point) => `${point.x},${point.y}`).join(' ')
-  const active =
-    placed.find((point) => point.date === activeDate) ?? placed[placed.length - 1]
 
   return (
     <figure className="mb-4 border-b border-line pb-4">
@@ -117,9 +120,9 @@ export function WordHistory({ points, activeDate }: WordHistoryProps) {
             key={point.date}
             cx={point.x}
             cy={point.y}
-            r={point === active ? 3 : 1.75}
+            r={point.open ? 3 : 1.75}
             style={{
-              fill: point === active ? 'var(--color-ink)' : 'var(--color-ink-faint)',
+              fill: point.open ? 'var(--color-ink)' : 'var(--color-ink-faint)',
             }}
           />
         ))}
@@ -145,10 +148,10 @@ export function WordHistory({ points, activeDate }: WordHistoryProps) {
                 y={PLOT_HEIGHT + 21}
                 textAnchor="middle"
                 fontSize={9.5}
-                fontWeight={point === active ? 600 : 400}
+                fontWeight={point.open ? 600 : 400}
                 style={{
                   fill:
-                    point === active ? 'var(--color-ink)' : 'var(--color-ink-muted)',
+                    point.open ? 'var(--color-ink)' : 'var(--color-ink-muted)',
                 }}
               >
                 {point.count}

@@ -169,6 +169,15 @@ interface Row {
    */
   inRegion: number
   overlap: number
+  /**
+   * 그려진 svg의 폭. **높이와 짝으로만 읽어야 하는 값이다.**
+   *
+   * svg는 제 크기로 그려진 뒤 `max-w-full`로 컨테이너에 맞춰 **균일 축소**되므로,
+   * 폭이 뷰의 폭을 넘어가면 그 비율만큼 글자도 같이 작아진다 — 최소 글자 크기가
+   * 14인데 배율 0.6이면 화면에서는 8.4px다. 높이만 보면 "자리를 더 쓴다"로 읽히는
+   * 변화가 실제로는 "글자가 작아진다"인 경우가 있고, 그 둘은 다른 문제다.
+   */
+  width: number
   height: number
   /**
    * 한 번의 `computeGraphLayout`에 걸린 시간(ms), 세 번 중 제일 짧은 것.
@@ -239,6 +248,7 @@ for (const view of VIEWS) {
       lenMax: Math.round(Math.max(0, ...lengths)),
       inRegion,
       overlap: overlaps(layout.nodes),
+      width: Math.round(layout.bounds.width),
       height: layout.bounds.height,
       ms: Math.round(fastest * 10) / 10,
     })
@@ -247,7 +257,7 @@ for (const view of VIEWS) {
 
 const columns: (keyof Row)[] = [
   'view', 'day', 'nodes', 'edges', 'drawn', 'crowded', 'crossings', 'xIn', 'xBr',
-  'bridges', 'lenMed', 'lenMax', 'inRegion', 'overlap', 'height', 'ms',
+  'bridges', 'lenMed', 'lenMax', 'inRegion', 'overlap', 'width', 'height', 'ms',
 ]
 const widths = columns.map((c) =>
   Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)),

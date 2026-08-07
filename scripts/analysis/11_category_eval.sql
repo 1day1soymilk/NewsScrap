@@ -114,7 +114,6 @@ day_pass as (
   cross join w
   left join word_overrides ov on ov.word = s.word
   where ov.mode is distinct from 'exclude'
-    and s.head_pos <= w.max_head_pos
     and (
       char_length(s.word) >= w.min_word_len
       or s.spec >= w.min_spec
@@ -130,12 +129,30 @@ day_pass as (
 -- Variant 1 is what shipped *before* migration 0004, not what ships now: that
 -- migration moved sieve 1 day-wide after this file measured it at 40.4 mean F1
 -- against 61.2. It is kept as the losing baseline it is.
-variants (ord, name, mode, min_h, min_sa) as (values
-  (1, 'sieve1 scoped >= 3 (pre-0004)', 'scoped', 3, null::numeric),
-  (3, 'sieve1 day >= 3       (ships)', 'day',    3, null::numeric),
-  (4, 'sieve1 day >= 3 and scoped >=2','both',   3, null::numeric),
-  (5, 'ships, standalone off',         'day',    3, 0.00),
-  (6, 'ships, standalone >= .50',      'day',    3, 0.50)
+-- `max_hp` / `demote_hp` of null mean "whatever ships", so rows 1 and 3-6 are
+-- untouched by round fifteen and only 10-13 move the head_pos axis.
+--
+-- **Round fifteen's question lives here rather than day-wide.** head_pos ships as
+-- a demotion because round five measured the cut winning day-wide and losing
+-- eight of twenty-four category cells, and read the split off the render cap: a
+-- tab drew at most 46 words against a cap of 70, so a cut there was loss with
+-- nothing to promote into the hole. Round thirteen then found the cap *does*
+-- bind on a fat day's tabs, which is why 2026-08-04 is in `analysis.eval_days`
+-- and why these four rows exist.
+--
+-- Note what this file still cannot see: it has no sieve 6, so every row here is
+-- gate-free. That is fine for this question because both arms are equally
+-- gate-free and the comparison is internal — but it is not the shipped screen.
+variants (ord, name, mode, min_h, min_sa, max_hp, demote_hp) as (values
+  (1, 'sieve1 scoped >= 3 (pre-0004)', 'scoped', 3, null::numeric, null::numeric, null::numeric),
+  (3, 'sieve1 day >= 3       (ships)', 'day',    3, null::numeric, null::numeric, null::numeric),
+  (4, 'sieve1 day >= 3 and scoped >=2','both',   3, null::numeric, null::numeric, null::numeric),
+  (5, 'ships, standalone off',         'day',    3, 0.00,          null::numeric, null::numeric),
+  (6, 'ships, standalone >= .50',      'day',    3, 0.50,          null::numeric, null::numeric),
+  (10,'r15: cut .60, no demote',       'day',    3, null::numeric, 0.60,          9.90),
+  (11,'r15: cut .65, no demote',       'day',    3, null::numeric, 0.65,          9.90),
+  (12,'r15: cut .70, no demote',       'day',    3, null::numeric, 0.70,          9.90),
+  (13,'r15: head_pos off entirely',    'day',    3, null::numeric, 9.90,          9.90)
 ),
 
 shown as (
@@ -145,13 +162,14 @@ shown as (
       partition by v.ord, sd.d, sd.cat
       -- 강등이 첫 키인 것은 keyword_graph와 같다. 상한이 안 걸리는 셀에서는
       -- 아무것도 바꾸지 않고, 걸리는 셀에서만 자리를 갈아 끼운다.
-      order by (dp.head_pos > w.demote_head_pos) asc, sd.df desc, sd.word
+      order by (dp.head_pos > coalesce(v.demote_hp, w.demote_head_pos)) asc, sd.df desc, sd.word
     ) as rank
   from variants v
   cross join scoped_df sd
   cross join w
   join day_pass dp on dp.d = sd.d and dp.word = sd.word
   where dp.standalone >= coalesce(v.min_sa, w.min_standalone)
+    and dp.head_pos <= coalesce(v.max_hp, w.max_head_pos)
     and case v.mode
           when 'scoped' then sd.df >= v.min_h
           when 'day'    then dp.day_df >= v.min_h
