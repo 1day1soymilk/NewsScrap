@@ -846,14 +846,19 @@ split is what makes the layout testable: jsdom has no canvas, so anything callin
 `computeFontSizes` the graph still reuses unchanged — the sieve decides who is
 drawn, never how big.
 
+**Every number in this section comes from `scripts/layout/`, and its README is
+where the tables live.** What is kept here is what stops a mistake without
+reading one. That README is also stamped with the sitting each table was taken
+in, because this branch was bitten three times by figures written down without
+theirs — **numbers from that harness are comparable only to other runs of it.**
+
 **The layout is two stages, and there is no global simulation.** This was one
 `forceSimulation` over all 70 words, and the trouble with it was structural
 rather than a matter of tuning. A day is not a hairball: it is eight to a dozen
-constellations of three to eight words plus 14–26 words holding no edge at all
-(`scripts/layout/README.md` has the counts for four days). The global sim knew
-none of that, and `isolatedRings` sent the edgeless words to rings at 0.36–0.52
-of the *short side* — inside the canvas — so unrelated words sat between the
-events and every edge had to cross somebody else's story.
+constellations of three to eight words plus 14–26 words holding no edge at all.
+The global sim knew none of that, and `isolatedRings` sent the edgeless words to
+rings at 0.36–0.52 of the *short side* — inside the canvas — so unrelated words
+sat between the events and every edge had to cross somebody else's story.
 
 - **Stage A lays each event out in its own box** (`layoutEvent`), and **stage B
   packs those boxes into the given width** (`shelfPack`). Separation now comes
@@ -876,9 +881,9 @@ events and every edge had to cross somebody else's story.
   label areas times 3.5. At 1.0 the collision pass cannot resolve — 12 to 19
   overlapping label pairs on every day, against an invariant of 0 — and two
   labels that end up touching leave no room for a stroke, so edges vanish
-  silently: 22 of 37 drawn. That is CLAUDE.md's cohesion-at-0.35 failure
-  returning by a different door. Slack is cheap because `crop` sizes the region,
-  not the box.
+  silently: 22 of 37 drawn. That is the cohesion-at-0.35 failure below returning
+  by a different door. Slack is cheap because `crop` sizes the region, not the
+  box.
 - **Edgeless words are scattered into the gaps between the regions, and the
   invariant that makes that safe is an ordering rather than a tuning**
   (`scatterLoose`). They used to go to a band *below* the packed regions — never
@@ -886,213 +891,144 @@ events and every edge had to cross somebody else's story.
   there as the graceful degradation. What changed is that **edges are routed
   first and their curves are then obstacles**: each curve's `CURVE_STEPS` samples
   are stamped into an 8px occupancy grid alongside the anchored labels, and a
-  loose word may sit anywhere its label box touches no marked cell, ties going to
-  the cell farthest from anything already placed. **`crowded` therefore cannot
-  rise**, and that is provable rather than measured: `routeEdge` now receives a
-  strict *subset* of the obstacle list it used to get — the removed members are
-  exactly the band words, and the band sat entirely below every region — so no
-  route could change. Measured accordingly: `crowded`, `crossings`, `xIn`, `xBr`,
-  `bridges` and `lenMax` are byte-identical in all eight cells. **What is bought
-  is height, down 5.6–17.4% everywhere** (9.4 / 6.4 / 15.0 / 5.6 desktop and
-  9.7 / 8.7 / 17.4 / 6.6 phone, computed from the before/after pairs in
-  `scripts/layout/README.md`'s `scatterLoose` table), which is the band's whole
-  vertical cost. If
-  `crowded` ever does rise here, that is a broken implementation and not a trade.
-  This is the same problem the old inner-ring placement failed at, solved by
-  ordering rather than by a force balance.
+  loose word may sit anywhere its label box touches no marked cell. **`crowded`
+  therefore cannot rise**, and that is provable rather than measured: `routeEdge`
+  now receives a strict *subset* of the obstacle list it used to get, so no route
+  could change. **If `crowded` ever does rise here, that is a broken
+  implementation and not a trade.** What is bought is height, down 5.6–17.4%
+  everywhere. The curves are not re-routed around the scattered words, and that
+  is symmetric rather than a shortcut: those words were placed to miss the
+  curves, so the curves already miss them.
 
-  The curves are not re-routed around the scattered words, and that is symmetric
-  rather than a shortcut: those words were placed to miss the curves, so the
-  curves already miss them.
-
-  **Every edgeless word is placed on all eight cells and the band takes zero**,
-  including on the phone, which the design did not expect: a narrow canvas stacks
-  its regions vertically and so is *taller*, and the 48px shelf gutter is wider
-  than the smallest label needs. The band path stays live and is unit-tested at
-  200px, where six of six loose words are stranded — it is the kind of path that
-  rots, so do not "simplify" `flowRows` away.
-
+  The band path takes zero words on all eight cells but stays live and is
+  unit-tested at 200px, where six of six loose words are stranded — it is the
+  kind of path that rots, so do not "simplify" `flowRows` away.
 - **A stranger may not sit inside somebody else's story, and the numbers rather
-  than taste settled that.** With in-region placement allowed, `inRegion` was 5 /
-  8 / 3 / 7 on desktop and 4 / 7 / 5 / 4 on the phone, and **on every one of the
-  eight cells the strangers concentrated in the day's biggest event** (7 of 7 in
-  2026-08-03's twelve-word one). That follows from the mechanism — the largest
-  crop box holds the most interior slack — and it is **the convex-hull failure
-  running backwards**: the blobs were removed because a hull swallows whatever
-  lies between an event's members, and here the words were being put there on
-  purpose. A region is read from the whitespace around it and nothing else, so a
-  foreign word in that whitespace erases the only thing saying "different story".
-  Region rectangles are now stamped into the same occupancy grid, `inRegion` is 0
-  everywhere, and **blocking them cost nothing**: every column and every height
-  identical to the decimal, all 14–26 loose words still placed, the only movement
-  a cropped svg width of 1040 → 1034 on two cells. `inRegion` stays in the
-  harness at 0 for the same reason the sieve harness prints `unlabeled`.
+  than taste settled that.** With in-region placement allowed the strangers
+  concentrated in the day's biggest event on **every one of the eight cells** —
+  the largest crop box holds the most interior slack. That is **the convex-hull
+  failure running backwards**: the blobs were removed because a hull swallows
+  whatever lies between an event's members, and here the words were being put
+  there on purpose. A region is read from the whitespace around it and nothing
+  else, so a foreign word in that whitespace erases the only thing saying
+  "different story". Region rectangles are stamped into the same occupancy grid,
+  and **blocking them cost nothing** — every column and every height identical to
+  the decimal. `inRegion` stays in the harness at 0 for the same reason the sieve
+  harness prints `unlabeled`.
 - **Bridged events are packed next to each other** (`orderForPacking`). Ordering
-  by area alone sent one bridge diagonally across the frame: edge length maxed
-  at 719px against 208 before the rewrite. Ordering greedily by ties to what is
+  by area alone sent one bridge diagonally across the frame: edge length maxed at
+  719px against 208 before the rewrite. Ordering greedily by ties to what is
   already placed brought it back to 228–337.
 - **Height is an output, not an input.** `LayoutOptions` has no `height`;
-  `bounds.height` is the answer. `MIN_HEIGHT`/`MAX_HEIGHT`/`HEIGHT_RATIO` and
-  the whole `NARROW_WIDTH`/`NARROW_HEIGHT_PER_WORD` branch are gone. That branch
+  `bounds.height` is the answer. `MIN_HEIGHT`/`MAX_HEIGHT`/`HEIGHT_RATIO` and the
+  whole `NARROW_WIDTH`/`NARROW_HEIGHT_PER_WORD` branch are gone. That branch
   existed because inventing a height from the width gives a phone a box far too
-  small — 358×279, which the collision pass cannot resolve, and 2026-07-31
-  really did draw one overlapping pair there. Not inventing a height removes the
-  problem rather than compensating for it.
-- **`crowded` fell on all eight measured cells; `crossings` did not.** It fell on
-  five, rose on three, and the rises are worth knowing: desktop 08-01 went 0 → 1
-  because 34 edges are sparse enough that the old global sim happened to find a
-  crossing-free arrangement, and 08-03 rose because **the remaining crossings are
-  now almost entirely inside one dense event** (`xIn` 18, `xBr` 0). Crossings
-  between unrelated stories are gone. Do not read the flat total as "no change";
-  read the `xIn`/`xBr` split, which is why the harness prints it.
-- **`xBr` is not one thing either, and splitting it overturned the diagnosis.**
-  Once collection went to six runs a day, 2026-08-03 doubled and its bridges went
-  2 → 7 with `xBr` 0 → 14, which reads as "the greedy ordering can no longer put
-  every bridge next to its partner". `scripts/layout/bridges.ts` breaks that
-  column into bridge×bridge, bridge×**own** region's inner edges, and
-  bridge×another region's inner edges. Across eight cells the first is **1** and
-  the third is **3** (all from one 703px bridge on a day with two bridges and no
-  reordering freedom); everything else — 14 of 14 on desktop 08-03 — is a bridge
-  cutting its **own** event's spokes on the way out. `orderForPacking` cannot
-  touch that. A word sitting mid-box crosses its event whichever way it leaves.
-- **The fix is a mirror, and it was chosen for a property rather than a score.**
-  `faceBridges` flips each region within its own box (identity / horizontal /
-  vertical / both, cheapest total bridge length, iterated to a fixed point).
-  Reflection is an isometry, so the box keeps its size — no re-packing — and it
-  **cannot change `xIn` or `overlap` at all**, since those depend only on
-  distances inside the region. It is a lever that can only move the thing it was
-  built for, which is why there is no regression surface to guard. Measured:
-  `xBr` 24 → 13 over eight cells, desktop 08-03 14 → 5, `xIn` and `overlap`
-  identical everywhere. It converges in **one** round; `FACE_ROUNDS` (4) is slack,
-  not a tuned number — 1, 2, 3, 4 and 8 all give the same picture.
-  One cell regresses and it is instructive: phone 08-03 goes 4 → 5 because the
-  cost is **length, not crossings**, so shortening one bridge can drag another's
-  exit across more spokes. Switching the objective to a crossing count would buy
-  one crossing on one of eight cells and cost the geometry of every inner edge at
-  flip time. Not done.
-- **`xIn` was not one thing either, and the same split settled it.** A story's
-  lines crossing each other may be forced by its graph or left there by the
-  layout, and only the second kind can be fixed. `scripts/layout/planarity.ts`
-  reports, per event, whether it is planar and — if not — its **skewness**, the
-  fewest edges that have to go, which is also the floor on that event's
-  crossings under *any* drawing. Six events drew a crossing, their floors summed
-  to 2 and they produced 30. Only 2026-08-02's thirteen-word 전당대회 is
-  non-planar at all, and five of the six were flat-drawable all along, which is
-  why sweeping `LOCAL_SLACK` and running `untangle` had moved none of them: the
-  tool was wrong, not the setting. Neither edge counting nor subgraph search
-  answers this — K3,3 clears the 3n−6 bound comfortably, and the Petersen graph
-  is non-planar while holding K5 and K3,3 only as subdivisions. Both are in
-  `planar.test.ts` for that reason.
-- **`layoutCluster` draws an event flat when it can**, via `src/components/planar.ts`:
-  Tutte's barycentric solve over a fixed convex outer boundary, with the
-  non-planar case handled by dropping the smallest edge set that makes the rest
-  planar and laying those edges back on top. **It computes no planar embedding**
-  — it tries short cycles as candidate boundaries and returns a drawing only
-  after verifying on the original edges that nothing crosses and no two points
-  coincide. Failing to find a drawing that exists costs nothing, since the force
-  layout is still there; returning a wrong one would, and this way round cannot.
-  Three things had to be measured rather than reasoned:
-  - **Tutte coordinates are unusable as drawn.** They need 3-connectivity, and a
-    day's events are sparse, so the graph is triangulated first — which makes
-    every face a triangle, hangs ten points inside one, and wants **31x** the
-    area (13 words) or **199x** (11 words). Scaling to separate labels is safe,
-    since crossings are similarity-invariant, but 865px became **7,377px**.
+  small — 358×279, which the collision pass cannot resolve, and 2026-07-31 really
+  did draw one overlapping pair there. Not inventing a height removes the problem
+  rather than compensating for it.
+
+**Three columns were each found not to be one thing, and every one of those
+splits overturned the diagnosis it was made under.** This is the section's
+recurring lesson, and it is why the harness prints the splits at all:
+
+- **`crossings` splits into `xIn`/`xBr`.** The region rewrite dropped `crowded`
+  on all eight cells while raising total `crossings` on three — because the
+  remaining crossings had moved *inside* single dense events, and crossings
+  between unrelated stories were gone. **Do not read the flat total as "no
+  change".**
+- **`xBr` splits three ways** (`scripts/layout/bridges.ts`): bridge×bridge,
+  bridge×**own** region's inner edges, bridge×another region's. Across eight
+  cells nearly all of it is the middle one — a bridge cutting its own event's
+  spokes on the way out, which `orderForPacking` cannot touch, because a word
+  sitting mid-box crosses its event whichever way it leaves. **A change that
+  claims to move `xBr` has to show the split**, or it has not shown the cause.
+- **`xIn` splits into forced and left-there** (`scripts/layout/planarity.ts`,
+  which reports each event's planarity and, if not, its **skewness** — the floor
+  on that event's crossings under *any* drawing). Six events once drew 30
+  crossings against a summed floor of 2, and five of the six were flat-drawable
+  all along, which is why sweeping `LOCAL_SLACK` and running `untangle` had moved
+  none of them: **the tool was wrong, not the setting.** Neither edge counting
+  nor subgraph search answers this — K3,3 clears the 3n−6 bound comfortably, and
+  the Petersen graph is non-planar while holding K5 and K3,3 only as
+  subdivisions. Both are in `planar.test.ts` for that reason.
+
+The two fixes those splits pointed at:
+
+- **`faceBridges` is a mirror, and it was chosen for a property rather than a
+  score.** It flips each region within its own box (identity / horizontal /
+  vertical / both, cheapest total bridge length, to a fixed point). Reflection is
+  an isometry, so the box keeps its size — no re-packing — and it **cannot change
+  `xIn` or `overlap` at all**, since those depend only on distances inside the
+  region. A lever that can only move the thing it was built for has no regression
+  surface to guard. `FACE_ROUNDS` (4) is slack, not a tuned number: it converges
+  in one. One cell regresses, instructively — the cost is **length, not
+  crossings**, so shortening one bridge can drag another's exit across more
+  spokes. Switching the objective to a crossing count was measured and declined.
+- **`layoutCluster` draws an event flat when it can**, via
+  `src/components/planar.ts`: Tutte's barycentric solve over a fixed convex outer
+  boundary, with the non-planar case handled by dropping the smallest edge set
+  that makes the rest planar and laying those edges back on top. **It computes no
+  planar embedding** — it tries short cycles as candidate boundaries and returns a
+  drawing only after verifying on the original edges that nothing crosses and no
+  two points coincide. Failing to find a drawing that exists costs nothing, since
+  the force layout is still there; returning a wrong one would, and this way round
+  cannot. Three things had to be measured rather than reasoned:
+  - **Tutte coordinates are unusable as drawn.** They need 3-connectivity, so the
+    graph is triangulated first — which hangs ten points inside one face and wants
+    31x the area at 13 words. Scaling to separate labels is safe, since crossings
+    are similarity-invariant, but 865px became **7,377px**.
   - **Seeding the force simulation from the flat drawing does nothing at all.**
-    300 ticks walk back to the same minimum and all four days returned to their
-    old numbers. A force layout does not remember where it started. Do not
-    re-run this experiment.
+    300 ticks walk back to the same minimum. A force layout does not remember
+    where it started. **Do not re-run this experiment.**
   - **Bounding each step does work.** Cap a vertex's move at a third of its
     distance to the nearest edge it does not touch and no edge can cross another
-    (PrEd's argument). And spreading and scaling **solve different days** —
-    spreading unlocked 08-02, scaling unlocked 08-03 — so both are candidates
-    and the winner is measured per event.
-  The area a flat drawing may cost is priced **per crossing removed**, and that
-  price must be a condition of entry: applied to the winner instead, the
-  candidate that removes the most crossings wins and is then disqualified,
-  taking the affordable one with it (08-02 went back from 5 to 15 that way).
-  Measured at the time: `xIn` 60 → 18, `crowded` 28 → 11, `overlap` 0
-  throughout, events drawing a crossing 6 → 3 against a floor of 2.
+    (PrEd's argument). And spreading and scaling **solve different days**, so both
+    are candidates and the winner is measured per event.
 
-  **Those figures are from the canvas of 2026-08-03 and the canvas has moved
-  several times since** — the analyser change, migrations `0018`–`0021`, and then
-  `0022`. `scripts/layout/README.md` carries the current table, taken from a
-  fixture stamped **2026-08-04 21:44 KST**, and it is stamped because this branch
-  was bitten three times by numbers written down without their sitting.
+  The area a flat drawing may cost is priced **per crossing removed, and that
+  price must be a condition of entry**: applied to the winner instead, the
+  candidate that removes the most crossings wins and is then disqualified, taking
+  the affordable one with it.
 
-  The short version of that table: `overlap` is 0 in all eight cells, `drawn`
-  equals `edges` in all eight, and **twenty-six of the day's twenty-seven events
-  are planar and draw no crossing at all**. `xBr` rose 4 → 12 and every one of
-  the twelve is `brOwn` under the three-way split, with `brBr`, `brOther` and
-  `overBoxes` 0 everywhere — a bridge cutting its own event's spokes on the way
-  out, the kind neither `orderForPacking` nor `faceBridges` can touch. **Read the
-  totals with 2026-08-02 removed and the direction reverses**: on the other three
-  days `xIn` is **0** and `crowded` went 12 → 2.
+**`PLANAR_AREA_PER_CROSSING` is a threshold, not a dial, and that is the whole
+character of it.** Its sweep is a staircase — 0.15/0.25/0.35 drew the days
+identically to having no planar path at all, 0.5 bought the entire move, 1.0 and
+2.0 are the same picture — so there is no middle setting and **the harness cannot
+settle it; it is a judgement about the picture.** It is 1.0. The price is height.
+It has since fired in the costly direction for the first time: 2026-08-02's
+biggest event grew by one word and three edges when the sieve improved, the area
+budget **refused** it a flat drawing, and it now draws 40 crossings against a
+floor of 2. `layoutCluster` verifies a candidate before returning it, so those 40
+cannot be a bad flat drawing — they are the force layout, which is what a refusal
+falls back to. **No constant was touched.** Open; the sweep and the numbers are in
+`scripts/layout/README.md` and `scripts/layout/OPEN.md`.
 
-  **The one event is a regression, it is large, and it is open.** 2026-08-02's
-  김민석·정청래·민주당 grew from 12 words / 26 edges to **13 / 29** when the
-  sieve improved, and at `PLANAR_AREA_PER_CROSSING` 1.0 the area budget
-  **refused** it a flat drawing — desktop height 2100 → **780**, below even the
-  1285 it had at price 0.5 — so it now draws **40** crossings against a floor of
-  2, with `crowded` 0 → 10 and `lenMax` 1769 → 217. `layoutCluster` verifies a
-  candidate before returning it, so 40 crossings cannot be a bad flat drawing; it
-  is the force layout, which is what the refusal falls back to. This is the
-  property already recorded here — **the area budget is a threshold, not a dial**
-  — firing for the first time in the direction that costs something, and one word
-  and three edges flipped it. **No constant was touched.** Also note that phone
-  08-02's svg falling to 402px looks like a fix for the "30% shrink" finding and
-  is not one: the box is small because the event lost its flat drawing, and if it
-  is ever let back in the shrink returns with it.
+**When that table went stale, the first diagnosis was the wrong one, and how it
+was settled is the reusable part.** Migration `0024` had reordered exactly-tied
+edges, so it looked like the culprit. **The leg that settles it is the one that
+does not depend on sampling**: no edge reordering can add a *word* to an event,
+and the event had gained one. The old order was decided by a query plan and
+cannot be replayed, so the sampled leg — permuting the tied edges eight ways per
+cell — is **a sample of the space, not a span of it**, and it moved no metric
+column anywhere. What actually invalidated the table is `min_word_len` 3 → 4
+changing which 70 words are drawn, and "which words" and "therefore which edges"
+cannot be separated, because edges exist only between drawn words. That is
+migration `0007`'s recorded trap, unchanged.
 
-  `PLANAR_AREA_PER_CROSSING` had been re-swept on the previous canvas and was
-  **still a staircase**: 0.5 gave `xIn` 34, 1.0 and 2.0 both gave 24 for 11% more
-  height with no other column moving, 4.0 gave 12 for 47% more height and pushed
-  `xBr` back to 7. **Raised to 1.0** on that sweep. The price is a cliff, so it
-  is a judgement about the picture rather than something the harness settles, and
-  the judgement went this way because the crossings it removes are all inside
-  **the day's biggest story** — the place a reader is most likely to be tracing a
-  line — while `overlap`, `xBr` and `crowded` did not move at all, so there was
-  no regression surface. On that canvas only 2026-08-02 changed: `xIn` 13 → 8,
-  height 1285 → 2100 desktop, `lenMax` 823 → 1769, accepted knowingly because the
-  event's region grows and the edges crossing it grow with it. **The price is
-  height** — 08-02 desktop 651 → 1544px — **and the per-crossing price is a
-  cliff, not a dial**: 0.15, 0.25 and 0.35 drew the four days identically to
-  having no planar path at all, and 0.5 bought the whole move. There is no middle
-  setting. That "no regression surface" is exactly what the paragraph above
-  overturned, on a canvas one word wider.
-
-  **The table went stale because of `0022`, not because of `0024`, and this
-  branch's own first conclusion was the wrong one.** `0024` reordered
-  exactly-tied edges, so it looked like the culprit. **The leg that settles it is
-  the one that does not depend on sampling**: no edge reordering can add a *word*
-  to an event, and 2026-08-02's largest event went 12 words / 26 edges to 13 / 29,
-  so a reorder cannot be what moved it. The old order was decided by a query plan
-  and cannot be replayed, so the sampled leg was run alongside it — permute the
-  tied edges eight ways per cell, which is **a sample of the space the reorder
-  could have moved through, not a span of it** — and **every metric column is
-  unmoved in all eight cells**, with only 2026-08-02's coordinate sum wobbling by
-  0.03%. What invalidated the table is `min_word_len` 3 → 4 changing
-  which 70 words are drawn — and the two halves of that, "which words" and
-  "therefore which edges", cannot be separated, because edges exist only between
-  drawn words. That is migration `0007`'s recorded trap, unchanged.
 - **Shelves wrap like a snake, and the packing order was never the problem.**
   `orderForPacking` puts bridged events next to each other, and the shelf wrap
-  then splits that pair across the full width of the canvas — the two boxes
-  deliberately made adjacent end up as far apart as possible. That was the 703px
-  bridge on desktop 08-01 that `OPEN.md` had written off as unfixable because
-  the day holds only two bridges. Mirroring odd shelves takes it to 274px and
-  its `xBr` to 0, with no constant involved. **First-fit packing is measured and
-  declined**: reclaiming the row a two-word event wastes saves 5–11% of the
-  phone's height but takes phone 08-03 from 6 bridge crossings to 9, because
-  going back to fill an earlier shelf is the same act as separating the
-  neighbours `orderForPacking` just placed. A wasted row is cosmetic; a bridge
-  cutting through another story is not.
+  then split that pair across the full width of the canvas — the two boxes
+  deliberately made adjacent ending up as far apart as possible. That was a 703px
+  bridge that `OPEN.md` had written off as unfixable. Mirroring odd shelves takes
+  it to 274px and its `xBr` to 0, with no constant involved. **First-fit packing
+  is measured and declined**: reclaiming the row a two-word event wastes saves
+  5–11% of the phone's height but raises bridge crossings, because going back to
+  fill an earlier shelf is the same act as separating the neighbours
+  `orderForPacking` just placed. A wasted row is cosmetic; a bridge cutting
+  through another story is not.
 - **The pass condition is written in terms of `xIn`/`xBr`, never total
-  `crossings`** (`scripts/layout/README.md`). The region rewrite dropped `crowded`
-  on all eight cells while raising total `crossings` on three, so the total called
-  a better picture a failure. `overlap` is the only column with an absolute rule:
-  never above 0. And a change that claims to move `xBr` has to show the
-  three-way split, because the total does not say whether the cause was guessed
-  right — the paragraph above is what that costs when it is skipped.
+  `crossings`.** `overlap` is the only column with an absolute rule: never above
+  0.
 
 Still true, and still arrived at by looking at real days:
 
@@ -1113,54 +1049,42 @@ Still true, and still arrived at by looking at real days:
 - **Widening buys nothing — *inside a fixed container*.** The svg is drawn at its
   own cropped size and then `max-w-full` scales it down to the container, so
   spreading sideways shrinks everything by the same factor. **Growing the
-  container is a different act and it does buy something**, which is why the
-  graph now has its own `max-w-[1600px]` box while the prose keeps its measure:
-  the layout runs at a larger width, so there are fewer shelf rows and less is
-  scaled away. Measured at 1600 against 1024, every column about the lines is
-  identical and `overlap` is 0, and height falls **26–41%** on all four days.
-  `<main>`'s `max-w-6xl` moved down onto the masthead and the error block,
+  container is a different act and it does buy something**, which is why the graph
+  has its own `max-w-[1600px]` box while the prose keeps its measure: the layout
+  runs at a larger width, so there are fewer shelf rows and less is scaled away.
+  Measured at 1600 against 1024, every column about the lines is identical,
+  `overlap` is 0, and height falls **26–41%** on all four days. `<main>`'s
+  `max-w-6xl` moved down onto the masthead and the error block,
   `KeywordGraph.tsx`'s own `max-w-5xl` had to come off too or the change would
-  have been a no-op, and the event list keeps 1024 from the header block inside
-  it. Verified in Chromium at a 1700px viewport: graph 1600, masthead 1152, list
-  1024. **1600 is not a measured number** — height falls monotonically with
-  width, so this harness cannot choose a stopping point; past it the minimum font
-  size and the reading distance decide, and that is a judgement about the picture.
+  have been a no-op, and the event list keeps 1024. **1600 is not a measured
+  number** — height falls monotonically with width, so this harness cannot choose
+  a stopping point; past it the minimum font size and the reading distance decide.
   `GraphSkeleton` carries the same cap, because when the two disagreed the canvas
   jumped ~570px wider the moment loading ended — the exact page-jump the skeleton
   exists to prevent.
 - **`h-auto` on the svg, not `max-w-full` alone.** The element carries `width`
   and `height` attributes, so capping the width leaves the height at the box the
-  layout ran in and the drawing is letterboxed inside it. That put a 141px
-  band of empty canvas above and below the graph on a phone.
-
+  layout ran in and the drawing is letterboxed inside it. That put a 141px band
+  of empty canvas above and below the graph on a phone.
 - **A resize under 8px does not re-run the layout** (`nextLayoutWidth`), and the
   width feeding it goes through `useDeferredValue` so a re-layout does not block
-  paint. One layout of 70 words and 60 edges measures **48ms**, and the cost is
-  the simulation rather than the edge routing — with the edges removed entirely
-  it is still 37.5ms, while 20 words with the same 60 edges is 5.5ms. Dragging a
-  window edge from 1280 to 358 at 6px a frame ran 154 layouts and now runs 76.
-  The 8px is invisible because the svg is drawn at its own size and then scaled
-  by `max-w-full`.
-- **`rectCollide` is not where that 48ms goes**, and it looks like it should be.
-  Hoisting the outer node's fields out of the inner loop and dropping the `?? 0`
-  guards (every node is seeded with x/y/vx/vy, so they never fired) produced a
-  bit-identical picture — coordinate sums matched to four decimals — and a time
-  inside the noise, 38.3ms against 38.7ms on the same fixture. The cost is
-  d3's own forces across 300 ticks, so anything that actually moves this number
-  changes the picture. Do not re-run this experiment.
-- **Both figures above predate the region rewrite, and the rewrite did make it
-  cheaper.** The simulation runs per event instead of over the whole day, so the
-  biggest collision pass is 14 nodes and 91 pairs a tick rather than 70 and
-  2,415. `scripts/layout/measure.ts` now prints `ms` per cell: the region layout
-  alone is **6.8–20.9 ms** across the eight cells, against the 48 ms this file
-  recorded for one global layout. The scatter is a fixed
-  O(cells × loose words) cost on top of that and takes it to **13.5–24.0 ms** —
-  the first draft was 26–42 ms, brought back by two exact optimisations that move
-  no pixel (a 2-D prefix sum so `fits` is four reads rather than a walk, and one
-  `Int32Array` BFS queue instead of a fresh array per layer). It grows with
-  canvas *area*, so the 1600px box is the sensitivity to watch, and the resize
-  path still re-runs the whole layout every 8px. Numbers from this harness are
-  comparable only to other runs of it.
+  paint. Dragging a window edge from 1280 to 358 at 6px a frame ran 154 layouts
+  and now runs 76. The 8px is invisible because the svg is drawn at its own size
+  and then scaled by `max-w-full`.
+- **`rectCollide` is not where the layout's time goes**, and it looks like it
+  should be. Hoisting the outer node's fields out of the inner loop and dropping
+  the `?? 0` guards (every node is seeded with x/y/vx/vy, so they never fired)
+  produced a bit-identical picture — coordinate sums matched to four decimals —
+  and a time inside the noise, 38.3ms against 38.7ms on the same fixture. The cost
+  is d3's own forces across 300 ticks, so **anything that actually moves this
+  number changes the picture. Do not re-run this experiment.**
+- **The region rewrite is what made it cheaper**, and by construction rather than
+  by tuning: the simulation runs per event instead of over the whole day, so the
+  biggest collision pass is 14 nodes and 91 pairs a tick rather than 70 and 2,415.
+  One global layout was 48 ms; the region layout is 6.8–20.9 ms across the eight
+  cells and 13.5–24.0 ms with the scatter. The scatter grows with canvas *area*,
+  so the 1600px box is the sensitivity to watch, and the resize path still re-runs
+  the whole layout every 8px.
 
 Collision is rectangular rather than d3's circular `forceCollide`, because a
 circle around a wide label is roughly three times taller than the text and leaves
