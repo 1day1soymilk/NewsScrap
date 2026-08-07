@@ -7,6 +7,7 @@ import { GraphSkeleton } from './components/GraphSkeleton'
 import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
+import { WordSearch } from './components/WordSearch'
 import {
   fetchCategories,
   fetchCategoryShare,
@@ -382,6 +383,17 @@ function App() {
   }, [eventGraph])
 
 
+  // 검색으로 닿은 단어는 그날 그려진 70개 안에 없을 수 있다. 그래프가 아직 안
+  // 왔을 때(nodes 0)는 아직 판단할 수 없으므로 false로 둔다 — 공유된 링크가
+  // 그래프 도착 전에 "없는 단어"라고 불려서는 안 된다.
+  const wordOffCanvas = useMemo(
+    () =>
+      selectedWord !== null &&
+      graph.nodes.length > 0 &&
+      !graph.nodes.some((node) => node.word === selectedWord),
+    [graph.nodes, selectedWord],
+  )
+
   const activeEvent = useMemo(() => {
     if (!selectedEvent) return null
     return eventGraph.events.find((event) => event.words[0].word === selectedEvent) ?? null
@@ -468,7 +480,17 @@ function App() {
           <h1 className="text-sm font-medium tracking-[0.2em] text-ink-muted uppercase">
             뉴스 스크랩
           </h1>
-          <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-4">
+            <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
+            <WordSearch
+              onSelect={(word) => {
+                // 단어 선택과 사건 선택은 상호배제다 — 캔버스에서 무엇이 살아 있는지
+                // 읽을 수 없게 된다. 캔버스 클릭 핸들러와 같은 규칙.
+                setSelectedEvent(null)
+                setSelectedWord(word)
+              }}
+            />
+          </div>
         </div>
       </header>
 
@@ -564,6 +586,7 @@ function App() {
         loading={headlinesLoading}
         error={headlinesError}
         history={history}
+        offCanvas={wordOffCanvas}
         onClose={() => {
           setSelectedWord(null)
           setSelectedEvent(null)

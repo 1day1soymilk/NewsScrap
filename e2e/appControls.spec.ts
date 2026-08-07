@@ -141,3 +141,44 @@ test('leaves the date stepper alone when nothing has been collected', async ({ p
   await expect(page.getByRole('button', { name: '이전 수집일' })).toBeDisabled()
   await expect(page.getByRole('button', { name: '다음 수집일' })).toBeDisabled()
 })
+
+// 유상증자 is in WORD_DIRECTORY and deliberately not in DEFAULT_GRAPH — that is
+// the whole point of it, and if a later fixture edit adds it to the graph these
+// tests stop testing anything.
+test('a searched word that was not drawn opens the panel and says so', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // Read only after first paint has settled: the mount effect that fills
+  // ?date= into the URL runs via replaceState, and reading page.url() right
+  // after goto() races it — goto() can resolve before React's first passive
+  // effect flushes, which was observed reading `before` as null every time.
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+  const before = new URL(page.url()).searchParams.get('date')
+
+  await page.getByRole('searchbox').fill('유상증자')
+  await page.getByRole('option', { name: /유상증자/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toBeVisible()
+
+  // The day did not move under the reader. Asserted on the date rather than on
+  // a hand-encoded word, which would be testing URLSearchParams' escaping.
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('word'))
+    .toBe('유상증자')
+  expect(new URL(page.url()).searchParams.get('date')).toBe(before)
+})
+
+test('a searched word that was drawn does not carry the note', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  await page.getByRole('searchbox').fill('예산안')
+  await page.getByRole('option', { name: /예산안/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel.getByText(/2일 중 2일/)).toBeVisible()
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toHaveCount(0)
+})

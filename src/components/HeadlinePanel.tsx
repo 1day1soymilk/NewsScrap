@@ -21,6 +21,12 @@ interface HeadlinePanelProps {
    * draw.
    */
   history?: HistoryPoint[]
+  /**
+   * The subject is a word the sieve did not draw on this day — reached by
+   * search rather than by clicking the canvas. Saying so is what stops the
+   * canvas looking broken for not lighting anything.
+   */
+  offCanvas?: boolean
 }
 
 export function HeadlinePanel({
@@ -32,6 +38,7 @@ export function HeadlinePanel({
   error,
   onClose,
   history = [],
+  offCanvas = false,
 }: HeadlinePanelProps) {
   const open = subject !== null
   const heading = isEvent ? `${subject} 관련 헤드라인` : `"${subject}" 관련 헤드라인`
@@ -87,6 +94,12 @@ export function HeadlinePanel({
           닫기
         </button>
       </div>
+
+      {offCanvas && (
+        <p className="mb-3 text-xs text-ink-faint">
+          이 날 화면에는 없는 단어입니다.
+        </p>
+      )}
 
       {!isEvent && <WordHistory points={history} />}
 

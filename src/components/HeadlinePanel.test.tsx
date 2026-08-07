@@ -157,4 +157,14 @@ describe('HeadlinePanel', () => {
     renderPanel({ subject: '김민석 · 정청래', isEvent: true, history: [] })
     expect(screen.queryByText(/일 중 /)).not.toBeInTheDocument()
   })
+
+  it('says when the word is not among the words drawn that day', () => {
+    renderPanel({ subject: '유상증자', offCanvas: true })
+    expect(screen.getByText(/이 날 화면에는 없는 단어/)).toBeInTheDocument()
+  })
+
+  it('says nothing of the sort for a word that is drawn', () => {
+    renderPanel({ subject: '폭염' })
+    expect(screen.queryByText(/이 날 화면에는 없는 단어/)).not.toBeInTheDocument()
+  })
 })
