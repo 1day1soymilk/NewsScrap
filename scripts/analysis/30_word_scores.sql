@@ -76,10 +76,18 @@ sig as (
   select s.* from params p cross join lateral keyword_signals(p.d) s
 ),
 
--- json_agg preserved keyword_graph's own ordering, so ordinality recovers the
--- rank the RPC assigned. The JSON carries no rank field of its own.
+-- json_agg preserved the ordering, so ordinality recovers the rank assigned.
+-- The JSON carries no rank field of its own.
+--
+-- **`keyword_graph_compute`, never `keyword_graph`.** Since migration 0032 the
+-- latter reads `keyword_graph_cache` and only computes on a miss, so it answers
+-- "what is on screen" rather than "what does the configuration currently
+-- produce". This file asks the second question, and `chk` below depends on it:
+-- its contract is two-valued — agreement, or `!` meaning *this script* is wrong.
+-- Reading the cache would add a third meaning, "the cache predates the last
+-- retune", and a check with three meanings and two symbols is not a check.
 graph as (
-  select keyword_graph((select d from params), null) as j
+  select keyword_graph_compute((select d from params), null) as j
 ),
 nodes as (
   select

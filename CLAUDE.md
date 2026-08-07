@@ -799,9 +799,26 @@ file says elsewhere that thresholds in `scoring_weights` and the dictionary in
 true of the *computation* and no longer true of the *screen*: until
 `refresh_keyword_graph_cache` is called for the affected dates, the cached graph
 is the one computed under the old settings. `docs/DEPLOYMENT.md` carries the
-operator step. Anyone running `scripts/analysis/` against the live database
-should note that the harness calls the helpers directly and is therefore
-unaffected — it measures the sieve, not the cache.
+operator step.
+
+**Anything that asks "what does the configuration produce" must call
+`keyword_graph_compute`; only the app may call `keyword_graph`.** This sentence
+first appeared here claiming the harness was unaffected because it calls the
+helpers directly. That was written without checking and was false: two scripts
+called the RPC itself, and both were switched.
+
+- `scripts/analysis/30_word_scores.sql` — its `chk` column cross-checks its own
+  copy of the sieve against the drawn node list, and its contract is
+  two-valued: agreement, or `!` meaning *the script* is wrong. Reading the cache
+  adds a third meaning — "the cache predates the last retune" — and a check with
+  three meanings and two symbols is not a check.
+- `scripts/layout/pullFixture.mjs` — a layout fixture has to be the graph the
+  current configuration draws, or every number `scripts/layout/measure.ts`
+  prints is measured against a picture the sieve no longer produces.
+
+`10_sieve_eval.sql`, `11_category_eval.sql` and the worklists were already safe:
+they call `keyword_signals` and the ranking helpers, never the RPC. The general
+rule is the one in bold, not the list.
 
 ### Reading the same view twice costs nothing
 
