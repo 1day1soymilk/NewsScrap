@@ -1599,18 +1599,53 @@ at 70. The four labelled evaluation days all predate it and are unaffected. The
 surge comparison is not: it divides by each day's own total, which is exactly
 what a step change in depth needs.
 
-**The thicker day has a price and it is on the graph's first paint.** One
-sitting, all-categories view, place gate on: **2,197 headlines → 2,103 ms;
-3,077 → 2,614 ms; 4,218 → 3,299 ms** — near-linear in the day's headline count,
-so a full day at cap 300 lands around 3.5 s. **The cost is `keyword_signals`,
-which is 2,034 ms of the 4,218-headline day's 3,299** (`keyword_graph_candidates`,
-which is that call plus sieves 1-4, is 1,967 ms and yields 338 candidates; the
-remaining ~1.3 s is the fixed-point loop's ranking and edge picking). It is
-already called exactly once per request — that is what migration `0024`'s
-restructure bought — so this is not a repeated-work bug and there is nothing
-cheap left to remove. Making it faster is its own task. Nothing on the frontend
-hides a 3.5 s wait: the skeleton, the `preconnect` and `main.tsx`'s pre-mount
-request all help the *first* byte rather than this.
+**The thicker day has a price and it is on the graph's first paint.** All-
+categories view, place gate on, near-linear in the day's headline count:
+
+| headlines | 2,197 | 3,077 | 4,218 |
+| --- | --- | --- | --- |
+| before `0029` | 2,103 ms | 2,614 ms | 3,299 ms |
+| after `0029` | **1,515 ms** | **2,080 ms** | **2,600 ms** |
+
+The "before" row is one pass per day; the "after" row is stable to ±25 ms over
+three consecutive passes, so read the direction and not the third digit.
+
+**The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299**,
+and it is called exactly once per request — migration `0024`'s restructure —
+so there was no repeated call to remove. Migration `0029` took it to 1,276 ms
+without moving a single one of its ten output columns on any of the **eight
+collected days**, checked by running the pre-`0029` definition beside the new one
+as `keyword_signals_old` and taking a symmetric `except` over all ten columns:
+0 differing rows across 41,142 word-rows. Two changes, and **the useful part is
+which of the three candidates survived measurement**:
+
+- **The neighbour count now comes out of `pairs`** — the same self-join over
+  `doc` the association signal already runs — instead of a second one of its own.
+  `pairs` keeps `b.word > a.word` and is grouped, so each distinct partner
+  appears exactly once across the two sides of a union, which is what
+  `count(distinct b.word)` was counting. Worth **414 ms**.
+- **`standalone` is handed its rows ordered by word.** The regex pattern is built
+  per row and varies by word, and Postgres keeps only a small compiled-regex
+  cache, so unordered input recompiles on nearly every row. Worth **183 ms**, and
+  it is an `ORDER BY` and nothing else.
+- **Hoisting `regexp_replace` out of the row loop does nothing, and it is the
+  obvious fix.** Building the pattern once per distinct word (7,749) rather than
+  per doc row (26,341) should cut a 524 ms node by 3.4x. Measured: 1,900 ms
+  against a 1,903 ms baseline. The cost is the *match*, not the building.
+
+**Two measurement errors were made getting there and both are worth not
+repeating.** The per-CTE timings were first taken by retyping each CTE as a
+standalone query — and the standalone regex came out differently escaped, so it
+measured a cheaper pattern at 103 ms where the real node is 524 ms. The same
+sitting also read a cold-cache first query (583 ms) as a signal when the warm
+value was 93 ms. Both are why the attribution that survived comes from running
+the deployed function's **own body** as a plain query — a `language sql` function
+with `RETURNS TABLE` is a black box to `EXPLAIN` otherwise — and why every timing
+here is the second of two runs.
+
+Nothing on the frontend hides a wait of this size: the skeleton, the
+`preconnect` and `main.tsx`'s pre-mount request all help the *first byte* rather
+than this.
 
 **The one thing lost is real and small.** Those 129 rows a day are genuine
 articles, and they are now not collected at all rather than collected under the
