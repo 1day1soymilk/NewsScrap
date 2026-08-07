@@ -207,8 +207,8 @@ at 1000. It returns `{nodes, edges}` as JSON. Functions here are all
 Everything the rest of this section says about the loop, the fixed point and the
 helpers describes `keyword_graph_compute`; the name `keyword_graph` now means
 "the cached answer, or compute it if there is no row". See "Why the graph is
-cached" below for the measurements that forced it and for what the cache costs
-you when you retune.
+cached" below for the measurements that forced it and for how a retune reaches
+the cache since migration `0034`.
 
 **`keyword_graph_compute` is `language plpgsql` and everything else here is
 `language sql`, because the node rule is a fixed point** (migration `0024`).
@@ -793,13 +793,29 @@ data. `json` is a verbatim passthrough. Anything that round-trips this payload
 has to preserve it exactly, because the frontend's cache compares object
 identity and the e2e suite asserts on drawn geometry.
 
-**The cost is that a retune is no longer live, and this is a real loss.** This
-file says elsewhere that thresholds in `scoring_weights` and the dictionary in
-`word_overrides` can be retuned with an `update` and no redeploy. That is still
-true of the *computation* and no longer true of the *screen*: until
-`refresh_keyword_graph_cache` is called for the affected dates, the cached graph
-is the one computed under the old settings. `docs/DEPLOYMENT.md` carries the
-operator step.
+**The cost was that a retune stopped being live, and migration `0034` closes
+that gap rather than merely documenting it.** For one release cycle this file
+said thresholds in `scoring_weights` and the dictionary in `word_overrides` can
+be retuned with an `update` and no redeploy, and that had quietly stopped being
+true of the *screen* — until `refresh_keyword_graph_cache` was called by hand
+for the affected dates, the cached graph stayed the one computed under the old
+settings. `keyword_graph_config_fingerprint()` (`0034`) hashes every row of
+both tables that can change the drawn graph — a denylist of `note` (both
+tables) and `created_at` (`word_overrides`), so a column added later is covered
+without editing the function, the same inversion this file already records for
+the compound-merge rule. `keyword_graph_cache` carries a `config_fingerprint`
+alongside its `graph`, and `keyword_graph` now serves a cached row only when
+that fingerprint still matches the current one — a retune is reflected on the
+very next read, at the cost of roughly doubling a cache hit (measured warm,
+second of two runs: 1.35 ms → ~3–6 ms, against ~2 s to recompute, which is what
+makes checking on every read affordable). `keyword_graph_cache_health` (`0033`)
+now calls a fingerprint mismatch `stale` too, so `refresh_stale_keyword_graph_cache`
+heals the affected dates' cache rows within a run or two with no operator step
+at all — `docs/DEPLOYMENT.md`'s "call `refresh_keyword_graph_cache` by hand
+after a retune" instruction is gone, not merely relocated. `note` is excluded
+from the hash for the same reason migration `0026` exists: it edits four `note`
+columns and deliberately moves no `value`, and hashing documentation would
+invalidate every cached cell for a comment edit.
 
 **Anything that asks "what does the configuration produce" must call
 `keyword_graph_compute`; only the app may call `keyword_graph`.** This sentence
