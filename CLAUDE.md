@@ -1564,12 +1564,40 @@ What the 11:00 run of that day would newly have stored, boundary stop on:
 | --- | --- | --- | --- | --- | --- |
 | new rows | 126 | 228 | 426 | 680 | 704 |
 
-**The cap should go to 300, and 300 is deliberately not the top of that column.**
-450 puts a cold all-new run at ~2,700 headlines against the 2,630 that is the
-deepest anything here has been measured at, and the worker budget is cumulative.
-It is a `scoring_weights` value, so the raise is an `update` with no redeploy —
-but **the boundary stop has to be deployed first**, since at 150 the early runs
-already overshoot and at 300 they would overshoot twice as far.
+**The cap went to 300 on 2026-08-07, and 300 is deliberately not the top of that
+column.** 450 puts a cold all-new run at ~2,700 headlines against the 2,630 that
+is the deepest anything here has been measured at, and the worker budget is
+cumulative. It is a `scoring_weights` value, so the raise was an `update` with no
+redeploy — but **the boundary stop had to be deployed first**, since at 150 the
+early runs already overshoot and at 300 they would overshoot twice as far.
+
+**Both halves were verified live the day they shipped, and the verification is a
+before/after inside one day rather than a claim.** Every row stored under
+2026-08-07 was classified against the section lists scraped past the boundary,
+one method for both groups:
+
+| | rows | published today | **published another day** | |
+| --- | --- | --- | --- | --- |
+| the day's four crons, old code | 1,821 | 1,545 | **141** | **8.4%** |
+| two runs after the deploy | 937 | 881 | **0** | **0.0%** |
+
+And the cap raise showed its own effect within six minutes: a cap-300 run made
+directly after a cap-150 run — with the 150-window's 150 economy and 148 society
+rows already stored — still found **125 new economy and 157 new society** rows at
+ranks 151-300. That is the 07:00-to-11:00 hole, filled while being watched.
+
+The run at cap 300 returned 200 in 6.5s. `culture` stopped at 236 headlines and
+`it` at 182 with 18 and 5 off-day, which is the boundary stop firing in the two
+thin sections while the four fast ones took the full 300 — the design working in
+both directions in one response.
+
+**2026-08-07 is a collection-regime boundary and days must not be compared
+across it.** A day collected at 300 is roughly half as deep again as one
+collected at 150, and this file already records that F1 is not comparable across
+days of different thickness — the recall denominator grows while the screen stays
+at 70. The four labelled evaluation days all predate it and are unaffected. The
+surge comparison is not: it divides by each day's own total, which is exactly
+what a step change in depth needs.
 
 **The one thing lost is real and small.** Those 129 rows a day are genuine
 articles, and they are now not collected at all rather than collected under the
