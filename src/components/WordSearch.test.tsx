@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WordSearch } from './WordSearch'
 
@@ -36,9 +36,18 @@ describe('WordSearch', () => {
   })
 
   it('asks nothing for a whitespace-only term', async () => {
-    render(<WordSearch onSelect={() => {}} />)
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '   ' } })
-    await waitFor(() => expect(searchWords).not.toHaveBeenCalled())
+    vi.useFakeTimers()
+    try {
+      render(<WordSearch onSelect={() => {}} />)
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '   ' } })
+      // 디바운스를 지나 보낸 뒤에 묻는다. 타이머가 뛸 수 있는 시점보다 **앞에서**
+      // 확인하는 단정은 구현이 틀려도 통과한다 — waitFor는 첫 검사를 동기로 한 번
+      // 돌리므로 그대로 두면 t=0에서 판정된다.
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(searchWords).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('says so when a term matches nothing', async () => {
@@ -54,6 +63,9 @@ describe('WordSearch', () => {
     searchWords.mockRejectedValue(new Error('nope'))
     render(<WordSearch onSelect={() => {}} />)
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '민석' } })
-    await waitFor(() => expect(screen.queryByRole('option')).not.toBeInTheDocument())
+    // 빈 상태 문구는 거절이 처리된 **뒤에만** 나온다. 그것을 먼저 기다리는 것이
+    // catch가 실제로 돌았다는 증거이고, 그 뒤라야 "옵션이 없다"가 의미를 가진다.
+    expect(await screen.findByText(/찾은 단어가 없습니다/)).toBeInTheDocument()
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
   })
 })
