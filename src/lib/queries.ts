@@ -342,3 +342,74 @@ export const fetchHeadlinesForEvent = cachedQuery(
     return (data ?? []) as HeadlineSummary[]
   },
 )
+
+export interface WordMatch {
+  word: string
+  /** Headline rows holding this word, across the whole archive. */
+  total: number
+  /** Collected days it appeared on. */
+  days: number
+  /** The most recent of those days. */
+  lastDate: string
+}
+
+/** Result rows shown for one search. Twenty fills the list without paging it. */
+export const SEARCH_LIMIT = 20
+
+// `%`, `_` and `*` are wildcards by the time a term reaches Postgres — PostgREST
+// rewrites `*` into `%` before Postgres sees the pattern — so escaping them
+// correctly means escaping at two layers with two sets of rules. They are
+// stripped instead, which is one rule in one place. The cost was counted rather
+// than waved away: of 19,767 words, **two** contain `%` (0.45%포인트, 1%포인트)
+// and **none** contain `_` or `*`, and both of those two are still reachable by
+// searching 포인트. Left alone, a lone `_` matches every one-character word in
+// the archive.
+function stripWildcards(term: string): string {
+  return term.replace(/[%_*\\]/g, '')
+}
+
+// Substring search over the whole archive, against the materialised directory
+// from migration 0030 rather than against headline_nouns.
+//
+// `word like '%…%'` uses no index at any anchoring, so searching the noun rows
+// reads all 114,457 of them — 316 ms measured — and that cost grows with
+// headline volume. The directory is ~19,767 rows, grows with vocabulary
+// instead, and is filtered in about a millisecond.
+//
+// Ordered by total, then by the last day it appeared on, then by the word so a
+// tie is broken the same way every time. `last_date` deliberately does not
+// outrank `total`: a recency-weighted score would be a ranking invented here
+// with nothing to measure it against, and the trajectory answers that question
+// properly one click later.
+//
+// Cached because a reader types, deletes a character and types it again.
+export const searchWords = cachedQuery(
+  (query: string) => `word-search|${stripWildcards(query.trim())}`,
+  async (query: string): Promise<WordMatch[]> => {
+    const term = stripWildcards(query.trim())
+    if (term === '') return []
+
+    const { data, error } = await supabase
+      .from('word_directory')
+      .select('word, total, days, last_date')
+      .ilike('word', `%${term}%`)
+      .order('total', { ascending: false })
+      .order('last_date', { ascending: false })
+      .order('word')
+      .limit(SEARCH_LIMIT)
+    if (error) throw queryError(error)
+
+    const rows = (data ?? []) as {
+      word: string
+      total: number | string
+      days: number | string
+      last_date: string
+    }[]
+    return rows.map((row) => ({
+      word: row.word,
+      total: Number(row.total),
+      days: Number(row.days),
+      lastDate: row.last_date,
+    }))
+  },
+)
