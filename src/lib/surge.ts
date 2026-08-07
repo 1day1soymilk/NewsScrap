@@ -1,3 +1,4 @@
+import { share } from './share'
 import type { WordCount } from './types'
 
 // Day-over-day movement, ranked by how much of the day a word gained.
@@ -88,8 +89,8 @@ export function computeSurges(
     if (row.count < minCount) continue
 
     const before = previousByWord.get(row.word) ?? 0
-    const todayShare = row.count / today.headlines
-    const previousShare = before / previous.headlines
+    const todayShare = share(row.count, today.headlines)
+    const previousShare = share(before, previous.headlines)
     const gain = todayShare - previousShare
     if (gain <= 0) continue
 
