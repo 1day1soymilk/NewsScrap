@@ -371,22 +371,29 @@ test('평면으로 그릴 수 있는 하루는 브라우저에서도 선이 안 
   await page.goto('/')
   await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
 
-  const drawn = await page.locator(`${GRAPH} path`).evaluateAll((els) =>
-    els.map((el) => el.getAttribute('d') ?? ''),
-  )
+  // **선과 라벨은 한 번의 왕복으로 함께 읽는다.** 둘을 따로 읽으면 그 사이에
+  // 재배치가 끼어들 수 있고, 그러면 끝점은 이전 배치의 것이고 상자는 새 배치의
+  // 것이 되어 되짚기가 통째로 어긋난다 — 전체 스위트를 돌릴 때 실제로 그렇게
+  // 됐고, 열두 선이 세 쌍으로 접혔다. 한 evaluate 안에서는 레이아웃이 갈릴 수 없다.
+  const snapshot = await page.evaluate((graphSel) => {
+    const svg = document.querySelector(graphSel)
+    if (!svg) return null
+    return {
+      drawn: [...svg.querySelectorAll('path')].map((el) => el.getAttribute('d') ?? ''),
+      labels: [...svg.querySelectorAll('text[role="button"]')].map((el) => {
+        const b = (el as SVGGraphicsElement).getBBox()
+        return { word: el.textContent ?? '', x: b.x, y: b.y, w: b.width, h: b.height }
+      }),
+    }
+  }, GRAPH)
+  if (!snapshot) throw new Error('graph svg not found')
+  const { drawn, labels } = snapshot
   expect(drawn.length).toBe(12)
 
   // 선은 자기가 어느 두 단어를 잇는지 DOM에 적어 두지 않는다. 끝점이 라벨 상자
   // 바로 바깥에서 시작하므로 제일 가까운 상자로 되짚는다 — 그리고 **못 찾으면
   // 조용히 넘어가지 않고 터진다.** 끝점을 공유하는 쌍을 빼는 것이 이 시험의
   // 전부이므로, 되짚기가 틀리면 시험이 거짓으로 통과한다.
-  const labels = await page.locator('svg text[role="button"]').evaluateAll((els) =>
-    els.map((el) => {
-      const b = (el as SVGGraphicsElement).getBBox()
-      return { word: el.textContent ?? '', x: b.x, y: b.y, w: b.width, h: b.height }
-    }),
-  )
-
   // 중심까지가 아니라 **상자까지**의 거리다. 라벨 폭이 50px에서 200px까지 벌어지므로
   // 중심으로 재면 넓은 라벨의 모서리에서 출발한 선이 옆의 좁은 라벨을 더 가깝게
   // 본다 — 처음 판본이 열두 선을 열한 쌍으로 되짚은 것이 그것이었다.
