@@ -1794,6 +1794,15 @@ categories view, place gate on, near-linear in the day's headline count:
 The "before" row is one pass per day; the "after" row is stable to ±25 ms over
 three consecutive passes, so read the direction and not the third digit.
 
+**A reader arriving today pays none of this**, and the table is kept because it
+is what forced the two changes that followed. `0031` took the computation down
+another 18% and `0032` stopped doing it per request at all — a cached read is
+**1.35 ms**, and a real page's first paint measured **~0.57 s** on both a nearly
+empty day and on 3,224 headlines. The numbers above are now the cost of a cache
+*miss*, and of `keyword_graph_compute` when the harness calls it directly. See
+"Why the graph is cached" for why the near-linear growth in that table was not
+merely slow but actually breaking the site for concurrent readers.
+
 **The cost was `keyword_signals`, 2,034 ms of the 4,218-headline day's 3,299**,
 and it is called exactly once per request — migration `0024`'s restructure —
 so there was no repeated call to remove. Migration `0029` took it to 1,276 ms
