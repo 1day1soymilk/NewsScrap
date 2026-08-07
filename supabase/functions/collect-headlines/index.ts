@@ -578,22 +578,36 @@ Deno.serve(async () => {
   // shape and a thrown rejection, and report the outcome in the body — the
   // only machine-readable channel out of this function.
   //
+  // **0033: refresh_stale_keyword_graph_cache, not refresh_keyword_graph_cache
+  // directly.** That swallowed failure means a bad refresh used to leave a
+  // date's cache stale with no further consequence — the graphCache field
+  // nobody reads was the only signal. This heals it instead: today is still
+  // refreshed unconditionally, and up to one more date the
+  // keyword_graph_cache_health view calls stale or missing (newest first) is
+  // refreshed alongside it, so a failed run's cache recovers within a bounded
+  // number of later runs rather than staying broken until an operator happens
+  // to read the body. See migration 0033's header for the ~28s-per-run /
+  // 8-day-backlog-in-2-days arithmetic behind the `1`.
+  //
   // This is wall clock the worker waits on the database for, not worker CPU —
   // the same distinction the run-budget section of CLAUDE.md draws about the
   // old ETRI wait — so it does not threaten the CPU budget that actually kills
-  // this function. It does add real wall time, though: 7 cells at ~2s each is
-  // ~14s, on top of the ~300ms word_directory refresh. `RUN_BUDGET_MS`
-  // (50_000) only bounds the category loop above, not this tail, and the
-  // category loop's own slack (a full 900-headline run finishes in 4-5s
-  // against a 50s budget) is what leaves room for it.
+  // this function. It does add real wall time, though: up to 2 dates x 7
+  // cells at ~2s each is ~28s, on top of the ~300ms word_directory refresh.
+  // `RUN_BUDGET_MS` (50_000) only bounds the category loop above, not this
+  // tail, and the category loop's own slack (a full 900-headline run finishes
+  // in 4-5s against a 50s budget) is what leaves room for it.
   let graphCache = 'ok'
   try {
-    const { error: graphCacheError } = await supabase.rpc('refresh_keyword_graph_cache', {
-      p_date: collectedDate,
-    })
+    const { data: refreshedDates, error: graphCacheError } = await supabase.rpc(
+      'refresh_stale_keyword_graph_cache',
+      { p_today: collectedDate, p_extra: 1 },
+    )
     if (graphCacheError) {
       graphCache = `failed: ${graphCacheError.message}`
       console.error('CHK keyword_graph_cache refresh failed:', graphCacheError)
+    } else {
+      graphCache = `ok: refreshed ${(refreshedDates ?? []).join(', ')}`
     }
   } catch (graphCacheThrow) {
     graphCache = `failed: ${String(graphCacheThrow)}`

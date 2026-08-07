@@ -157,10 +157,26 @@ scripts/analysis/run.sh -c "select public.refresh_keyword_graph_cache(collected_
 
 안 하면 어떻게 되냐면: 값은 바뀌었는데 화면은 마지막으로 새로고침된 시점의 그래프를
 그대로 보여준다 — 실패가 아니라 조용히 낡은 채로 남는 것이라 눈치채기 더 어렵다.
-컬렉터는 매 실행 끝에 **그날 날짜만** 자동으로 새로고침한다(`index.ts`, 응답의
-`graphCache` 필드). 과거 날짜는 여전히 손으로 돌려야 한다. 배경과 캐시 미스가
-안전한 이유(느리지만 정확한 재계산으로 빠진다 — `security definer` 로 쓰기를 하지
-않는다)는 마이그레이션 `0032`의 헤더에 있다.
+컬렉터는 매 실행 끝에 **그날 날짜와, 낡은 날짜 중 최신 하나**를 자동으로
+새로고침한다(마이그레이션 `0033`, `refresh_stale_keyword_graph_cache`, 응답의
+`graphCache` 필드에 새로고침된 날짜가 그대로 찍힌다). 배경과 캐시 미스가 안전한
+이유(느리지만 정확한 재계산으로 빠진다 — `security definer` 로 쓰기를 하지 않는다)는
+마이그레이션 `0032`의 헤더에 있다.
+
+**그래프가 느리게 느껴지면 제일 먼저 읽을 것은 `keyword_graph_cache_health` 뷰다.**
+
+```sql
+select * from public.keyword_graph_cache_health order by collected_date desc;
+```
+
+`state` 가 `missing`/`stale` 인 날짜는 컬렉터가 실행될 때마다 최신 하나씩 저절로
+낫는다 (하루 6회, 실행당 여분 1개 — 8일 밀림도 이틀 안에 저절로 풀린다). 그래도
+급하면 `refresh_keyword_graph_cache(date)` 를 손으로 한 번 더 부르면 된다.
+**단, 이 뷰는 `scoring_weights` / `word_overrides` 재튜닝은 보지 못한다** — 캐시 행의
+시각(`computed_at`)과 헤드라인 행의 시각(`created_at`)만 비교하는 것이라, 재튜닝은
+둘 중 어느 시각도 바꾸지 않는다. 값을 바꾼 뒤에는 여전히 위 "배포 없이 켜고 끄는
+값" 절대로 영향받는 날짜를 손으로 새로고침해야 하고, `computed_at` 을 재튜닝한
+시각과 눈으로 비교하는 것이 뷰가 해 줄 수 있는 전부다.
 
 ### 2. 데이터 확인 (SQL Editor)
 
