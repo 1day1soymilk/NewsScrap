@@ -223,9 +223,23 @@ function numeric(value: number | null): number | null {
 // A word appears in a few dozen headlines on a busy day, so this is a safety
 // cap rather than a semantic cut: it exists so that a pathological word — or a
 // day collected several times over — cannot pull thousands of rows into the
-// panel. It is deliberately far above any real value, because the sort happens
+// panel. It has to stay far above any real value, because the sort happens
 // after the fetch and a limit that ever bites would silently change the list.
-const HEADLINE_ROW_LIMIT = 200
+//
+// **It was 200 and that had stopped being far above anything.** Measured on the
+// live archive 2026-08-08, worst (word, day) cell: 폭염 on 2026-08-07 returns
+// **198 rows** for 194 distinct headlines. Two rows of headroom, and nothing
+// would have said so — the panel would simply have shown 194 of 195 one day.
+//
+// **What moves this number is `scoring_weights.collect_cap`, not the word.** The
+// cap went 150 → 300 on 2026-08-07 and the day went to 4,218 headlines; the
+// biggest word takes about 4.7% of a day, so a cap that doubles again puts the
+// worst cell near 400. 600 is three times the measured worst and covers that
+// doubling. This is the same shape as `MAX_LIST_PAGES` in the collector — a
+// second limit nobody chose, which surfaces as a short list rather than as
+// anything named — so it is written down here beside the measurement that sets
+// it rather than left as a round number.
+const HEADLINE_ROW_LIMIT = 600
 
 interface HeadlineRow {
   headlines: {
