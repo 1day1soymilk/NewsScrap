@@ -156,7 +156,7 @@ test('a searched word that was not drawn opens the panel and says so', async ({ 
   await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
   const before = new URL(page.url()).searchParams.get('date')
 
-  await page.getByRole('searchbox').fill('유상증자')
+  await page.getByRole('combobox').fill('유상증자')
   await page.getByRole('option', { name: /유상증자/ }).click()
 
   const panel = page.getByRole('complementary')
@@ -188,7 +188,7 @@ test('a searched word that was drawn does not carry the note', async ({ page }) 
   await mockSupabase(page)
   await page.goto('/')
 
-  await page.getByRole('searchbox').fill('예산안')
+  await page.getByRole('combobox').fill('예산안')
   await page.getByRole('option', { name: /예산안/ }).click()
 
   const panel = page.getByRole('complementary')
@@ -255,7 +255,7 @@ test('keeps the header at two rows below lg, and the panel starts exactly beneat
   expect(tokenPx).toBeGreaterThanOrEqual(headerBox.height)
   expect(tokenPx - headerBox.height).toBeLessThanOrEqual(4)
 
-  await page.getByRole('searchbox').fill('유상증자')
+  await page.getByRole('combobox').fill('유상증자')
   await page.getByRole('option', { name: /유상증자/ }).click()
 
   const panel = page.getByRole('complementary')
