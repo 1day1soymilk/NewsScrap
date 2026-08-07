@@ -33,9 +33,12 @@ Vitest + Testing Library, Playwright, Supabase Postgres + a Deno Edge Function.
   through inline `style` (`var()` is unreliable in presentation attributes);
   `opacity` and `stroke-opacity` stay attributes because e2e asserts on them.
 - **Do not add write policies** anywhere. All access is select-only.
-- **Reply/commit language:** commit messages and code comments in English,
-  matching the surrounding files. `CLAUDE.md` and `scripts/*/README.md` keep the
-  language they already use.
+- **Language:** commit messages in English. **Code comments match the file's
+  neighbours, and this codebase genuinely mixes** — `src/lib/*.ts` is English
+  (`surge.ts`, `queries.ts`), while `App.tsx` and `CategoryShare.tsx` are
+  Korean. The code blocks in this plan already follow that split; write what
+  each block shows rather than translating it. `CLAUDE.md` and
+  `docs/superpowers/**` keep the language they already use.
 - Migrations are sequential: the next number is **`0030`**.
 - Run one test file with `npx vitest run <path>`, one test by name with
   `npx vitest run -t "<name>"`.
