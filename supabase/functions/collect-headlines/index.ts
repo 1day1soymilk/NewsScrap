@@ -563,6 +563,43 @@ Deno.serve(async () => {
     console.error('CHK word_directory refresh threw:', refreshThrow)
   }
 
+  // keyword_graph_cache (migration 0032) holds one precomputed row per
+  // (collected_date, category_slug); the RPC anon actually calls now just
+  // reads it, falling back to the ~2s recompute only on a miss. Today's date
+  // is the one date that always misses the moment this run starts, so it has
+  // to be filled here or the day's first several page loads pay the full
+  // cost the cache exists to remove — and worse, five of them at once would
+  // each hit anon's 3s statement_timeout, which is the failure this migration
+  // was written to fix.
+  //
+  // Same shape as the word_directory refresh just above: swallow the failure
+  // (a stale cache serving yesterday's thresholds is a far smaller fault than
+  // a collection run reported as failed), guard both the postgrest `{ error }`
+  // shape and a thrown rejection, and report the outcome in the body — the
+  // only machine-readable channel out of this function.
+  //
+  // This is wall clock the worker waits on the database for, not worker CPU —
+  // the same distinction the run-budget section of CLAUDE.md draws about the
+  // old ETRI wait — so it does not threaten the CPU budget that actually kills
+  // this function. It does add real wall time, though: 7 cells at ~2s each is
+  // ~14s, on top of the ~300ms word_directory refresh. `RUN_BUDGET_MS`
+  // (50_000) only bounds the category loop above, not this tail, and the
+  // category loop's own slack (a full 900-headline run finishes in 4-5s
+  // against a 50s budget) is what leaves room for it.
+  let graphCache = 'ok'
+  try {
+    const { error: graphCacheError } = await supabase.rpc('refresh_keyword_graph_cache', {
+      p_date: collectedDate,
+    })
+    if (graphCacheError) {
+      graphCache = `failed: ${graphCacheError.message}`
+      console.error('CHK keyword_graph_cache refresh failed:', graphCacheError)
+    }
+  } catch (graphCacheThrow) {
+    graphCache = `failed: ${String(graphCacheThrow)}`
+    console.error('CHK keyword_graph_cache refresh threw:', graphCacheThrow)
+  }
+
   return new Response(
     // `cap` is in the response because it is now a database value: without it
     // the summary cannot be read without a second query asking what the run was
@@ -572,6 +609,7 @@ Deno.serve(async () => {
       cap: headlineCap,
       elapsedMs: Date.now() - startedAt,
       directory,
+      graphCache,
       summary,
     }),
     { headers: { 'Content-Type': 'application/json' } },

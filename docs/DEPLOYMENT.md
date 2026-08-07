@@ -139,6 +139,29 @@ Management API 의 로그 엔드포인트는 `function_logs` 에 403 을 주고,
   넷 중 셋이 라벨 기준으로 중립이고 나머지 하나는 균등 수집된 날이라 보정할 것이
   없다. 2026-08-04처럼 섹션이 크게 갈린 날에 라벨이 붙은 뒤에 다시 볼 값이다.
 
+**중요 — 위 두 값(과 `word_overrides`)을 바꿨다면 여기서 끝이 아니다.**
+마이그레이션 `0032`부터 `keyword_graph` RPC는 매 요청마다 다시 계산하지 않고
+`keyword_graph_cache`(날짜 x 카테고리 7칸)를 먼저 읽는다 — 하루가 두꺼운 날은
+계산에 2초 가까이 걸리고 `anon`의 `statement_timeout`(3초)에 걸려 동시 방문자가
+전부 500을 받았기 때문이다. **대가는 재튜닝이 더는 즉시 반영되지 않는다는 것이다.**
+`scoring_weights` 나 `word_overrides` 를 바꾼 뒤, 화면에 반영하려면 영향받는 날짜마다
+캐시를 새로고침해야 한다:
+
+```bash
+# 특정 날짜 하나
+scripts/analysis/run.sh -c "select public.refresh_keyword_graph_cache('2026-08-07')"
+
+# 수집된 모든 날짜 (하루 7칸 x 몇 초 — 8일 기준 실측 약 50-90초)
+scripts/analysis/run.sh -c "select public.refresh_keyword_graph_cache(collected_date) from public.collected_dates"
+```
+
+안 하면 어떻게 되냐면: 값은 바뀌었는데 화면은 마지막으로 새로고침된 시점의 그래프를
+그대로 보여준다 — 실패가 아니라 조용히 낡은 채로 남는 것이라 눈치채기 더 어렵다.
+컬렉터는 매 실행 끝에 **그날 날짜만** 자동으로 새로고침한다(`index.ts`, 응답의
+`graphCache` 필드). 과거 날짜는 여전히 손으로 돌려야 한다. 배경과 캐시 미스가
+안전한 이유(느리지만 정확한 재계산으로 빠진다 — `security definer` 로 쓰기를 하지
+않는다)는 마이그레이션 `0032`의 헤더에 있다.
+
 ### 2. 데이터 확인 (SQL Editor)
 
 ```sql
