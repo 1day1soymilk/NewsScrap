@@ -170,6 +170,16 @@ npm run dev
 
 날짜/카테고리 전환, 단어 클릭 시 관련 헤드라인 표시까지 확인한다.
 
+### 5. 보안 어드바이저의 `word_directory` 경고
+
+`get_advisors(security)` 는 `public.word_directory` 에 대해
+`materialized_view_in_api` 를 **영구적으로** 보고한다. 이것은 예상된 결과이지
+고쳐야 할 경고가 아니다 — 마이그레이션 `0030` 이 이미 적어 둔 대로, materialized
+view는 RLS 정책을 가질 수 없으므로 select-only `grant` 가 이 뷰의 접근 모델
+전부다. 다른 모든 테이블처럼 RLS로 막는 대신 grant를 select로만 좁혀 두었으니,
+이 경고를 없애려고 `anon`/`authenticated` 의 select 권한을 걷어내지 말 것 — 그러면
+검색 기능 자체가 죽는다.
+
 ## 자동 수집 스케줄
 
 pg_cron 과 pg_net 확장이 **먼저 활성화되어 있어야** 한다.

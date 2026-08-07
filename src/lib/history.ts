@@ -58,6 +58,40 @@ export interface HistoryOptions {
 }
 
 /**
+ * Which collected days a trajectory covers: at most `window` of them, ending
+ * at `endDate` rather than at the newest collected day.
+ *
+ * Exported so the fetch that asks for a word's counts and the arithmetic that
+ * builds the series from them cannot disagree about which days that is.
+ * Before this existed as its own function, `App.tsx` asked
+ * `fetchWordCountsFor` for **every** collected date while `buildHistory` used
+ * at most `HISTORY_WINDOW` of them — harmless while the archive was short, but
+ * PostgREST spells an unbounded date list `collected_date=in.(…)`, so the URL
+ * grows without bound as the archive grows: about 4.8 kB at one year and
+ * 9.6 kB at two, past the 8 kB header limit typical of gateways. The same
+ * shape as `MAX_LIST_PAGES` elsewhere in this codebase — a second limit
+ * nobody chose, surfacing as a broken sparkline rather than as anything named.
+ *
+ * @param dates every collected day, in any order, as `fetchCollectedDates`
+ *   returns them.
+ * @param endDate the day on screen. Days after it are excluded.
+ * @param window at most this many days, counting back from `endDate`.
+ */
+export function historyWindow(
+  dates: string[],
+  endDate: string,
+  window: number = HISTORY_WINDOW,
+): string[] {
+  // ISO dates compare correctly as strings, which is why no Date is built here:
+  // a Date would drag in a time zone, and every date in this app is already a
+  // KST calendar day decided server side.
+  return dates
+    .filter((date) => date <= endDate)
+    .sort()
+    .slice(-window)
+}
+
+/**
  * @param countsByDate exactly what `fetchWordCountsFor` returns — date to the
  *   rows for that date. Asked about one word, each entry holds zero rows or
  *   one, and a date missing from the map is a day the word did not appear on.
@@ -72,14 +106,7 @@ export function buildHistory(
   options: HistoryOptions,
 ): HistoryPoint[] {
   const { endDate, window = HISTORY_WINDOW } = options
-
-  // ISO dates compare correctly as strings, which is why no Date is built here:
-  // a Date would drag in a time zone, and every date in this app is already a
-  // KST calendar day decided server side.
-  const inWindow = dates
-    .filter((date) => date <= endDate)
-    .sort()
-    .slice(-window)
+  const inWindow = historyWindow(dates, endDate, window)
 
   return inWindow.map((date) => {
     const rows = countsByDate.get(date) ?? []

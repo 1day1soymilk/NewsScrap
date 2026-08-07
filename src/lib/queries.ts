@@ -354,7 +354,7 @@ export interface WordMatch {
 }
 
 /** Result rows shown for one search. Twenty fills the list without paging it. */
-export const SEARCH_LIMIT = 20
+const SEARCH_LIMIT = 20
 
 // `%`, `_` and `*` are wildcards by the time a term reaches Postgres — PostgREST
 // rewrites `*` into `%` before Postgres sees the pattern — so escaping them
@@ -373,8 +373,10 @@ function stripWildcards(term: string): string {
 //
 // `word like '%…%'` uses no index at any anchoring, so searching the noun rows
 // reads all 114,457 of them — 316 ms measured — and that cost grows with
-// headline volume. The directory is ~19,767 rows, grows with vocabulary
-// instead, and is filtered in about a millisecond.
+// headline volume. The directory is ~19,767 rows and grows with vocabulary
+// instead: measured live, ~35 ms warm and ~60 ms cold — a seq scan too, just
+// over two orders of magnitude fewer rows — still about 9x cheaper than
+// searching headline_nouns directly.
 //
 // Ordered by total, then by the last day it appeared on, then by the word so a
 // tie is broken the same way every time. `last_date` deliberately does not

@@ -8,7 +8,8 @@ interface WordSearchProps {
 }
 
 // 타자를 치는 동안 매 글자마다 묻지 않는다. 250ms는 한 글자를 더 칠 만한 시간이고,
-// 사전 조회 자체는 ~1ms이므로 이 값은 네트워크가 아니라 요청 수를 위한 것이다.
+// 사전 조회 자체가 서버에서 ~35ms(웜), ~60ms(콜드)이므로 왕복까지 더하면 이 값은
+// 요청 수만이 아니라 네트워크 비용을 줄이기 위한 것이기도 하다.
 const DEBOUNCE_MS = 250
 
 /**
@@ -86,7 +87,15 @@ export function WordSearch({ onSelect }: WordSearchProps) {
               <button
                 role="option"
                 aria-selected={false}
-                onClick={() => onSelect(match.word)}
+                onClick={() => {
+                  // 고르고 나면 목록도 입력창도 비운다. 비우지 않으면 목록이 선택 뒤에도
+                  // 열린 채로 남고, 이 컴포넌트에는 Escape나 바깥 클릭으로 닫는 처리가
+                  // 없어 HeadlinePanel의 전역 Escape 핸들러가 패널을 대신 닫아 버린다.
+                  setTerm('')
+                  setMatches([])
+                  setSearched(false)
+                  onSelect(match.word)
+                }}
                 className="flex w-full items-baseline gap-2 px-3 py-2 text-left text-sm hover:bg-ground"
               >
                 <span className="truncate text-ink">{match.word}</span>

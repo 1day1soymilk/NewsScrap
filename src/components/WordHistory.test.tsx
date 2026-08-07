@@ -34,6 +34,15 @@ describe('WordHistory', () => {
     expect(screen.getByText(/−50%/)).toBeInTheDocument()
   })
 
+  // Math.round(-0.3) is -0, and -0 >= 0 is true in JS — so a decline this
+  // small used to print "+0%", stating the wrong direction outright rather
+  // than merely rounding away a small move.
+  it('prints a rounding-to-zero decline as 0%, never as a rise', () => {
+    render(<WordHistory points={points([0.201, 0.2])} />)
+    expect(screen.getByText('0%')).toBeInTheDocument()
+    expect(screen.queryByText(/\+0%/)).not.toBeInTheDocument()
+  })
+
   // One point is not a trajectory: a flat dot would claim the word has been
   // steady when what happened is that there is nothing to compare.
   it('renders nothing for fewer than two days', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HISTORY_WINDOW, buildHistory, summariseHistory } from './history'
+import { HISTORY_WINDOW, buildHistory, historyWindow, summariseHistory } from './history'
 import type { WordCount } from './types'
 
 // Newest first, which is the order fetchCollectedDates returns.
@@ -91,6 +91,40 @@ describe('buildHistory', () => {
 
   it('is empty when the selected date is older than everything collected', () => {
     expect(buildHistory(new Map(), HEADLINES, DATES, { endDate: '2026-07-01' })).toEqual([])
+  })
+})
+
+describe('historyWindow', () => {
+  it('keeps only dates on or before endDate, sorted', () => {
+    expect(historyWindow(['2026-08-05', '2026-08-03', '2026-08-04'], '2026-08-04')).toEqual([
+      '2026-08-03',
+      '2026-08-04',
+    ])
+  })
+
+  it('keeps only the last `window` collected days', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `2026-07-${String(20 - i).padStart(2, '0')}`)
+    expect(historyWindow(many, '2026-07-20', 3)).toEqual(['2026-07-18', '2026-07-19', '2026-07-20'])
+  })
+
+  it('defaults the window to HISTORY_WINDOW', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `2026-07-${String(30 - i).padStart(2, '0')}`)
+    expect(historyWindow(many, '2026-07-30')).toHaveLength(HISTORY_WINDOW)
+  })
+
+  it('is empty when endDate is older than everything collected', () => {
+    expect(historyWindow(['2026-08-01', '2026-08-02'], '2026-07-01')).toEqual([])
+  })
+
+  // The whole reason this function is exported rather than staying inline
+  // inside buildHistory: a caller that bounds a fetch by it and a caller that
+  // builds a series by it must be describing the same days, or a request can
+  // ask for a wider set of dates than the series ever draws.
+  it('agrees with what buildHistory keeps, given the same inputs', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`)
+    const windowed = historyWindow(many, '2026-06-25')
+    const points = buildHistory(new Map(), new Map(), many, { endDate: '2026-06-25' })
+    expect(points.map((point) => point.date)).toEqual(windowed)
   })
 })
 

@@ -20,7 +20,7 @@ import {
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
-import { buildHistory } from './lib/history'
+import { buildHistory, historyWindow } from './lib/history'
 import type { HistoryPoint } from './lib/history'
 import {
   EVENT_LIST_LIMIT,
@@ -267,12 +267,14 @@ function App() {
       return
     }
     let cancelled = false
-    fetchWordCountsFor(availableDates, [selectedWord])
+    // PostgREST spells an unbounded date list `collected_date=in.(…)`, so the
+    // fetch is bounded to the same window buildHistory would keep anyway —
+    // historyWindow is what stops the two from being able to disagree.
+    const dates = historyWindow(availableDates, selectedDate)
+    fetchWordCountsFor(dates, [selectedWord])
       .then((counts) => {
         if (cancelled) return
-        setHistory(
-          buildHistory(counts, headlinesByDate, availableDates, { endDate: selectedDate }),
-        )
+        setHistory(buildHistory(counts, headlinesByDate, dates, { endDate: selectedDate }))
       })
       .catch(() => {
         // 급상승 표식과 같은 방식으로 삼킨다. 궤적이 없어도 헤드라인 목록은 그대로
@@ -554,7 +556,13 @@ function App() {
           >
             <KeywordGraph
               graph={graph}
-              selectedWord={selectedWord}
+              // 검색으로 닿은 단어가 이 날 캔버스에 없으면(wordOffCanvas) 캔버스에는
+              // 포커스할 대상이 없다 — null을 넘겨 아무것도 선택되지 않은 것처럼
+              // 그리게 한다. 그러지 않으면 KeywordGraph의 이웃 집합이 빈 채로
+              // selectedWord만 켜져서 모든 라벨이 0.1로 죽고 모든 엣지가 숨는다.
+              // EventList가 이미 지키는 규칙과 같다 — "빈 집합은 아무것도 죽이지
+              // 않는다". 패널은 그대로 열려 있고 헤드라인과 궤적도 그대로 보인다.
+              selectedWord={wordOffCanvas ? null : selectedWord}
               // 단어를 누르면 사건 선택이 풀린다. 둘 다 켜진 상태는 캔버스에서
               // 무엇이 살아 있는지 읽을 수 없다.
               onWordClick={(word) => {

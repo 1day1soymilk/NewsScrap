@@ -169,6 +169,19 @@ test('a searched word that was not drawn opens the panel and says so', async ({ 
     .poll(() => new URL(page.url()).searchParams.get('word'))
     .toBe('유상증자')
   expect(new URL(page.url()).searchParams.get('date')).toBe(before)
+
+  // 유상증자 has no bridge entry — it touches no drawn word — so focusWords is
+  // null and the canvas falls back to its selectedWord path. Nothing on the
+  // canvas equals '유상증자', so with no guard every label's neighbour set is
+  // empty and every one of them recedes to UNFOCUSED_OPACITY: the whole canvas
+  // reads as dimmed for a word it never had anything to light in the first
+  // place. App.tsx must pass selectedWord={null} to KeywordGraph once
+  // wordOffCanvas is true, so at least one label stays at full opacity.
+  const opacities = await page.locator('svg text[role="button"]').evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('opacity')),
+  )
+  expect(opacities.length).toBeGreaterThan(0)
+  expect(opacities.some((value) => value !== '0.1')).toBe(true)
 })
 
 test('a searched word that was drawn does not carry the note', async ({ page }) => {
@@ -234,7 +247,13 @@ test('keeps the header at two rows below lg, and the panel starts exactly beneat
     return px
   })
 
-  expect(Math.abs(headerBox.height - tokenPx)).toBeLessThanOrEqual(1)
+  // One-sided, because that is the actual requirement: the panel must never
+  // start above the header, and a token a few pixels taller than the rendered
+  // header is a harmless gap rather than a bug. A token shorter than the
+  // rendered header is the failure that matters — it would put the panel's
+  // top edge over the tab row.
+  expect(tokenPx).toBeGreaterThanOrEqual(headerBox.height)
+  expect(tokenPx - headerBox.height).toBeLessThanOrEqual(4)
 
   await page.getByRole('searchbox').fill('유상증자')
   await page.getByRole('option', { name: /유상증자/ }).click()
@@ -242,5 +261,8 @@ test('keeps the header at two rows below lg, and the panel starts exactly beneat
   const panel = page.getByRole('complementary')
   await expect(panel).toBeVisible()
   const panelBox = (await panel.boundingBox())!
-  expect(Math.abs(panelBox.y - (headerBox.y + headerBox.height))).toBeLessThanOrEqual(1)
+  // Same one-sided rule applied to what actually lands on screen: the panel
+  // may start a few pixels below the header, never above it.
+  expect(panelBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height)
+  expect(panelBox.y - (headerBox.y + headerBox.height)).toBeLessThanOrEqual(4)
 })

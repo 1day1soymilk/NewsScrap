@@ -17,7 +17,8 @@
 -- new day is mostly words already here. 19,767 rows at eight days.
 --
 -- No index beyond the unique one below. Filtering 19,767 short strings is the
--- ~1 ms above, and a substring match could not use a btree index anyway.
+-- ~35 ms above (34.8 ms measured), and a substring match could not use a
+-- btree index anyway.
 --
 -- `last_date` is shown on every search result and breaks ties in the ordering.
 -- It deliberately does not outrank `total`: a recency-weighted score would be a

@@ -153,8 +153,21 @@ describe('HeadlinePanel', () => {
   // An event is not a thing that persists across days here: the Louvain
   // partition is per day and mergeCommunities runs on one day's edges, so
   // nothing can say yesterday's event and today's are the same event.
+  //
+  // history holds a real two-point series here on purpose. WordHistory
+  // returns null for anything under two points regardless of isEvent, so an
+  // empty array cannot tell "suppressed because isEvent" apart from
+  // "suppressed because there is nothing to draw" — this failed to catch
+  // `!isEvent &&` being deleted from HeadlinePanel.tsx when it passed `[]`.
   it('shows no trajectory for an event', () => {
-    renderPanel({ subject: '김민석 · 정청래', isEvent: true, history: [] })
+    renderPanel({
+      subject: '김민석 · 정청래',
+      isEvent: true,
+      history: [
+        { date: '2026-08-03', count: 4, share: 0.1, present: true },
+        { date: '2026-08-04', count: 12, share: 0.2, present: true },
+      ],
+    })
     expect(screen.queryByText(/일 중 /)).not.toBeInTheDocument()
   })
 

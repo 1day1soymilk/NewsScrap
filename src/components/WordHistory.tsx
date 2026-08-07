@@ -93,5 +93,9 @@ export function WordHistory({ points }: WordHistoryProps) {
 // 마이너스는 하이픈이 아니라 U+2212로, 숫자 옆에서 폭이 맞는다.
 function formatChange(change: number): string {
   const percent = Math.round(change * 100)
-  return percent >= 0 ? `+${percent}%` : `−${Math.abs(percent)}%`
+  // Math.round(-0.3) is -0, which passes `>= 0` — so a small decline between
+  // -0.5% and 0% would otherwise print as a rise. -0 === 0 in JS, so this
+  // check has to come first rather than be folded into the sign branch below.
+  if (percent === 0) return '0%'
+  return percent > 0 ? `+${percent}%` : `−${Math.abs(percent)}%`
 }
