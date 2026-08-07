@@ -28,18 +28,22 @@ test('reaches the real Supabase project', async ({ page }) => {
   // contains at least one <text>, because WordCloud renders the svg only when
   // it placed at least one word - so `svg text` avoids a strict-mode
   // violation the day a second, iconography <svg> is added to the page.
-  // The default 5,000ms timeout is shorter than the real page's first paint on
-  // a thick day. A browser probe against the live project on 2026-08-07 (3,224
-  // headlines that day) measured the keyword_graph response landing at
-  // +5,867ms and the first `svg text` painting at +6,007ms — this is the
-  // day-boundary/collect-cap fix from CLAUDE.md's "Edge Function run budget"
-  // section (cap raised to 300 on 2026-08-07) making days thick enough that
-  // CLAUDE.md's own ~2,080–2,600ms keyword_graph table applies, plus the cold
-  // connection, the JS and the layout on top. 20,000ms is headroom over that
-  // measurement, not a guess.
+  // **This carried an explicit 20,000ms timeout and no longer needs one.** It was
+  // raised because a browser probe on 2026-08-07 measured keyword_graph landing
+  // at +5,867ms and the first paint at +6,007ms, past the 5,000ms default. That
+  // diagnosis was half right: the request was not merely slow, it was being
+  // *refused* — `anon` carries a 3s statement_timeout and five concurrent calls
+  // on a thick day all returned 500/57014, which is what the suite's five workers
+  // produce. Raising the timeout could never have fixed a 500, and did not.
+  //
+  // Migration 0032 removed the cause by caching the graph per (date, category).
+  // Re-probed after it, second of two runs both times: first paint at +579ms on
+  // the current day and +570ms on 2026-08-07's 3,224 headlines. The default
+  // 5,000ms is ~9x that, so the explicit timeout is gone rather than left
+  // standing at 35x a number that no longer describes anything.
   const wordCloudSvg = page.locator('svg text').first()
   const emptyState = page.getByText('아직 수집된 데이터가 없습니다.')
-  await expect(wordCloudSvg.or(emptyState)).toBeVisible({ timeout: 20000 })
+  await expect(wordCloudSvg.or(emptyState)).toBeVisible()
 
   // The retry button only renders when a query failed.
   await expect(page.getByRole('button', { name: '다시 시도' })).toHaveCount(0)
@@ -51,13 +55,12 @@ test('reaches the real Supabase project', async ({ page }) => {
   // instead; it is not pinned to a specific date because the real database
   // accumulates dates over time.
   //
-  // This is the same live round trip as the svg/empty-state wait above (both
-  // effects race against the same cold connection to the same thick day), so
-  // it gets the same generous timeout for the same reason rather than the
-  // default 5,000ms — not separately measured, but the risk is identical.
+  // This carried the same 20,000ms timeout as the wait above, for the same
+  // reason and with the same expiry: it was never separately measured, it was
+  // matched to that one, and migration 0032 removed what both were compensating
+  // for. Back to the default with it.
   await expect(page.locator('input[type="date"]')).toHaveAttribute(
     'max',
     /^\d{4}-\d{2}-\d{2}$/,
-    { timeout: 20000 },
   )
 })
