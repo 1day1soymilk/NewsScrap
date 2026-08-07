@@ -202,7 +202,15 @@ at 1000. It returns `{nodes, edges}` as JSON. Functions here are all
 `SECURITY INVOKER`, so the select-only policies still apply; `anon` needs
 `execute` on the whole chain.
 
-**`keyword_graph` is `language plpgsql` and everything else here is
+**Since migration `0032`, `keyword_graph` is a thin reader over
+`keyword_graph_cache` and the computation lives in `keyword_graph_compute`.**
+Everything the rest of this section says about the loop, the fixed point and the
+helpers describes `keyword_graph_compute`; the name `keyword_graph` now means
+"the cached answer, or compute it if there is no row". See "Why the graph is
+cached" below for the measurements that forced it and for what the cache costs
+you when you retune.
+
+**`keyword_graph_compute` is `language plpgsql` and everything else here is
 `language sql`, because the node rule is a fixed point** (migration `0024`).
 With the place gate on, dropping a place promotes the word at rank 71, and that
 word can be the only non-place partner some *other* place was hanging on by — or
@@ -738,6 +746,62 @@ until now measured.
 data underneath it and `20_unlabeled.sql` returned eight words that had never
 been near the cut before. **Run it before the harness, every time, whatever
 changed.**
+
+### Why the graph is cached, and what that costs when you retune
+
+**`keyword_graph` was failing for concurrent readers, and the failure was a
+server-side 500 rather than slowness.** `anon` carries `statement_timeout = 3s`
+(`authenticated` 8s). Measured against the live project on 2026-08-07, a day
+holding 3,224 headlines: one call returned 200 in 2,637 ms, and **five
+concurrent calls all returned 500 with SQLSTATE `57014`.** A handful of
+simultaneous visitors on a thick day each got an error page. `e2e/smoke.spec.ts`
+had been red for exactly this reason — Playwright runs five workers against the
+real project — and raising its timeout did not help, because the request was not
+slow, it was refused.
+
+Two changes followed, and the order matters because only the second one fixed
+the problem.
+
+- **Migration `0031` removed a duplicate edge pass.** The place-gate loop's last
+  pass computes the converged nodes and edges, finds nothing to drop, and exits —
+  and the old final block then recomputed both with the identical `banned`.
+  `keyword_graph_pick_edges` ran **three** times where two were needed. Warm,
+  second of two runs: **2,425 ms → 1,976 ms**, about 18%, with all **56** cells
+  (8 collected days × the all view and 6 tabs) byte-identical before and after.
+  Worth having, and **it does not solve the concurrency failure** — five
+  concurrent two-second queries still exceed a three-second wall.
+- **Migration `0032` stopped computing the graph per request.** The result is a
+  pure function of `(date, category)` and that day's stored rows, and those rows
+  only change when the collector runs, so recomputing it on every page load was
+  the actual defect. `keyword_graph_cache` is keyed `(collected_date,
+  category_slug)`; `keyword_graph` reads it and falls back to
+  `keyword_graph_compute` on a miss. Same 56 cells byte-identical. Read time
+  warm, second of two: **1,976 ms → 1.35 ms**, and the five concurrent calls that
+  had all returned 500 now all return **200 in ~0.5 s with identical payloads**.
+
+**A miss does not write the cache, deliberately.** Writing would need
+`SECURITY DEFINER`, which would let `anon` trigger unbounded ~2-second writes
+through PostgREST. A miss is slow but correct, which is the right direction to
+fail in. `refresh_keyword_graph_cache(p_date)` is the writer, `SECURITY DEFINER`
+with `set search_path = ''` and execute granted to `service_role` alone — the
+same shape and the same reasoning as `refresh_word_directory()` in `0030`.
+
+**Store it as `json`, never `jsonb`.** This was found by the byte-identity check
+rather than reasoned: `jsonb` canonicalises key order, so the first draft of
+`0032` silently changed all 56 hashes while returning semantically identical
+data. `json` is a verbatim passthrough. Anything that round-trips this payload
+has to preserve it exactly, because the frontend's cache compares object
+identity and the e2e suite asserts on drawn geometry.
+
+**The cost is that a retune is no longer live, and this is a real loss.** This
+file says elsewhere that thresholds in `scoring_weights` and the dictionary in
+`word_overrides` can be retuned with an `update` and no redeploy. That is still
+true of the *computation* and no longer true of the *screen*: until
+`refresh_keyword_graph_cache` is called for the affected dates, the cached graph
+is the one computed under the old settings. `docs/DEPLOYMENT.md` carries the
+operator step. Anyone running `scripts/analysis/` against the live database
+should note that the harness calls the helpers directly and is therefore
+unaffected — it measures the sieve, not the cache.
 
 ### Reading the same view twice costs nothing
 
