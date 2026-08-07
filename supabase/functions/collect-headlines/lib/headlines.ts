@@ -1,12 +1,42 @@
 export interface ScrapedHeadline {
   title: string
   link: string
+  /**
+   * The day the article was published, `YYYY-MM-DD`, or **null when the markup
+   * does not say** — which is 0.3% of items, measured over 676 of them across
+   * three sections and six pages on 2026-08-05.
+   *
+   * It is read off the thumbnail's origin path rather than off the visible
+   * timestamp beside the headline, and that is a deliberate choice between two
+   * available sources. The visible one is relative ("2시간전", "1일전"): it needs
+   * the current time and a time zone to become a date, it is hour-grained, and
+   * past a day it stops resolving at all — three ways to be wrong about exactly
+   * the articles this field exists to identify. The thumbnail path carries the
+   * date literally, so reading it is a pure function of the HTML, which is also
+   * what keeps this file testable without a clock.
+   *
+   * Checked twice before it was relied on, and the second check is the one that
+   * matters. Against the page cursor: over 30 pages of three sections, **not one
+   * article carried a thumbnail date older than its own page's cursor stamp**.
+   * And against the articles themselves, which is the only thing that can say
+   * this is a *publication* date rather than merely a consistent one — the
+   * twelve politics articles straddling the 2026-08-05 boundary, six each side,
+   * were fetched and their own timestamps read: **12 agree, 0 disagree**, with
+   * the flip in the list falling exactly where the articles put it.
+   */
+  published: string | null
 }
 
 // sa_text_title may appear anywhere in the class list, not just first.
 const ANCHOR_RE = /<a\b([^>]*class="[^"]*\bsa_text_title\b[^"]*"[^>]*)>([\s\S]*?)<\/a>/g
 const HREF_RE = /href="([^"]+)"/
 const STRONG_RE = /<strong[^>]*>([\s\S]*?)<\/strong>/
+
+// Naver serves an article's thumbnail from a path that spells out the day it
+// was published: .../image/origin/{press}/2026/08/05/{id}.jpg. The image sits
+// inside the same <li> as the headline and **before** it, so the date belonging
+// to a headline is the last one appearing above that headline's anchor.
+const IMG_DATE_RE = /\/image\/origin\/\d+\/(\d{4})\/(\d{2})\/(\d{2})\//g
 
 // 섹션 첫 페이지는 /mnews/article/{press}/{id}를, "더보기" 페이지네이션은
 // /article/{press}/{id}를 같은 기사에 준다. 삽입 시 중복 검사(index.ts)는 링크
@@ -42,7 +72,29 @@ export function extractHeadlines(html: string): ScrapedHeadline[] {
   const results: ScrapedHeadline[] = []
   const seenLinks = new Set<string>()
 
+  // Both sequences run in document order, so one forward pointer pairs them:
+  // for each anchor, take the last thumbnail date above it that no earlier
+  // anchor has already claimed.
+  //
+  // **The pointer advances before any `continue`, and that is load-bearing in
+  // one case only** — a skipped anchor whose item has a thumbnail, followed by
+  // an item that has none. Advancing late would hand the skipped item's day to
+  // the next headline instead of leaving it null. Items with no thumbnail are
+  // 0.3% of them, so the case is rare rather than hypothetical.
+  const dates: { at: number; date: string }[] = []
+  for (const match of html.matchAll(IMG_DATE_RE)) {
+    dates.push({ at: match.index ?? 0, date: `${match[1]}-${match[2]}-${match[3]}` })
+  }
+  let nextDate = 0
+
   for (const match of html.matchAll(ANCHOR_RE)) {
+    const anchorAt = match.index ?? 0
+    let published: string | null = null
+    while (nextDate < dates.length && dates[nextDate].at < anchorAt) {
+      published = dates[nextDate].date
+      nextDate += 1
+    }
+
     const [, attrs, inner] = match
     const hrefMatch = HREF_RE.exec(attrs)
     if (!hrefMatch) continue
@@ -63,7 +115,7 @@ export function extractHeadlines(html: string): ScrapedHeadline[] {
     if (!title) continue
 
     seenLinks.add(link)
-    results.push({ title, link })
+    results.push({ title, link, published })
   }
 
   return results
@@ -84,6 +136,31 @@ export function extractListCursor(html: string): ListCursor | null {
   const match = CURSOR_RE.exec(html)
   if (!match) return null
   return { hasNext: match[1] === 'true', cursor: match[2], pageNo: Number(match[3]) }
+}
+
+/**
+ * Has this page reached back past the start of `date` (`YYYY-MM-DD`)?
+ *
+ * The cursor is the stamp of the **oldest** article on the page just read, so a
+ * `true` here means the next page cannot hold anything from `date` at all and
+ * paging may stop. It is not a statement about the page it was read from: that
+ * page straddles the boundary and still holds articles worth keeping, which is
+ * why the per-article `published` field exists as well.
+ *
+ * **The two have to be separate, and page 1 is why.** The first page opens with
+ * the section's curated headline block, which is not in publication order —
+ * 2026-08-05 12:30 KST had three 08-04 articles inside the first 46 of politics
+ * under a cursor still stamped 08-05. A rule that stopped at the first old
+ * article would have cut that page off at rank 3.
+ *
+ * A missing or malformed cursor answers `false`: paging on and letting the cap
+ * stop the run costs at most one page of articles that get filtered anyway,
+ * while a `true` would silently shorten every scrape.
+ */
+export function cursorIsBefore(cursor: ListCursor | null, date: string): boolean {
+  const stamp = cursor?.cursor
+  if (!stamp || stamp.length < 8) return false
+  return stamp.slice(0, 8) < date.replace(/-/g, '')
 }
 
 // The pagination endpoint answers with JSON that wraps the same list markup the

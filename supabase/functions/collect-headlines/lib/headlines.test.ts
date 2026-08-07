@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalLink, extractHeadlines, extractListCursor, extractTemplateListHtml } from './headlines'
+import {
+  canonicalLink,
+  cursorIsBefore,
+  extractHeadlines,
+  extractListCursor,
+  extractTemplateListHtml,
+} from './headlines'
 
 const SAMPLE_HTML = `
 <li class="sa_item">
@@ -85,10 +91,12 @@ describe('extractHeadlines', () => {
       {
         title: '[속보]김의겸 "24년전 발언은 사실과 다르다"',
         link: 'https://n.news.naver.com/article/087/0001208610',
+        published: null,
       },
       {
         title: '여야, 예산안 처리 & 협상 재개',
         link: 'https://n.news.naver.com/article/001/0016226272',
+        published: null,
       },
     ])
   })
@@ -111,6 +119,7 @@ describe('extractHeadlines', () => {
       {
         title: '국회, 본회의 개최',
         link: 'https://n.news.naver.com/article/055/0001199999',
+        published: null,
       },
     ])
   })
@@ -140,6 +149,7 @@ describe('extractHeadlines', () => {
       {
         title: '여야, 예산안 처리 협상 재개',
         link: 'https://n.news.naver.com/article/001/0016226272',
+        published: null,
       },
     ])
   })
@@ -163,6 +173,103 @@ describe('extractHeadlines', () => {
     expect(headline.title).toBe('李대통령, 金총리와 회동')
     // 문자열 비교가 깨지면 두 줄이 똑같아 보이므로, 코드포인트로도 확인한다.
     expect(headline.title.codePointAt(0)).toBe(0x674e)
+  })
+})
+
+// The shape of one real list item, cut down: the thumbnail — whose origin path
+// spells out the publication day — sits inside the same <li> and above the
+// headline anchor.
+function item(press: string, id: string, day: string | null, title: string) {
+  const thumb = day === null
+    ? ''
+    : `<div class="sa_thumb"><a href="https://n.news.naver.com/mnews/article/${press}/${id}" class="sa_thumb_link">` +
+      `<img data-src="https://mimgnews.pstatic.net/image/origin/${press}/${day}/${id}.jpg?type=nf220_150"></a></div>`
+  return (
+    `<li class="sa_item">${thumb}<div class="sa_text">` +
+    `<a href="https://n.news.naver.com/mnews/article/${press}/${id}" class="sa_text_title">` +
+    `<strong class="sa_text_strong">${title}</strong></a></div></li>`
+  )
+}
+
+describe('extractHeadlines — publication day', () => {
+  it('reads the day off the thumbnail path', () => {
+    const [headline] = extractHeadlines(item('055', '0001378178', '2026/08/05', '카카오게임즈 적자 확대'))
+    expect(headline.published).toBe('2026-08-05')
+  })
+
+  // **This is the assertion the day-boundary stop rests on.** The first page of
+  // a section opens with the curated headline block, which is not in publication
+  // order: on 2026-08-05 at 12:30 KST three 08-04 articles sat inside the first
+  // 46 of politics. Pairing a date with the wrong headline would drop a current
+  // article or keep a stale one, and both are silent.
+  it('pairs each day with the headline it sits above, not with the next one', () => {
+    const html =
+      item('055', '0000000001', '2026/08/05', '오늘 기사') +
+      item('001', '0000000002', '2026/08/04', '어제 기사') +
+      item('022', '0000000003', '2026/08/05', '오늘 기사 둘')
+    expect(extractHeadlines(html).map((h) => [h.link.slice(-10), h.published])).toEqual([
+      ['0000000001', '2026-08-05'],
+      ['0000000002', '2026-08-04'],
+      ['0000000003', '2026-08-05'],
+    ])
+  })
+
+  // An item with no thumbnail is 0.3% of them, measured over 676. It must come
+  // back null rather than inheriting whatever date was above it — that would
+  // make an unreadable article silently take its neighbour's day.
+  it('answers null for a headline with no thumbnail, either side of a dated one', () => {
+    const html =
+      item('055', '0000000001', '2026/08/05', '썸네일 있는 기사') +
+      item('001', '0000000002', null, '썸네일 없는 기사') +
+      item('022', '0000000003', null, '썸네일 없는 기사 둘') +
+      item('037', '0000000004', '2026/08/04', '썸네일 있는 기사 둘')
+    expect(extractHeadlines(html).map((h) => h.published)).toEqual([
+      '2026-08-05',
+      null,
+      null,
+      '2026-08-04',
+    ])
+  })
+
+  // A headline anchor the href regex cannot read is skipped, and it has to
+  // consume its own thumbnail on the way out. The case where that shows is a
+  // skipped item **with** a thumbnail followed by one **without**: leaving the
+  // date behind hands 08-04 to an article the markup says nothing about, and a
+  // wrong day here is not a null — it is a real article dropped as off-day.
+  it('does not hand a skipped anchor\'s day to the next headline', () => {
+    const html =
+      '<li class="sa_item"><div class="sa_thumb"><img data-src="https://mimgnews.pstatic.net/image/origin/055/2026/08/04/0000000001.jpg"></div>' +
+      '<div class="sa_text"><a class="sa_text_title"><strong>href 없는 기사</strong></a></div></li>' +
+      item('001', '0000000002', null, '썸네일 없는 다음 기사')
+    expect(extractHeadlines(html)).toEqual([
+      {
+        title: '썸네일 없는 다음 기사',
+        link: 'https://n.news.naver.com/article/001/0000000002',
+        published: null,
+      },
+    ])
+  })
+})
+
+describe('cursorIsBefore', () => {
+  const cursor = (stamp: string) => ({ hasNext: true, cursor: stamp, pageNo: 3 })
+
+  it('is true once the page\'s oldest article predates the day', () => {
+    expect(cursorIsBefore(cursor('20260804213711'), '2026-08-05')).toBe(true)
+  })
+
+  it('is false while the page still ends inside the day', () => {
+    expect(cursorIsBefore(cursor('20260805043306'), '2026-08-05')).toBe(false)
+    expect(cursorIsBefore(cursor('20260805000000'), '2026-08-05')).toBe(false)
+  })
+
+  // A missing or short cursor pages on and lets the cap stop the run: the extra
+  // page's articles are filtered by their own date anyway, while answering true
+  // would quietly shorten every scrape the moment Naver renamed an attribute.
+  it('fails open on a missing or unreadable cursor', () => {
+    expect(cursorIsBefore(null, '2026-08-05')).toBe(false)
+    expect(cursorIsBefore(cursor(''), '2026-08-05')).toBe(false)
+    expect(cursorIsBefore(cursor('202608'), '2026-08-05')).toBe(false)
   })
 })
 

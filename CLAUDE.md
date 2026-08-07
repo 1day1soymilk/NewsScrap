@@ -1424,6 +1424,12 @@ short scrape rather than as anything named. It is 12 now, reaching ~440, past an
 cap measured here. A database value is only a decision if nothing else silently
 binds first.
 
+**It is now the thing to check when `collect_cap` is raised**, and the arithmetic
+moved: with the day-boundary stop dropping off-day articles, a page contributes
+fewer than 36 kept headlines near the boundary, so 12 pages is comfortable at a
+cap of 300 and **not enough at 600**. Raise them together or the cap silently
+stops meaning what it says again.
+
 **The limit that kills this function is CPU time, not the wall clock, and every
 number in this section used to be written against the wrong one.** The platform
 allows roughly **3 seconds of accumulated CPU per worker** and says so in the
@@ -1502,49 +1508,111 @@ gives the **all-new** case a live run cannot be made to take on demand:
 | 300 | 1,800 | 1,481ms | 4.2s | 200 |
 | 441 | 2,630 | 2,082ms | 5.3s | 200 |
 
-**What stops it is the date stamp.** `collected_date` is the day of collection
-and a deeper page is an older article, so paging past midnight files yesterday's
-news under today. Measured at 20:10 KST at rank #400 — the deepest depth the
-measurement's table covers: the fast sections never leave today — society
-reaches only 4 hours back at that depth — while culture and `it` cross into
-2026-08-03 at about rank 290, and one cap-300 run stored 7 such rows, all in
-`it`, at ranks 278-296.
+#### The day boundary, and why one cap cannot serve both ends of the day
 
-**That measurement covers one time of day, and raising the cap needs the
-opposite one.** The whole of it is 20:10–21:10 KST, the regime least likely to
-reach past midnight — the fast sections already had most of a day's news ahead
-of the boundary. If the cap is ever raised, the check to run is the pre-today
-count on the 03:00 and 07:00 runs, not on an evening one; those runs are the
-regime where a deeper page reaches furthest into yesterday, and they were not
-measured because they cannot be provoked on demand.
+**What used to stop a raise was the date stamp, and it no longer does.**
+`collected_date` is the day of collection and a deeper page is an older article,
+so a window wider than the day's own news files yesterday under today.
+`fetchSectionHeadlines` now refuses to return anything published on another day,
+and that — not the CPU budget, which was tested and fits — is what makes the cap
+movable.
 
-Two things keep that small, and both have to be read before the 7 is used as an
-argument either way. `UNIQUE (category_id, link)` is **global rather than
-per-date**, so only an article that fell in a coverage hole can be re-stamped at
-all. And **the effect is already here at 150**: the 02:29 and 07:00 runs of
-2026-08-04 stored 89 culture, 64 `it` and 43 world articles published on 08-03,
-because at 02:29 the day holds 2.5 hours of news and a 150-headline window has to
-reach past midnight to fill itself. So a raise makes an existing property of the
-design larger; it does not introduce one. **Deciding what `collected_date` should
-mean comes before deciding the cap**, and `extractListCursor` already returns the
-YYYYMMDDHHMMSS stamp a day-boundary stop would need.
+**It was not a cost of raising the cap. It was already happening at 150, by more
+than anyone had counted.** Every row stored under 2026-08-05 was classified
+against the live section lists at 12:30 KST that day, after three runs: 1,224
+rows, **129 of them published before that day**, and a further 88 sitting deeper
+than a 1,620-article scrape could reach and so almost certainly older still.
+**80 of the 129 came from the 03:00 run.**
 
-**The cap does bind, and what is behind it is today's news.** society stored
-exactly 150 on the 11:00, 15:00 and 19:00 runs of 2026-08-04 and publishes about
-75 headlines an hour, so a 150 window covers under half of a 4-hour cron gap and
-the remainder is lost for good — of the 140 society links sitting at ranks
-301-441 at 20:10, **139 are absent from the archive** and every one is from that
-day, a permanent hole between the 15:00 and 19:00 runs. At 20:10 a cap of 300
-would have taken
-478 new links against 150's 278. The gain is concentrated: politics +50, economy
-+98, society +36 against culture +1, world +4, `it` +11, so **deeper paging
-widens the section gap rather than closing it**.
+**The 03:00 and 07:00 regime is measurable without waiting for it**, which is
+what turned a year-old "cannot be provoked on demand" into a measurement. The
+section list is ordered by publication time, so *articles published between
+midnight and T* is exactly the rank at which a run starting at T crosses into
+yesterday. Counted at 12:30 KST on 2026-08-05:
 
-The cap therefore **stays at 150**, and the value being in the database is what
-makes that a decision rather than a deployment.
+| section | published by 03:00 | by 07:00 | today by 11:00 |
+| --- | --- | --- | --- |
+| politics | 17 | 50 | 140 |
+| economy | 24 | 120 | 589 |
+| society | 42 | 136 | 533 |
+| culture | 15 | 52 | 131 |
+| world | 15 | 75 | 167 |
+| `it` | 1 | 23 | 81 |
+
+**Not one section reaches 150 before 07:00.** At 03:00 a 150-headline window
+spends 133 of its 150 slots on yesterday in politics and 149 in `it`. What kept
+the damage to 129 rows is only that most of those articles were already held:
+`UNIQUE (category_id, link)` is **global rather than per-date**, so a yesterday
+article yesterday collected cannot be re-stamped. The 129 are the ones that fell
+in a coverage hole.
+
+**The other end of the day says the opposite thing about the same number, and
+that is the finding.** Of the articles published on 2026-08-05 before the 11:00
+run, **42.9% were never collected at all** — 704 of 1,641, 61% of economy and
+53% of society. Every one of those holes sits between 07:00 and 11:00 and **none
+at all between midnight and 05:00**. So 150 is simultaneously far too wide for
+the thin hours and less than half of what the busy ones need. **The boundary stop
+is what lets one number stop being asked to do both**: in the thin hours it stops
+the scrape early, in the busy hours it never fires, so the cap is free to rise
+for the case that actually wants it. Verified against live markup with the
+shipped parser at cap 300: economy and society stop on the cap, the other four
+stop on the boundary.
+
+What the 11:00 run of that day would newly have stored, boundary stop on:
+
+| cap | 150 | 200 | 300 | 450 | 600 |
+| --- | --- | --- | --- | --- | --- |
+| new rows | 126 | 228 | 426 | 680 | 704 |
+
+**The cap should go to 300, and 300 is deliberately not the top of that column.**
+450 puts a cold all-new run at ~2,700 headlines against the 2,630 that is the
+deepest anything here has been measured at, and the worker budget is cumulative.
+It is a `scoring_weights` value, so the raise is an `update` with no redeploy —
+but **the boundary stop has to be deployed first**, since at 150 the early runs
+already overshoot and at 300 they would overshoot twice as far.
+
+**The one thing lost is real and small.** Those 129 rows a day are genuine
+articles, and they are now not collected at all rather than collected under the
+wrong date. That is the right trade — they are yesterday's holes, against 426
+correctly dated rows arriving in their place — but it is a trade. Stamping rows
+by publication date instead would keep them, at the cost of a closed day's totals
+changing afterwards, which invalidates every measurement taken against that day
+and is exactly the hazard rule 4 exists for. Not done.
+
+**The date is read off the thumbnail path, not off the visible timestamp**
+(`/image/origin/{press}/2026/08/05/…`), and the choice is not arbitrary. The
+visible one is relative — "2시간전", "1일전" — so it needs a clock and a time
+zone to become a date, it is hour-grained, and past a day it stops resolving at
+all: three ways to be wrong about precisely the articles the field exists to
+identify. The thumbnail path is a pure function of the HTML, which is also what
+keeps `lib/headlines.ts` testable without a clock. Coverage is **99.7%** over
+676 items, and a missing date **keeps** the article — the same fail-open choice
+`canonicalLink` makes.
+
+**The per-article date and the paging stop are separate mechanisms, and page 1
+is why.** A section's first page opens with a curated headline block that is
+*not* in publication order: at 12:30 KST on 2026-08-05, politics had three 08-04
+articles inside its first 46 under a cursor still stamped 08-05. A rule that
+stopped at the first old article would have cut that page off at rank 3. So
+`cursorIsBefore` stops the *paging* once a whole page's oldest article predates
+the day, and `published` filters *within* every page, including that one.
+
+**It was checked twice, and the second check is the one that matters.** Against
+the page cursor: over 30 pages of three sections, not one article carried a
+thumbnail date older than its own page's cursor stamp. And **against the articles
+themselves**, which is the only thing that can establish this is a *publication*
+date rather than merely a self-consistent one — the twelve politics articles
+straddling the 2026-08-05 boundary, six each side, were fetched and their own
+timestamps read: **12 agree, 0 disagree**, with the flip in the list falling
+exactly where the articles put it. Agreeing with the cursor would have been
+satisfied by any date the same pipeline stamped on both.
+
+**Note that deeper paging widens the section gap rather than closing it**: the
+recovery above is 359 economy and 285 society against 11 culture, 9 world and 11
+`it`. Balance is a ranking question and `df_balanced` is where it lives.
 
 **Collection cannot be equalised by paging deeper, and that is why balance was
-attempted in the ranking instead.** The same day, counted per run: society took
+attempted in the ranking instead.** 2026-08-04, counted per run: society took
 the whole 150-headline window on both the 11:00 and the 15:00 run while `it`
 never passed 98 on any of the five. **The thin section is not being truncated —
 it publishes less** — so a deeper page adds rows where there are already rows.
