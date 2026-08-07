@@ -1599,6 +1599,19 @@ at 70. The four labelled evaluation days all predate it and are unaffected. The
 surge comparison is not: it divides by each day's own total, which is exactly
 what a step change in depth needs.
 
+**The thicker day has a price and it is on the graph's first paint.** One
+sitting, all-categories view, place gate on: **2,197 headlines → 2,103 ms;
+3,077 → 2,614 ms; 4,218 → 3,299 ms** — near-linear in the day's headline count,
+so a full day at cap 300 lands around 3.5 s. **The cost is `keyword_signals`,
+which is 2,034 ms of the 4,218-headline day's 3,299** (`keyword_graph_candidates`,
+which is that call plus sieves 1-4, is 1,967 ms and yields 338 candidates; the
+remaining ~1.3 s is the fixed-point loop's ranking and edge picking). It is
+already called exactly once per request — that is what migration `0024`'s
+restructure bought — so this is not a repeated-work bug and there is nothing
+cheap left to remove. Making it faster is its own task. Nothing on the frontend
+hides a 3.5 s wait: the skeleton, the `preconnect` and `main.tsx`'s pre-mount
+request all help the *first* byte rather than this.
+
 **The one thing lost is real and small.** Those 129 rows a day are genuine
 articles, and they are now not collected at all rather than collected under the
 wrong date. That is the right trade — they are yesterday's holes, against 426
