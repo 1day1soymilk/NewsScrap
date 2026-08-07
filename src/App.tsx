@@ -7,6 +7,7 @@ import { GraphSkeleton } from './components/GraphSkeleton'
 import { HeadlinePanel } from './components/HeadlinePanel'
 import { KeywordGraph } from './components/KeywordGraph'
 import { Masthead } from './components/Masthead'
+import { WordSearch } from './components/WordSearch'
 import {
   fetchCategories,
   fetchCategoryShare,
@@ -19,6 +20,8 @@ import {
   fetchWordCountsFor,
 } from './lib/queries'
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
+import { buildHistory, historyWindow } from './lib/history'
+import type { HistoryPoint } from './lib/history'
 import {
   EVENT_LIST_LIMIT,
   buildEvents,
@@ -72,6 +75,7 @@ function App() {
   const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
   const [headlinesForWord, setHeadlinesForWord] = useState<HeadlineSummary[]>([])
+  const [history, setHistory] = useState<HistoryPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [headlinesLoading, setHeadlinesLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -249,6 +253,39 @@ function App() {
     }
   }, [selectedDate, previousDate, graphWords, headlinesByDate])
 
+  // 그 단어가 수집된 날들을 지나며 그날의 몇 퍼센트였는지. 사건에는 붙이지 않는다
+  // — 루뱅 분할은 하루짜리고 `mergeCommunities`도 그날 엣지 위에서만 돌아서, 어제의
+  // 사건과 오늘의 사건이 같다고 말할 근거가 이 코드베이스에 없다.
+  //
+  // 새 쿼리를 만들지 않는다. `fetchWordCountsFor`가 이미 단어를 지목해서 묻고
+  // (그래서 1,000행 상한에 안 걸리고) 이미 캐시돼 있다. 분모도 이미 손에 있는
+  // `headlinesByDate`이고, 그것은 `collected_dates`의 `count(*)`이지 응답의 합이
+  // 아니다.
+  useEffect(() => {
+    if (!selectedWord || availableDates.length === 0) {
+      setHistory([])
+      return
+    }
+    let cancelled = false
+    // PostgREST spells an unbounded date list `collected_date=in.(…)`, so the
+    // fetch is bounded to the same window buildHistory would keep anyway —
+    // historyWindow is what stops the two from being able to disagree.
+    const dates = historyWindow(availableDates, selectedDate)
+    fetchWordCountsFor(dates, [selectedWord])
+      .then((counts) => {
+        if (cancelled) return
+        setHistory(buildHistory(counts, headlinesByDate, dates, { endDate: selectedDate }))
+      })
+      .catch(() => {
+        // 급상승 표식과 같은 방식으로 삼킨다. 궤적이 없어도 헤드라인 목록은 그대로
+        // 읽히고, 없는 편이 오류 페이지보다 낫다.
+        if (!cancelled) setHistory([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWord, selectedDate, availableDates, headlinesByDate])
+
   // --- 사건 ------------------------------------------------------------------
 
   // 캔버스가 쓴 것과 같은 루뱅 분할을 그대로 받는다. 레이아웃은 폭에 반응하므로
@@ -348,6 +385,17 @@ function App() {
   }, [eventGraph])
 
 
+  // 검색으로 닿은 단어는 그날 그려진 70개 안에 없을 수 있다. 그래프가 아직 안
+  // 왔을 때(nodes 0)는 아직 판단할 수 없으므로 false로 둔다 — 공유된 링크가
+  // 그래프 도착 전에 "없는 단어"라고 불려서는 안 된다.
+  const wordOffCanvas = useMemo(
+    () =>
+      selectedWord !== null &&
+      graph.nodes.length > 0 &&
+      !graph.nodes.some((node) => node.word === selectedWord),
+    [graph.nodes, selectedWord],
+  )
+
   const activeEvent = useMemo(() => {
     if (!selectedEvent) return null
     return eventGraph.events.find((event) => event.words[0].word === selectedEvent) ?? null
@@ -431,9 +479,25 @@ function App() {
           than one more control in a row of them. */}
       <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <h1 className="text-sm font-medium tracking-[0.2em] text-ink-muted uppercase">
-            뉴스 스크랩
-          </h1>
+          {/* lg 아래에서는 워드마크와 검색창이 한 줄을 나눠 쓴다 — 이 래퍼가 없어서
+              검색창이 CategoryTabs 아래 제 줄을 새로 차지하면 헤더가 세 줄이 되고,
+              index.css의 --header-height(lg 아래 6.5rem)는 두 줄만 계산해 둔
+              값이라 더 이상 실제 높이와 맞지 않는다 — 패널이 검색창 위에 겹친다.
+              lg부터는 `contents`로 이 래퍼가 사라져 h1과 검색창이 CategoryTabs와
+              나란히 한 줄이 된다. */}
+          <div className="flex items-center justify-between gap-3 lg:contents">
+            <h1 className="text-sm font-medium tracking-[0.2em] text-ink-muted uppercase">
+              뉴스 스크랩
+            </h1>
+            <WordSearch
+              onSelect={(word) => {
+                // 단어 선택과 사건 선택은 상호배제다 — 캔버스에서 무엇이 살아 있는지
+                // 읽을 수 없게 된다. 캔버스 클릭 핸들러와 같은 규칙.
+                setSelectedEvent(null)
+                setSelectedWord(word)
+              }}
+            />
+          </div>
           <CategoryTabs categories={categories} selected={selectedCategory} onSelect={setSelectedCategory} />
         </div>
       </header>
@@ -492,7 +556,13 @@ function App() {
           >
             <KeywordGraph
               graph={graph}
-              selectedWord={selectedWord}
+              // 검색으로 닿은 단어가 이 날 캔버스에 없으면(wordOffCanvas) 캔버스에는
+              // 포커스할 대상이 없다 — null을 넘겨 아무것도 선택되지 않은 것처럼
+              // 그리게 한다. 그러지 않으면 KeywordGraph의 이웃 집합이 빈 채로
+              // selectedWord만 켜져서 모든 라벨이 0.1로 죽고 모든 엣지가 숨는다.
+              // EventList가 이미 지키는 규칙과 같다 — "빈 집합은 아무것도 죽이지
+              // 않는다". 패널은 그대로 열려 있고 헤드라인과 궤적도 그대로 보인다.
+              selectedWord={wordOffCanvas ? null : selectedWord}
               // 단어를 누르면 사건 선택이 풀린다. 둘 다 켜진 상태는 캔버스에서
               // 무엇이 살아 있는지 읽을 수 없다.
               onWordClick={(word) => {
@@ -529,6 +599,8 @@ function App() {
         categories={categories}
         loading={headlinesLoading}
         error={headlinesError}
+        history={history}
+        offCanvas={wordOffCanvas}
         onClose={() => {
           setSelectedWord(null)
           setSelectedEvent(null)

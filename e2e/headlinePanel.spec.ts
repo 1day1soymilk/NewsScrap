@@ -68,6 +68,20 @@ test('reports a failed headline query inside the panel', async ({ page }) => {
   await expect(page.locator('svg text').filter({ hasText: /^여야$/ })).toBeVisible()
 })
 
+test('the panel shows the word trajectory across collected days', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+  // The file's own way of clicking a word on the canvas — the labels are SVG
+  // text, so getByText would also match the event list's copy of the word.
+  await page.locator('svg text').filter({ hasText: /^예산안$/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel.getByText(/2일 중 2일/)).toBeVisible()
+  // 5/12 today against 1/8 yesterday — a rise in **share**, which is the whole
+  // point: the count went 1 → 5 while the day went 8 → 12 headlines.
+  await expect(panel.getByText(/\+233%/)).toBeVisible()
+})
+
 test('sits at the bottom of a phone screen instead of over the graph', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 780 })
   await mockSupabase(page)

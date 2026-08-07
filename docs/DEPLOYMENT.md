@@ -139,6 +139,45 @@ Management API 의 로그 엔드포인트는 `function_logs` 에 403 을 주고,
   넷 중 셋이 라벨 기준으로 중립이고 나머지 하나는 균등 수집된 날이라 보정할 것이
   없다. 2026-08-04처럼 섹션이 크게 갈린 날에 라벨이 붙은 뒤에 다시 볼 값이다.
 
+**중요 — 위 두 값(과 `word_overrides`)을 바꿨다면 여기서 끝이 아니다.**
+마이그레이션 `0032`부터 `keyword_graph` RPC는 매 요청마다 다시 계산하지 않고
+`keyword_graph_cache`(날짜 x 카테고리 7칸)를 먼저 읽는다 — 하루가 두꺼운 날은
+계산에 2초 가까이 걸리고 `anon`의 `statement_timeout`(3초)에 걸려 동시 방문자가
+전부 500을 받았기 때문이다. **대가는 재튜닝이 더는 즉시 반영되지 않는다는 것이다.**
+`scoring_weights` 나 `word_overrides` 를 바꾼 뒤, 화면에 반영하려면 영향받는 날짜마다
+캐시를 새로고침해야 한다:
+
+```bash
+# 특정 날짜 하나
+scripts/analysis/run.sh -c "select public.refresh_keyword_graph_cache('2026-08-07')"
+
+# 수집된 모든 날짜 (하루 7칸 x 몇 초 — 8일 기준 실측 약 50-90초)
+scripts/analysis/run.sh -c "select public.refresh_keyword_graph_cache(collected_date) from public.collected_dates"
+```
+
+안 하면 어떻게 되냐면: 값은 바뀌었는데 화면은 마지막으로 새로고침된 시점의 그래프를
+그대로 보여준다 — 실패가 아니라 조용히 낡은 채로 남는 것이라 눈치채기 더 어렵다.
+컬렉터는 매 실행 끝에 **그날 날짜와, 낡은 날짜 중 최신 하나**를 자동으로
+새로고침한다(마이그레이션 `0033`, `refresh_stale_keyword_graph_cache`, 응답의
+`graphCache` 필드에 새로고침된 날짜가 그대로 찍힌다). 배경과 캐시 미스가 안전한
+이유(느리지만 정확한 재계산으로 빠진다 — `security definer` 로 쓰기를 하지 않는다)는
+마이그레이션 `0032`의 헤더에 있다.
+
+**그래프가 느리게 느껴지면 제일 먼저 읽을 것은 `keyword_graph_cache_health` 뷰다.**
+
+```sql
+select * from public.keyword_graph_cache_health order by collected_date desc;
+```
+
+`state` 가 `missing`/`stale` 인 날짜는 컬렉터가 실행될 때마다 최신 하나씩 저절로
+낫는다 (하루 6회, 실행당 여분 1개 — 8일 밀림도 이틀 안에 저절로 풀린다). 그래도
+급하면 `refresh_keyword_graph_cache(date)` 를 손으로 한 번 더 부르면 된다.
+**단, 이 뷰는 `scoring_weights` / `word_overrides` 재튜닝은 보지 못한다** — 캐시 행의
+시각(`computed_at`)과 헤드라인 행의 시각(`created_at`)만 비교하는 것이라, 재튜닝은
+둘 중 어느 시각도 바꾸지 않는다. 값을 바꾼 뒤에는 여전히 위 "배포 없이 켜고 끄는
+값" 절대로 영향받는 날짜를 손으로 새로고침해야 하고, `computed_at` 을 재튜닝한
+시각과 눈으로 비교하는 것이 뷰가 해 줄 수 있는 전부다.
+
 ### 2. 데이터 확인 (SQL Editor)
 
 ```sql
@@ -169,6 +208,16 @@ npm run dev
 ```
 
 날짜/카테고리 전환, 단어 클릭 시 관련 헤드라인 표시까지 확인한다.
+
+### 5. 보안 어드바이저의 `word_directory` 경고
+
+`get_advisors(security)` 는 `public.word_directory` 에 대해
+`materialized_view_in_api` 를 **영구적으로** 보고한다. 이것은 예상된 결과이지
+고쳐야 할 경고가 아니다 — 마이그레이션 `0030` 이 이미 적어 둔 대로, materialized
+view는 RLS 정책을 가질 수 없으므로 select-only `grant` 가 이 뷰의 접근 모델
+전부다. 다른 모든 테이블처럼 RLS로 막는 대신 grant를 select로만 좁혀 두었으니,
+이 경고를 없애려고 `anon`/`authenticated` 의 select 권한을 걷어내지 말 것 — 그러면
+검색 기능 자체가 죽는다.
 
 ## 자동 수집 스케줄
 

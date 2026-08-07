@@ -538,11 +538,94 @@ Deno.serve(async () => {
     }
   }
 
+  // 검색이 읽는 사전은 미리 지어 둬야 의미가 있다 — 부분일치는 어떤 인덱스도 타지
+  // 않아서, 명사 행 11만 개를 그때그때 훑으면 316ms이고 그 값은 헤드라인 수에
+  // 비례해 자란다. 여기서 갱신하면 검색은 항상 직전 런까지 최신이다.
+  //
+  // **실패는 삼킨다.** 사전이 하루 낡는 것과 수집이 실패하는 것은 비교 대상이
+  // 아니다. 대신 응답 본문에 적는다: `CHK` 로그는 대시보드에만 있고 Management
+  // API는 function_logs에 403을 주므로, 기계가 읽을 수 있는 유일한 자리가 본문이다.
+  //
+  // CPU 예산과는 무관하다. 이 함수를 죽이는 한계는 워커의 **누적 CPU**인데 이것은
+  // DB가 하는 일을 기다리는 벽시계 시간이다.
+  let directory = 'ok'
+  try {
+    const { error: refreshError } = await supabase.rpc('refresh_word_directory')
+    if (refreshError) {
+      directory = `failed: ${refreshError.message}`
+      console.error('CHK word_directory refresh failed:', refreshError)
+    }
+  } catch (refreshThrow) {
+    // postgrest-js resolves an ordinary failure into { error }, but a network
+    // error it raises itself is not that shape — and an unguarded await here
+    // would lose the whole run's summary at the very last step.
+    directory = `failed: ${String(refreshThrow)}`
+    console.error('CHK word_directory refresh threw:', refreshThrow)
+  }
+
+  // keyword_graph_cache (migration 0032) holds one precomputed row per
+  // (collected_date, category_slug); the RPC anon actually calls now just
+  // reads it, falling back to the ~2s recompute only on a miss. Today's date
+  // is the one date that always misses the moment this run starts, so it has
+  // to be filled here or the day's first several page loads pay the full
+  // cost the cache exists to remove — and worse, five of them at once would
+  // each hit anon's 3s statement_timeout, which is the failure this migration
+  // was written to fix.
+  //
+  // Same shape as the word_directory refresh just above: swallow the failure
+  // (a stale cache serving yesterday's thresholds is a far smaller fault than
+  // a collection run reported as failed), guard both the postgrest `{ error }`
+  // shape and a thrown rejection, and report the outcome in the body — the
+  // only machine-readable channel out of this function.
+  //
+  // **0033: refresh_stale_keyword_graph_cache, not refresh_keyword_graph_cache
+  // directly.** That swallowed failure means a bad refresh used to leave a
+  // date's cache stale with no further consequence — the graphCache field
+  // nobody reads was the only signal. This heals it instead: today is still
+  // refreshed unconditionally, and up to one more date the
+  // keyword_graph_cache_health view calls stale or missing (newest first) is
+  // refreshed alongside it, so a failed run's cache recovers within a bounded
+  // number of later runs rather than staying broken until an operator happens
+  // to read the body. See migration 0033's header for the ~28s-per-run /
+  // 8-day-backlog-in-2-days arithmetic behind the `1`.
+  //
+  // This is wall clock the worker waits on the database for, not worker CPU —
+  // the same distinction the run-budget section of CLAUDE.md draws about the
+  // old ETRI wait — so it does not threaten the CPU budget that actually kills
+  // this function. It does add real wall time, though: up to 2 dates x 7
+  // cells at ~2s each is ~28s, on top of the ~300ms word_directory refresh.
+  // `RUN_BUDGET_MS` (50_000) only bounds the category loop above, not this
+  // tail, and the category loop's own slack (a full 900-headline run finishes
+  // in 4-5s against a 50s budget) is what leaves room for it.
+  let graphCache = 'ok'
+  try {
+    const { data: refreshedDates, error: graphCacheError } = await supabase.rpc(
+      'refresh_stale_keyword_graph_cache',
+      { p_today: collectedDate, p_extra: 1 },
+    )
+    if (graphCacheError) {
+      graphCache = `failed: ${graphCacheError.message}`
+      console.error('CHK keyword_graph_cache refresh failed:', graphCacheError)
+    } else {
+      graphCache = `ok: refreshed ${(refreshedDates ?? []).join(', ')}`
+    }
+  } catch (graphCacheThrow) {
+    graphCache = `failed: ${String(graphCacheThrow)}`
+    console.error('CHK keyword_graph_cache refresh threw:', graphCacheThrow)
+  }
+
   return new Response(
     // `cap` is in the response because it is now a database value: without it
     // the summary cannot be read without a second query asking what the run was
     // configured with, and a run's own report should say what it ran with.
-    JSON.stringify({ date: collectedDate, cap: headlineCap, elapsedMs: Date.now() - startedAt, summary }),
+    JSON.stringify({
+      date: collectedDate,
+      cap: headlineCap,
+      elapsedMs: Date.now() - startedAt,
+      directory,
+      graphCache,
+      summary,
+    }),
     { headers: { 'Content-Type': 'application/json' } },
   )
 })

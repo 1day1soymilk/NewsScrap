@@ -103,6 +103,52 @@ describe('cached', () => {
     expect(run).toHaveBeenCalledTimes(2)
   })
 
+  it('상한을 넘어도 최근에 읽힌 항목은 버려지지 않는다 — LRU는 삽입 순서가 아니라 읽은 순서다', async () => {
+    // 검색과 궤적이 늘린 항목 수만큼, keyword_graph처럼 계속 다시 읽히는 값이
+    // 삽입 순서만으로 밀려나면 안 된다. 'keep'을 매번 다시 읽어 항상 최근에
+    // 읽힌 상태로 유지하면서 새 키를 CACHE_MAX_ENTRIES개 채운 뒤, 하나를 더
+    // 넣어 상한을 넘긴다.
+    const run = vi.fn(async () => 1)
+
+    await cached('keep', run)
+    for (let i = 0; i < CACHE_MAX_ENTRIES - 1; i++) {
+      await cached(`k${i}`, run)
+      await cached('keep', run) // 'keep'을 매번 다시 읽어 맨 뒤로 옮긴다
+    }
+    // 지금까지 삽입/재읽기 순서: k0, k1, ..., k(CACHE_MAX_ENTRIES-2), keep
+    // (크기는 CACHE_MAX_ENTRIES, 아직 상한을 넘지 않았다)
+    expect(run).toHaveBeenCalledTimes(CACHE_MAX_ENTRIES)
+
+    // 한 번 더 넣어 상한을 넘긴다 — 가장 오래 읽히지 않은 k0이 밀려나야 한다.
+    await cached(`k${CACHE_MAX_ENTRIES - 1}`, run)
+    expect(run).toHaveBeenCalledTimes(CACHE_MAX_ENTRIES + 1)
+
+    await cached('keep', run)
+    expect(run).toHaveBeenCalledTimes(CACHE_MAX_ENTRIES + 1) // 'keep'은 살아있다
+
+    await cached('k0', run)
+    expect(run).toHaveBeenCalledTimes(CACHE_MAX_ENTRIES + 2) // k0은 밀려났다
+  })
+
+  it('최근에 읽어도 TTL은 삽입 시각 기준으로 그대로 만료된다 — LRU가 TTL을 슬라이딩 윈도로 바꾸지 않는다', async () => {
+    vi.useFakeTimers()
+    try {
+      const run = vi.fn(async () => 1)
+
+      await cached('a', run)
+      // TTL 만료 직전까지 반복해서 읽어 맨 뒤로 옮긴다 — 읽기가 'at'을
+      // 갱신한다면 이 다음 advance로는 만료되지 않아야 한다.
+      vi.advanceTimersByTime(CACHE_TTL_MS - 10)
+      await cached('a', run)
+      vi.advanceTimersByTime(20) // 삽입 시각 기준으로 TTL을 넘긴다
+      await cached('a', run)
+
+      expect(run).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('clearQueryCache는 전부 비운다', async () => {
     const run = vi.fn(async () => 1)
 

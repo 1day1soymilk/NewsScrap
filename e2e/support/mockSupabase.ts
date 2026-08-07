@@ -9,6 +9,7 @@ import {
   HEADLINE_COUNTS,
   HEADLINE_ROWS,
   WORD_COUNTS,
+  WORD_DIRECTORY,
 } from './fixtures'
 import type { GraphPayload, HeadlineSummary } from './fixtures'
 
@@ -43,6 +44,7 @@ export type EndpointName =
   | 'keyword_graph'
   | 'event_headline_counts'
   | 'event_headlines'
+  | 'word_directory'
 
 export type MockOptions = {
   categories?: RowsOrFn
@@ -50,6 +52,7 @@ export type MockOptions = {
   headline_nouns?: RowsOrFn
   daily_word_counts?: RowsOrFn
   daily_category_counts?: RowsOrFn
+  word_directory?: RowsOrFn
   /** Headlines per collected_date, answered as a head-count. */
   headlines?: Record<string, number>
   keyword_graph?: GraphOrFn
@@ -111,12 +114,22 @@ function eventHeadlinesFor({ body }: MockRequest): HeadlineSummary[] {
   return EVENT_HEADLINE_ROWS[(body.p_words ?? [])[0] ?? ''] ?? []
 }
 
+// The whole point of a search is the filter, so the default applies it: a mock
+// that ignored `ilike` would pass even if the app searched for the wrong term.
+// PostgREST spells it `ilike.%민석%`.
+function directoryFor({ params }: MockRequest): Rows {
+  const pattern = (params.get('word') ?? '').replace(/^ilike\./, '').replace(/%/g, '')
+  if (pattern === '') return []
+  return WORD_DIRECTORY.filter((row) => row.word.includes(pattern))
+}
+
 const TABLE_DEFAULTS: Record<string, RowsOrFn> = {
   categories: CATEGORIES,
   collected_dates: COLLECTED_DATES,
   headline_nouns: HEADLINE_ROWS,
   daily_word_counts: wordCountsFor,
   daily_category_counts: categoryShareFor,
+  word_directory: directoryFor,
 }
 
 // The fallback is resolved the same way the override is: daily_word_counts and

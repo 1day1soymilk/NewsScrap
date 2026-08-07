@@ -18,6 +18,7 @@ const {
   fetchKeywordGraph,
   fetchWordCounts,
   fetchWordCountsFor,
+  searchWords,
 } = await import('./queries')
 
 // 이 파일의 함수들은 모듈 수준 캐시를 공유하므로, 비우지 않으면 한 테스트의
@@ -32,6 +33,7 @@ function makeQueryChain(result: { data: unknown; error: unknown }) {
     eq: vi.fn(() => chain),
     in: vi.fn(() => chain),
     is: vi.fn(() => chain),
+    ilike: vi.fn(() => chain),
     order: vi.fn(() => chain),
     limit: vi.fn(() => chain),
     then: (resolve: (r: typeof result) => unknown) => resolve(result),
@@ -488,5 +490,80 @@ describe('캐시 — 급상승 카운트', () => {
     const second = await fetchWordCountsFor(['2026-08-01'], ['폭염'])
 
     expect(second).toBe(first)
+  })
+})
+
+describe('searchWords', () => {
+  const ROW = { word: '김민석', total: 120, days: 8, last_date: '2026-08-07' }
+
+  it('asks the directory for a substring match, biggest first', async () => {
+    const chain = makeQueryChain({ data: [ROW], error: null })
+    mockSupabase.from.mockReturnValue(chain)
+
+    const result = await searchWords('민석')
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('word_directory')
+    expect(chain.ilike).toHaveBeenCalledWith('word', '%민석%')
+    expect(chain.order).toHaveBeenCalledWith('total', { ascending: false })
+    expect(result).toEqual([
+      { word: '김민석', total: 120, days: 8, lastDate: '2026-08-07' },
+    ])
+  })
+
+  it('coerces counts arriving as strings', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({
+        data: [{ ...ROW, total: '120', days: '8' }],
+        error: null,
+      }),
+    )
+
+    const result = await searchWords('민석')
+
+    expect(result[0].total).toBe(120)
+    expect(result[0].days).toBe(8)
+  })
+
+  it('returns nothing for a blank term without going to the network', async () => {
+    mockSupabase.from.mockClear()
+
+    expect(await searchWords('   ')).toEqual([])
+
+    expect(mockSupabase.from).not.toHaveBeenCalled()
+  })
+
+  // `_` is a LIKE wildcard, so left alone it matches every one-character word
+  // in the archive. PostgREST also rewrites `*` into `%` before Postgres sees
+  // the pattern, so escaping would have to happen at two layers with two sets
+  // of rules; stripping is one rule in one place.
+  it('strips wildcards rather than escaping them', async () => {
+    const chain = makeQueryChain({ data: [], error: null })
+    mockSupabase.from.mockReturnValue(chain)
+
+    await searchWords('민_석*%')
+
+    expect(chain.ilike).toHaveBeenCalledWith('word', '%민석%')
+  })
+
+  it('trims the term', async () => {
+    const chain = makeQueryChain({ data: [], error: null })
+    mockSupabase.from.mockReturnValue(chain)
+
+    await searchWords('  민석  ')
+
+    expect(chain.ilike).toHaveBeenCalledWith('word', '%민석%')
+  })
+
+  it('throws a real Error carrying the PostgREST message', async () => {
+    mockSupabase.from.mockReturnValue(
+      makeQueryChain({
+        data: null,
+        error: { message: 'permission denied for materialized view word_directory', code: '42501' },
+      }),
+    )
+
+    await expect(searchWords('민석')).rejects.toThrow(
+      'permission denied for materialized view word_directory (42501)',
+    )
   })
 })

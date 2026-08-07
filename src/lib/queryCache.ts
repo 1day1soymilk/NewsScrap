@@ -19,6 +19,15 @@ export const CACHE_TTL_MS = 5 * 60 * 1000
 // A day's screen is seven views (six sections plus all), so several days of
 // browsing fit. The cap is here to bound growth in a long-lived tab, not to
 // maximise the hit rate.
+//
+// Search and the word directory added two more entry classes on top of the
+// seven this number used to bound — one per distinct search term and one per
+// word whose trajectory is fetched. A session that searches a handful of
+// words can add more entries than a plain tab/date round trip ever did, which
+// is why eviction below is least-recently-*read* rather than oldest-inserted:
+// insertion order alone would throw away the keyword_graph/share promises the
+// "6 requests on return became 0" measurement rests on, in favour of keeping
+// whatever was searched most recently.
 export const CACHE_MAX_ENTRIES = 24
 
 interface Entry {
@@ -35,9 +44,22 @@ interface Entry {
 
 const entries = new Map<string, Entry>()
 
+/**
+ * Look up a key and, if it is live, mark it as just-read.
+ *
+ * `Map` preserves insertion order, and re-`set`ting an existing key moves it
+ * to the end — so deleting and re-inserting the same entry is what turns
+ * insertion order into least-recently-*read* order, with no separate
+ * timestamp needed. This must not touch `at`: TTL is measured from when the
+ * request went out, never from when it was last read (see the `at` doc
+ * comment above), so the entry object itself is reused untouched.
+ */
 function live(key: string): Entry | undefined {
   const held = entries.get(key)
-  return held && Date.now() - held.at < CACHE_TTL_MS ? held : undefined
+  if (!held || Date.now() - held.at >= CACHE_TTL_MS) return undefined
+  entries.delete(key)
+  entries.set(key, held)
+  return held
 }
 
 export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
@@ -45,8 +67,9 @@ export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
   if (held) return held.value as Promise<T>
 
   const value = run()
-  // Map keeps insertion order, so that order is age order. An existing key has
-  // to be deleted before it is set again or it keeps its old position.
+  // Map keeps insertion order, and `live` above re-inserts on every read, so
+  // this order is least-recently-read order. An existing key has to be
+  // deleted before it is set again or it keeps its old position.
   entries.delete(key)
   const entry: Entry = { at: Date.now(), value, settled: false }
   entries.set(key, entry)
@@ -63,9 +86,9 @@ export function cached<T>(key: string, run: () => Promise<T>): Promise<T> {
   )
 
   while (entries.size > CACHE_MAX_ENTRIES) {
-    const oldest = entries.keys().next()
-    if (oldest.done) break
-    entries.delete(oldest.value)
+    const leastRecentlyRead = entries.keys().next()
+    if (leastRecentlyRead.done) break
+    entries.delete(leastRecentlyRead.value)
   }
   return value
 }

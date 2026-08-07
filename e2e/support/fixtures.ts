@@ -124,6 +124,35 @@ export const WORD_COUNTS: WordCountRow[] = [
   { collected_date: previousDayInSeoul(), word: '한파', count: 2 },
 ]
 
+export type WordDirectoryRow = {
+  word: string
+  total: number
+  days: number
+  last_date: string
+}
+
+// The directory is what the database would materialise from WORD_COUNTS, so it
+// is computed from WORD_COUNTS rather than written out beside it. 유상증자 is
+// added as the one word that exists in the archive and is **not** in
+// DEFAULT_GRAPH — it is what the "not on this day's canvas" assertion needs,
+// and it has to be absent from the graph to test anything.
+export const WORD_DIRECTORY: WordDirectoryRow[] = [
+  ...Object.entries(
+    WORD_COUNTS.reduce<Record<string, { total: number; days: Set<string> }>>((acc, row) => {
+      const held = (acc[row.word] ??= { total: 0, days: new Set() })
+      held.total += row.count
+      held.days.add(row.collected_date)
+      return acc
+    }, {}),
+  ).map(([word, held]) => ({
+    word,
+    total: held.total,
+    days: held.days.size,
+    last_date: [...held.days].sort().slice(-1)[0],
+  })),
+  { word: '유상증자', total: 4, days: 1, last_date: previousDayInSeoul() },
+]
+
 // Shape matches the json_build_object in keyword_graph. The signal fields are
 // not read by the layout, only shown in the tooltip, but they are here so the
 // fixture stays a faithful copy of what the RPC returns.

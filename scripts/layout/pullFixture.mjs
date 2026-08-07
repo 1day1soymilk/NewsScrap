@@ -20,7 +20,13 @@ const days = ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03']
 const out = {}
 
 for (const day of days) {
-  const res = await fetch(`${url}/rest/v1/rpc/keyword_graph`, {
+  // **`keyword_graph_compute`, never `keyword_graph`.** Since migration 0032 the
+  // latter reads `keyword_graph_cache`, so it would hand back whatever was
+  // cached at the last collector run. A layout fixture has to be the graph the
+  // *current* configuration draws, or every number `measure.ts` prints is
+  // measured against a picture the sieve no longer produces — and the whole
+  // point of the fixture is that those numbers are comparable to each other.
+  const res = await fetch(`${url}/rest/v1/rpc/keyword_graph_compute`, {
     method: 'POST',
     headers: {
       apikey: key,

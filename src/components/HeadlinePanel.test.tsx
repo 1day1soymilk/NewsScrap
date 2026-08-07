@@ -138,4 +138,46 @@ describe('HeadlinePanel', () => {
       screen.getByRole('heading', { name: /폭염 · 양산 · 한반도 · 에어컨 관련 헤드라인/ }),
     ).toBeInTheDocument()
   })
+
+  it('shows the trajectory above the headlines for a word', () => {
+    renderPanel({
+      subject: '폭염',
+      history: [
+        { date: '2026-08-03', count: 4, share: 0.1, present: true },
+        { date: '2026-08-04', count: 12, share: 0.2, present: true },
+      ],
+    })
+    expect(screen.getByText(/2일 중 2일/)).toBeInTheDocument()
+  })
+
+  // An event is not a thing that persists across days here: the Louvain
+  // partition is per day and mergeCommunities runs on one day's edges, so
+  // nothing can say yesterday's event and today's are the same event.
+  //
+  // history holds a real two-point series here on purpose. WordHistory
+  // returns null for anything under two points regardless of isEvent, so an
+  // empty array cannot tell "suppressed because isEvent" apart from
+  // "suppressed because there is nothing to draw" — this failed to catch
+  // `!isEvent &&` being deleted from HeadlinePanel.tsx when it passed `[]`.
+  it('shows no trajectory for an event', () => {
+    renderPanel({
+      subject: '김민석 · 정청래',
+      isEvent: true,
+      history: [
+        { date: '2026-08-03', count: 4, share: 0.1, present: true },
+        { date: '2026-08-04', count: 12, share: 0.2, present: true },
+      ],
+    })
+    expect(screen.queryByText(/일 중 /)).not.toBeInTheDocument()
+  })
+
+  it('says when the word is not among the words drawn that day', () => {
+    renderPanel({ subject: '유상증자', offCanvas: true })
+    expect(screen.getByText(/이 날 화면에는 없는 단어/)).toBeInTheDocument()
+  })
+
+  it('says nothing of the sort for a word that is drawn', () => {
+    renderPanel({ subject: '폭염' })
+    expect(screen.queryByText(/이 날 화면에는 없는 단어/)).not.toBeInTheDocument()
+  })
 })

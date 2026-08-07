@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import type { Category, HeadlineSummary } from '../lib/types'
 import { sectionColor } from '../lib/sectionColors'
+import { WordHistory } from './WordHistory'
+import type { HistoryPoint } from '../lib/history'
 
 interface HeadlinePanelProps {
   /** 무엇에 대한 목록인가. null이면 패널이 닫힌다. */
@@ -13,6 +15,18 @@ interface HeadlinePanelProps {
   loading: boolean
   error: string | null
   onClose: () => void
+  /**
+   * The subject word's share across the collected days. Empty for an event —
+   * event identity is not defined across days here, so there is no line to
+   * draw.
+   */
+  history?: HistoryPoint[]
+  /**
+   * The subject is a word the sieve did not draw on this day — reached by
+   * search rather than by clicking the canvas. Saying so is what stops the
+   * canvas looking broken for not lighting anything.
+   */
+  offCanvas?: boolean
 }
 
 export function HeadlinePanel({
@@ -23,6 +37,8 @@ export function HeadlinePanel({
   loading,
   error,
   onClose,
+  history = [],
+  offCanvas = false,
 }: HeadlinePanelProps) {
   const open = subject !== null
   const heading = isEvent ? `${subject} 관련 헤드라인` : `"${subject}" 관련 헤드라인`
@@ -78,6 +94,14 @@ export function HeadlinePanel({
           닫기
         </button>
       </div>
+
+      {offCanvas && (
+        <p className="mb-3 text-xs text-ink-faint">
+          이 날 화면에는 없는 단어입니다.
+        </p>
+      )}
+
+      {!isEvent && <WordHistory points={history} />}
 
       {error && (
         <p role="alert" className="text-sm text-danger">

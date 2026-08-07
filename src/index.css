@@ -79,9 +79,26 @@
      otherwise agree only by coincidence: the toolbar wraps to two rows below
      lg, and a panel pinned to a single hard-coded offset covers the tab row in
      exactly the sm-to-lg range. The breakpoint below must stay equal to the
-     toolbar's lg:flex-row in src/App.tsx. */
+     toolbar's lg:flex-row in src/App.tsx.
+
+     Below lg the two rows are [h1 · WordSearch] and [CategoryTabs] — the
+     search box shares the wordmark's row rather than getting a row of its
+     own, which is what keeps this at two rows rather than three. Measured
+     with Playwright across 640/700/768/900/1023px, after every category tab
+     and the search box had rendered: rendered height is 93px at every one of
+     them. 6rem (96px) is chosen rather than that exact figure, because the
+     requirement this token exists to satisfy is one-sided — the panel must
+     never start ABOVE the header, a 3px gap below it is harmless — and a
+     token equal to the measurement to the pixel has no room to absorb a
+     future change to the wordmark, the search input or CategoryTabs' row
+     height without turning into an overlap. e2e/appControls.spec.ts's "keeps
+     the header at two rows below lg" test asserts the one-sided version of
+     this: the token must be at least the rendered height, and not more than
+     4px past it. If the search box, the wordmark, or CategoryTabs' row height
+     changes enough to eat that slack, that test fails and says so — re-measure
+     with it rather than recomputing by hand. */
   :root {
-    --header-height: 6.5rem;
+    --header-height: 6rem;
   }
 
   @media (width >= 64rem) {

@@ -28,6 +28,19 @@ test('reaches the real Supabase project', async ({ page }) => {
   // contains at least one <text>, because WordCloud renders the svg only when
   // it placed at least one word - so `svg text` avoids a strict-mode
   // violation the day a second, iconography <svg> is added to the page.
+  // **This carried an explicit 20,000ms timeout and no longer needs one.** It was
+  // raised because a browser probe on 2026-08-07 measured keyword_graph landing
+  // at +5,867ms and the first paint at +6,007ms, past the 5,000ms default. That
+  // diagnosis was half right: the request was not merely slow, it was being
+  // *refused* — `anon` carries a 3s statement_timeout and five concurrent calls
+  // on a thick day all returned 500/57014, which is what the suite's five workers
+  // produce. Raising the timeout could never have fixed a 500, and did not.
+  //
+  // Migration 0032 removed the cause by caching the graph per (date, category).
+  // Re-probed after it, second of two runs both times: first paint at +579ms on
+  // the current day and +570ms on 2026-08-07's 3,224 headlines. The default
+  // 5,000ms is ~9x that, so the explicit timeout is gone rather than left
+  // standing at 35x a number that no longer describes anything.
   const wordCloudSvg = page.locator('svg text').first()
   const emptyState = page.getByText('아직 수집된 데이터가 없습니다.')
   await expect(wordCloudSvg.or(emptyState)).toBeVisible()
@@ -41,5 +54,13 @@ test('reaches the real Supabase project', async ({ page }) => {
   // of the word-count effect settling). Assert the max attribute deterministically
   // instead; it is not pinned to a specific date because the real database
   // accumulates dates over time.
-  await expect(page.locator('input[type="date"]')).toHaveAttribute('max', /^\d{4}-\d{2}-\d{2}$/)
+  //
+  // This carried the same 20,000ms timeout as the wait above, for the same
+  // reason and with the same expiry: it was never separately measured, it was
+  // matched to that one, and migration 0032 removed what both were compensating
+  // for. Back to the default with it.
+  await expect(page.locator('input[type="date"]')).toHaveAttribute(
+    'max',
+    /^\d{4}-\d{2}-\d{2}$/,
+  )
 })

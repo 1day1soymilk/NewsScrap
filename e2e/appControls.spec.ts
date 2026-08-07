@@ -141,3 +141,128 @@ test('leaves the date stepper alone when nothing has been collected', async ({ p
   await expect(page.getByRole('button', { name: '이전 수집일' })).toBeDisabled()
   await expect(page.getByRole('button', { name: '다음 수집일' })).toBeDisabled()
 })
+
+// 유상증자 is in WORD_DIRECTORY and deliberately not in DEFAULT_GRAPH — that is
+// the whole point of it, and if a later fixture edit adds it to the graph these
+// tests stop testing anything.
+test('a searched word that was not drawn opens the panel and says so', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  // Read only after first paint has settled: the mount effect that fills
+  // ?date= into the URL runs via replaceState, and reading page.url() right
+  // after goto() races it — goto() can resolve before React's first passive
+  // effect flushes, which was observed reading `before` as null every time.
+  await expect(page.locator('svg text').filter({ hasText: /^예산안$/ })).toBeVisible()
+  const before = new URL(page.url()).searchParams.get('date')
+
+  await page.getByRole('combobox').fill('유상증자')
+  await page.getByRole('option', { name: /유상증자/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toBeVisible()
+
+  // The day did not move under the reader. Asserted on the date rather than on
+  // a hand-encoded word, which would be testing URLSearchParams' escaping.
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('word'))
+    .toBe('유상증자')
+  expect(new URL(page.url()).searchParams.get('date')).toBe(before)
+
+  // 유상증자 has no bridge entry — it touches no drawn word — so focusWords is
+  // null and the canvas falls back to its selectedWord path. Nothing on the
+  // canvas equals '유상증자', so with no guard every label's neighbour set is
+  // empty and every one of them recedes to UNFOCUSED_OPACITY: the whole canvas
+  // reads as dimmed for a word it never had anything to light in the first
+  // place. App.tsx must pass selectedWord={null} to KeywordGraph once
+  // wordOffCanvas is true, so at least one label stays at full opacity.
+  const opacities = await page.locator('svg text[role="button"]').evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('opacity')),
+  )
+  expect(opacities.length).toBeGreaterThan(0)
+  expect(opacities.some((value) => value !== '0.1')).toBe(true)
+})
+
+test('a searched word that was drawn does not carry the note', async ({ page }) => {
+  await mockSupabase(page)
+  await page.goto('/')
+
+  await page.getByRole('combobox').fill('예산안')
+  await page.getByRole('option', { name: /예산안/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel.getByText(/2일 중 2일/)).toBeVisible()
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toHaveCount(0)
+})
+
+// wordOffCanvas in App.tsx is held false while graph.nodes is still empty —
+// deliberately, so a freshly opened ?word= link is not told the word is
+// missing before the graph has had a chance to arrive and say otherwise. On
+// an empty array, `.some(...)` is false and `!false` is true, so without that
+// guard the note would flash on immediately, correctly or not, on every
+// load. This delays keyword_graph to make that window observable.
+test('does not call a word missing before the graph has had a chance to load', async ({
+  page,
+}) => {
+  await mockSupabase(page, { delayOn: { endpoint: 'keyword_graph', ms: 800 } })
+  await page.goto(`/?word=${encodeURIComponent('유상증자')}`)
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  // The graph has not arrived yet — nothing yet says the word is missing.
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toHaveCount(0)
+
+  // DEFAULT_GRAPH arrives without 유상증자, so the note appears once it has.
+  await expect(panel.getByText(/이 날 화면에는 없는 단어/)).toBeVisible()
+})
+
+// 768px sits in the sm-to-lg band where the toolbar wraps to two rows — the
+// exact band index.css's --header-height media query exists for, and the one
+// the suite's pinned 1280x900 project viewport never reaches. WordSearch was
+// mounted nested inside CategoryTabs' own lg:flex-row wrapper, which folded
+// the header to three rows in this band and left the token (tuned for two)
+// too short, so HeadlinePanel's `sm:top-(--header-height)` started the panel
+// on top of the search row instead of below it.
+test('keeps the header at two rows below lg, and the panel starts exactly beneath it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 768, height: 900 })
+  await mockSupabase(page)
+  await page.goto('/')
+
+  const header = page.locator('header')
+  await expect(header).toBeVisible()
+  const headerBox = (await header.boundingBox())!
+
+  // The value HeadlinePanel's `sm:top-(--header-height)` actually resolves to
+  // at this viewport, read off a probe element rather than parsed out of the
+  // raw custom-property text (which can be an unresolved token like "6.5rem").
+  const tokenPx = await page.evaluate(() => {
+    const probe = document.createElement('div')
+    probe.style.height = 'var(--header-height)'
+    document.body.appendChild(probe)
+    const px = parseFloat(getComputedStyle(probe).height)
+    probe.remove()
+    return px
+  })
+
+  // One-sided, because that is the actual requirement: the panel must never
+  // start above the header, and a token a few pixels taller than the rendered
+  // header is a harmless gap rather than a bug. A token shorter than the
+  // rendered header is the failure that matters — it would put the panel's
+  // top edge over the tab row.
+  expect(tokenPx).toBeGreaterThanOrEqual(headerBox.height)
+  expect(tokenPx - headerBox.height).toBeLessThanOrEqual(4)
+
+  await page.getByRole('combobox').fill('유상증자')
+  await page.getByRole('option', { name: /유상증자/ }).click()
+
+  const panel = page.getByRole('complementary')
+  await expect(panel).toBeVisible()
+  const panelBox = (await panel.boundingBox())!
+  // Same one-sided rule applied to what actually lands on screen: the panel
+  // may start a few pixels below the header, never above it.
+  expect(panelBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height)
+  expect(panelBox.y - (headerBox.y + headerBox.height)).toBeLessThanOrEqual(4)
+})
