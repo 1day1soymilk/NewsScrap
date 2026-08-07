@@ -422,6 +422,7 @@ only rescue a mechanism whose losses sit in the non-binding cells.
   now decides only which of the day's words are shown and how big they are, never
   which ones qualify. The all-categories view is unaffected by construction —
   with no filter the scoped set is the whole day.
+
 #### Round fourteen built three mechanisms, measured them, and shipped one — on a judgement, not on the numbers
 
 Migrations `0023`–`0025` wired a **place gate**, a **render cap the harness can
@@ -1615,6 +1616,7 @@ is the second of two runs.
 
 Nothing on the frontend hides a wait of this size: the skeleton, the `preconnect`
 and `main.tsx`'s pre-mount request all help the *first byte* rather than this.
+
 ## External services
 
 - **Naver RSS is discontinued. Never use it.** Headlines come from parsing
