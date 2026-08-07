@@ -71,6 +71,14 @@ function App() {
   // data, and the URL already carries a mutual-exclusion rule between ?word= and
   // ?event= that a third axis would only complicate.
   const [eventsExpanded, setEventsExpanded] = useState(false)
+  // 헤드라인 패널에서 지금 펼쳐 놓은 날. 같은 이유로 URL에 없다 — 그리고 **캔버스의
+  // 날짜를 바꾸지 않는다**: 검색으로 닿은 단어가 날짜를 옮기지 않는 것과 같은 판단으로,
+  // 읽던 화면이 발밑에서 움직이면 안 된다.
+  //
+  // 어느 상태에 대한 펼침인지를 `for`에 같이 들고 다닌다. 날짜/단어가 바뀌면 저절로
+  // 무효가 되어 화면의 날짜로 돌아가므로, 되돌리는 effect가 필요 없다 — effect로
+  // 되돌리면 그 한 렌더 동안 이전 날짜가 유효해 보여서 지난 날의 요청이 한 번 나간다.
+  const [panelDate, setPanelDate] = useState<{ for: string; date: string } | null>(null)
   const [graph, setGraph] = useState<KeywordGraphData>(EMPTY_GRAPH)
   const [categoryShare, setCategoryShare] = useState<CategoryShareRow[]>(NO_SHARE)
   const [surges, setSurges] = useState<Map<string, Surge>>(NO_SURGES)
@@ -433,6 +441,11 @@ function App() {
     return rest > 0 ? `${shown.join(' · ')} 외 ${rest}` : shown.join(' · ')
   }, [activeEvent])
 
+  // 패널이 지금 어느 날을 펼쳐 놓았는가. 기본은 화면의 날짜이고, 궤적의 다른 날을
+  // 누르면 그 날이 된다. 캔버스는 움직이지 않는다.
+  const panelKey = `${selectedWord ?? ''}|${selectedEvent ?? ''}|${selectedDate}`
+  const openDate = panelDate?.for === panelKey ? panelDate.date : selectedDate
+
   useEffect(() => {
     setHeadlinesError(null)
     // 다리 단어를 눌러도 열리는 것은 **그 단어의** 헤드라인이다. 두 사건의
@@ -445,10 +458,22 @@ function App() {
     }
 
     let cancelled = false
-    setHeadlinesLoading(true)
+    // 단어는 펼쳐진 날을, 사건은 화면의 날짜를 읽는다. **사건에 날짜 축이 없는 것은
+    // 데이터의 성질이지 아직 안 만든 기능이 아니다** — 루뱅 분할이 하루짜리라
+    // 어제의 같은 사건이라는 것이 정의되지 않는다.
     const request = selectedWord
-      ? fetchHeadlinesForWord(selectedDate, selectedCategory, selectedWord)
+      ? fetchHeadlinesForWord(openDate, selectedCategory, selectedWord)
       : fetchHeadlinesForEvent(selectedDate, selectedCategory, eventWords!)
+
+    // 스켈레톤은 **기다릴 것이 있을 때만** 올린다. 날짜 칸을 오갈 때 이미 받아 둔
+    // 날은 왕복 없이 그 자리에서 풀리는데, 거기에 한 프레임짜리 스켈레톤을 번쩍이면
+    // 캐시로 번 것을 그대로 돌려주는 셈이다 — loadGraph가 같은 이유로 같은 모양을
+    // 하고 있고, 그 판정을 프로미스가 언제 풀리는지로 추측하지 않는 것도 같다.
+    setHeadlinesLoading(
+      selectedWord
+        ? !fetchHeadlinesForWord.isReady(openDate, selectedCategory, selectedWord)
+        : !fetchHeadlinesForEvent.isReady(selectedDate, selectedCategory, eventWords!),
+    )
 
     request
       .then((data) => {
@@ -466,7 +491,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedWord, activeEvent, selectedDate, selectedCategory])
+  }, [selectedWord, activeEvent, selectedDate, selectedCategory, openDate])
 
   return (
     <div className="min-h-svh bg-ground text-ink">
@@ -600,6 +625,8 @@ function App() {
         loading={headlinesLoading}
         error={headlinesError}
         history={history}
+        openDate={openDate}
+        onOpenDate={(date) => setPanelDate({ for: panelKey, date })}
         offCanvas={wordOffCanvas}
         onClose={() => {
           setSelectedWord(null)

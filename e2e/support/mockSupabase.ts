@@ -93,6 +93,21 @@ function categoryShareFor({ params }: MockRequest): Rows {
   return CATEGORY_SHARE.filter((row) => row.date === date)
 }
 
+// 한 단어의 헤드라인은 **날짜별로 다른 답**이어야 한다. 패널이 궤적의 다른 날을
+// 펼치면 그 날을 묻는데, 필터를 무시하는 목은 앱이 엉뚱한 날을 물어도 통과한다 —
+// wordCountsFor와 categoryShareFor가 이미 같은 이유로 상수가 아니라 함수다.
+// PostgREST는 내장 리소스의 필터를 점 표기 그대로 쿼리 문자열에 싣는다:
+// `headlines.collected_date=eq.2026-08-08`.
+function headlineRowsFor({ params }: MockRequest): Rows {
+  const date = (params.get('headlines.collected_date') ?? '').replace(/^eq\./, '')
+  const slug = (params.get('headlines.categories.slug') ?? '').replace(/^eq\./, '')
+  return HEADLINE_ROWS.filter(
+    (row) =>
+      (date === '' || row.headlines.collected_date === date) &&
+      (slug === '' || row.headlines.categories.slug === slug),
+  )
+}
+
 function wordCountsFor({ params }: MockRequest): Rows {
   const dates = parseIn(params.get('collected_date'))
   const words = parseIn(params.get('word'))
@@ -126,7 +141,7 @@ function directoryFor({ params }: MockRequest): Rows {
 const TABLE_DEFAULTS: Record<string, RowsOrFn> = {
   categories: CATEGORIES,
   collected_dates: COLLECTED_DATES,
-  headline_nouns: HEADLINE_ROWS,
+  headline_nouns: headlineRowsFor,
   daily_word_counts: wordCountsFor,
   daily_category_counts: categoryShareFor,
   word_directory: directoryFor,
