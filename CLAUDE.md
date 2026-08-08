@@ -977,36 +977,36 @@ The two fixes those splits pointed at:
   candidate that removes the most crossings wins and is then disqualified, taking
   the affordable one with it.
 
-**`PLANAR_AREA_PER_CROSSING` is a threshold, not a dial, and that is the whole
-character of it.** Its sweep is a staircase — 0.15/0.25/0.35 drew the days
-identically to having no planar path at all, 0.5 bought the entire move, 1.0 and
-2.0 are the same picture — so there is no middle setting and **the harness cannot
-settle it; it is a judgement about the picture.** It is 1.0, and it stays 1.0.
+**The budget for a flat drawing is priced in the minimum font size the reader
+actually gets, and getting that unit right is the whole of it.**
+`PLANAR_PX_PER_CROSSING` (0.1) is how many px of rendered `MIN_FONT_SIZE` one
+removed crossing may cost. It replaced `PLANAR_AREA_PER_CROSSING`, which measured
+area against the force layout — **the wrong quantity**, since the svg is drawn at
+its own size and then uniformly scaled to fit, so what a wide region actually
+spends is type size. That rule allowed 46x and refused almost nothing; ten of its
+twelve candidates fell to **overlap** first.
 
-It fired in the costly direction once: 2026-08-02's biggest event grew by one
-word and three edges when the sieve improved, the budget refused it a flat
-drawing, and it now draws 40 crossings against a floor of 2. `layoutCluster`
-verifies a candidate before returning it, so those 40 cannot be a bad flat
-drawing — they are the force layout, which is what a refusal falls back to.
-**Raising the constant was then measured and declined**, and the reason is the
-one this file already states one section down about the canvas, firing here about
-a *region*: **widening buys nothing inside a fixed container.** At any k that
-admits it, the drawing is **2,864px wide on all three views**, and the svg is
-drawn at its own size and then scaled to fit — so `MIN_FONT_SIZE` 14 renders at
-1.8px on a phone, 5.0 on desktop and 7.8 on the wide box. It removes 33 crossings
-from one event and takes the legibility of all 69 words on the day.
+Three things about it are worth not re-deriving:
 
-**The harness could not see that until `scripts/layout/measure.ts` grew a `width`
-column**, which it now has. A change that widens reads as "uses more room" in a
-height-only table and as "shrinks the type" in the real browser, and those are
-different problems. Two more corrections came out of the same instrumenting: ten
-of the twelve candidates are rejected for **overlap** rather than by the budget,
-and `forced` is 52 rather than the 40 the metric reports (`xIn` counts crossings
-among *drawn* edges; `forced` counts every edge in the event), so the budget at
-1.0 already allows **46x** and the flat drawing simply wants 58x. **Whatever is
-tried next, the thing to change is not the constant but what the budget measures**
-— area against the force layout, where the price is actually width against the
-view. Numbers in `scripts/layout/README.md`, "평면화 가격 — 닫힘".
+- **It is relative to the force layout, not an absolute px floor**, and the
+  harness said so the moment it could. `measure.ts`'s `minPx` column shows the
+  phone view already rendering at **5.8–8.8px** with no planar drawing involved,
+  because the packed canvas is wider than 358 — so any "at least N px on screen"
+  bar would condemn the shipped picture. What can be priced is the px this
+  mechanism *takes*.
+- **The same event is drawn differently on different views, by design.** A region
+  inside the view width costs nothing and is flattened free; the budget only
+  bites once a candidate pushes the canvas past the view. `layoutEvent` takes the
+  width for this and nothing else — height is still an output.
+- **The sweep is not a staircase any more, and both of its columns matter.**
+  0.0 through 0.2 draw identically; at 0.5 the flat drawings come back and take
+  the phone's type to 1.7–6.2px. Crossings fall monotonically with k and `minPx`
+  rises against it, so the harness now prints the trade in both paid units rather
+  than only one. 0.1 is mid-plateau and 0.4 clear of the cliff.
+
+Measured on the phone, desktop and wide **byte-identical**: 2026-08-03 gives up
+27 crossings and gets 5.8px → 13.4px and 39% of its height back; the fat day is
+strictly better on every column. Tables in `scripts/layout/README.md`.
 
 **When that table went stale, the first diagnosis was the wrong one, and how it
 was settled is the reusable part.** Migration `0024` had reordered exactly-tied
