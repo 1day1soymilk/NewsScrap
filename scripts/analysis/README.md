@@ -837,15 +837,15 @@ this run carries its own control; 320-323 gate it. Balance spread per day —
 
 | configuration | 07-31 | 08-01 | 08-02 | 08-03 | 08-04 | 08-05 | 08-06 | mean F1 | mean prec |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **300 SHIPPED (α 0)** | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 38.1 | 35.8 | 50.20 | 86.49 |
-| 310 flat α .25 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 38.7 | 35.8 | 49.86 | 86.07 |
-| 311 flat α .50 | **64.3** | 64.3 | 77.1 | 42.0 | 26.3 | 39.4 | 35.8 | 49.89 | 86.07 |
-| 312 flat α .75 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 35.8 | 49.96 | 86.29 |
-| 313 flat α 1.00 | **64.3** | 64.3 | 77.1 | 42.7 | 26.8 | 39.4 | 36.4 | 50.14 | 86.69 |
-| **320 α 1.00, spread ≥ 1.2** | 67.3 | 64.3 | 77.1 | **42.7** | 26.8 | **39.4** | **36.4** | **50.57** | **87.30** |
-| 321 α .50, spread ≥ 1.2 | 67.3 | 64.3 | 77.1 | 42.0 | 26.3 | 39.4 | 35.8 | 50.31 | 86.69 |
-| 322 α 1.00, spread ≥ 1.6 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 36.4 | 50.47 | 87.10 |
-| 323 α 1.00, spread ≥ 2.0 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 36.4 | 50.47 | 87.10 |
+| **300 SHIPPED before α** | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 38.0 | 35.6 | 50.16 | 86.49 |
+| 310 flat α .25 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 38.6 | 35.6 | 49.81 | 86.07 |
+| 311 flat α .50 | **64.3** | 64.3 | 77.1 | 42.0 | 26.3 | 39.2 | 35.6 | 49.83 | 86.07 |
+| 312 flat α .75 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 39.2 | 35.6 | 49.90 | 86.29 |
+| 313 flat α 1.00 | **64.3** | 64.3 | 77.1 | 42.7 | 26.8 | 39.2 | 36.2 | 50.09 | 86.69 |
+| **320 α 1.00, spread ≥ 1.2 — SHIPPED (0035)** | 67.3 | 64.3 | 77.1 | **42.7** | 26.8 | **39.2** | **36.2** | **50.51** | **87.30** |
+| 321 α .50, spread ≥ 1.2 | 67.3 | 64.3 | 77.1 | 42.0 | 26.3 | 39.2 | 35.6 | 50.26 | 86.69 |
+| 322 α 1.00, spread ≥ 1.6 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.2 | 36.2 | 50.41 | 87.10 |
+| 323 α 1.00, spread ≥ 2.0 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.2 | 36.2 | 50.41 | 87.10 |
 | *spread* | *1.01* | *2.52* | *1.67* | *1.49* | *2.44* | *2.48* | *2.21* | | |
 
 `shown` is 69.7 for every row — α reorders and removes nothing — and
@@ -863,7 +863,7 @@ is not what this round rests on. Three things are:
   and a single word of difference would have meant the fallback was miswired.
   It is the implementation check, and it passes.
 - **320 does not lose a single day.** Per-day against the shipped row:
-  +0.0 / +0.0 / +0.0 / **+0.7** / +0.0 / **+1.3** / **+0.6**. Three days better,
+  +0.0 / +0.0 / +0.0 / **+0.7** / +0.0 / **+1.2** / **+0.6**. Three days better,
   four identical, none worse. **Weak dominance is a different kind of fact from a
   better average**, and round fifteen never had one — its flat α lost 3.0 points
   on 07-31 to buy its gains.
@@ -873,7 +873,7 @@ is not what this round rests on. Three things are:
 ### The threshold is not "how imbalanced" — it is "imbalanced at all"
 
 The sweep says something sharper than "1.2 works". 322 and 323 lift the threshold
-to 1.6 and 2.0 and both score **50.47**, below 320's 50.57, because they take
+to 1.6 and 2.0 and both score **50.41**, below 320's 50.51, because they take
 2026-08-03 (spread 1.49) out of α and α is worth +0.7 there. Meanwhile anything
 at or below 1.01 is flat α, which is worse again.
 
@@ -889,18 +889,44 @@ decimal — at a cost of three good words. **Every day with any real imbalance a
 all wants α, including the mildest one in the archive.** The gate is a guard
 against a degenerate input, not a dosage.
 
-α .50 gated (321) scores 50.31 and loses 0.5 on 08-04, so the magnitude is not
+α .50 gated (321) scores 50.26 and loses 0.5 on 08-04, so the magnitude is not
 free either: gated **α = 1.00** is the configuration, not gating on its own.
 
-### It is earned and it is not shipped yet — deliberately
+### It shipped — migration `0035`
 
-No `scoring_weights` value moves in this round. Turning it on means the gating
-has to exist **database-side**, where `keyword_signals`' α default is a single
-constant with no per-day branch, and that is its own change with its own
-migration: a `category_balance_alpha_min_spread` key, an α resolution that reads
-`category_balance_factors(p_date, 1)`, and — by this file's own standing rule —
-the harness's shipped configuration row moved in the same breath. `OPEN.md`
-carries it as the one open item this round leaves.
+`category_balance_alpha` goes 0 → 1.00 and a new
+`category_balance_alpha_min_spread` holds 1.2. **The gate lives in
+`category_balance_factors`' `alpha` CTE, which is where α was already resolved**,
+so the number of places that decide "what α is in force" stays one, and it
+applies to the **default path only** — an explicit `p_alpha` is honoured
+verbatim, because this harness depends on asking for a specific slice.
+
+`category_balance_spread(p_date)` is the day's imbalance, max/min of its
+per-section headline counts, and it is **deliberately independent of α**: a
+threshold on imbalance measured *through* the exponent it gates would read 1.0
+for every day while α is 0 and could never turn itself on. `10_sieve_eval.sql`
+and `20_unlabeled.sql` were switched to read that function rather than compute a
+max/min of their own — checked rather than assumed equivalent, and the check is
+the argument: the two agree to six decimal places on all nine collected days and
+are **not equal**, because numeric division rounds at different points.
+
+On screen, measured over all 63 (day, view) cells:
+
+- **55 identical.** The balanced day is identical on all seven views — the
+  gate's fallback is exact, not approximate.
+- **Every category tab is identical on every day.** α is the identity inside a
+  tab by construction, and that is now measured rather than argued.
+- The eight that moved are the all-categories views of the eight imbalanced days,
+  which is exactly where α is meant to act. Node counts never change: it
+  reorders and removes nothing. On 2026-08-07 the swap is legible — 서울,
+  오피스텔, 주택공급 and 정비사업 step back (society collected 989) and 컴투스,
+  삼성전자, 테슬라, 쿠팡, 오픈AI and 메타 come forward (`it` collected 262).
+
+**The harness's shipped row moved in the same breath**, to 320, and that rule no
+longer depends on anyone remembering: `32_shipped_row_agreement.sql` compares
+the active configuration against `scoring_weights` knob by knob and prints `!`
+on disagreement. It is the automated form of the check `0028` failed. Eleven
+knobs, no `!`.
 
 ### Two silent holes, both found by instruments rather than by reading
 
@@ -1090,6 +1116,7 @@ what it finds before trusting the harness.** That happened three times here:
 | `27_round_sixteen_configs.sql` | Round sixteen: `alpha_min_spread`, and α gated on the day's own imbalance |
 | `28_labels_round_sixteen.sql` | Labels round sixteen exposed — two new days and three worklists |
 | `29_gate_on_category.sql` | The **shipped** tab, read from the deployed RPC because sieve 6 must not be copied a third time |
+| `32_shipped_row_agreement.sql` | Does the shipped configuration row still say what `scoring_weights` says — the automated form of the check `0028` failed |
 | `30_word_scores.sql` | One day's words with every signal and the sieve's verdict beside each |
 | `31_fragments.sql` | Words that look like pieces of longer words, with the longer word beside them |
 

@@ -124,20 +124,33 @@ Management API 의 로그 엔드포인트는 `function_logs` 에 403 을 주고,
   읽을 것** — 라벨은 데이터가 움직이면 상해서, 새로 수집한 날 위에서 하네스를
   돌리려면 `20_unlabeled.sql`이 먼저다.
 
-- **`category_balance_alpha` — 수집량 불균형 보정.** 0이 항등(지금 값, 순수
-  빈도순)이고 1이 "모든 섹션을 똑같이 수집했다면 나왔을 개수"다. 크기는 안 변하고
-  순서만 움직이며, **카테고리 탭 안에서는 α가 무엇이든 항등**이다(같은 섹션의 모든
-  행이 같은 상수를 받으므로).
+- **`category_balance_alpha` — 수집량 불균형 보정. 마이그레이션 `0035`부터
+  **켜져 있고(1.00) 날마다 갈린다**.** 0이 항등이고 1이 "모든 섹션을 똑같이
+  수집했다면 나왔을 개수"다. 크기는 안 변하고 순서만 움직이며, **카테고리 탭
+  안에서는 α가 무엇이든 항등**이다(같은 섹션의 모든 행이 같은 상수를 받으므로).
+
+  **혼자 움직이는 값이 아니다.** `category_balance_alpha_min_spread`(1.2)가
+  그날의 불균형 문턱이고, `category_balance_spread(d)` = 그날 섹션별 기사 수의
+  max/min이 그 아래면 α는 0으로 떨어진다. 균등 수집된 날에는 α가 보정할 것이 없고
+  `df` 동점만 흔들어 좋은 단어를 잃기 때문이다.
 
   ```bash
-  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1 where key = 'category_balance_alpha'"
-  scripts/analysis/run.sh -c "update public.scoring_weights set value = 0 where key = 'category_balance_alpha'"
+  # 그날의 불균형과 실제로 적용되는 계수
+  scripts/analysis/run.sh -c "select category_balance_spread('2026-08-07')"
+  scripts/analysis/run.sh -c "select * from category_balance_factors('2026-08-07')"
+  # 끄기 / 켜기 (문턱을 올리면 모든 날에서 꺼진다)
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 99 where key = 'category_balance_alpha_min_spread'"
+  scripts/analysis/run.sh -c "update public.scoring_weights set value = 1.2 where key = 'category_balance_alpha_min_spread'"
   ```
 
-  측정은 같은 README의 "α: not measurable on this day set" 절, 정의와 비용은
-  마이그레이션 `0025`의 헤더에 있다. 요약하면 **이 네 날 위에서는 α를 잴 수 없다** —
-  넷 중 셋이 라벨 기준으로 중립이고 나머지 하나는 균등 수집된 날이라 보정할 것이
-  없다. 2026-08-04처럼 섹션이 크게 갈린 날에 라벨이 붙은 뒤에 다시 볼 값이다.
+  **문턱은 튜닝하지 말 것.** (1.01, 1.49] 안의 어떤 값이든 일곱 eval day를 똑같이
+  가르는 고원이고, 위로 올리면 08-03을 잃고 아래로 내리면 평평한 α가 된다.
+
+  **어느 쪽을 바꾸든 하네스의 출하 설정 행도 같은 숨에 옮기고**
+  `32_shipped_row_agreement.sql`로 확인한다 — `0028`이 그걸 안 해서 한 릴리스
+  주기 동안 하네스가 앱이 안 그리는 화면을 쟀다. 측정은
+  `scripts/analysis/README.md`의 "Round sixteen", 정의는 마이그레이션 `0025`와
+  `0035`의 헤더에 있다.
 
 **참고 — 위 두 값(과 `word_overrides`)을 바꿔도 손으로 할 일은 없다.**
 마이그레이션 `0032`부터 `keyword_graph` RPC는 매 요청마다 다시 계산하지 않고

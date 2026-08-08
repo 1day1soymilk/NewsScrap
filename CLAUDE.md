@@ -516,21 +516,31 @@ its own knob:
   (spread 1.49 to 2.52) α is neutral or **positive**.
 
   **So α is not wrong; applying it to days that do not need it is** — and round
-  sixteen turned that sentence from arithmetic into a measured configuration.
-  `analysis.sieve_configs.alpha_min_spread` makes the α slice a function of
-  (configuration, **day**), and on seven days **α 1.00 gated at spread ≥ 1.2
-  loses no day at all** (three better, four identical; mean F1 50.20 → 50.57,
-  precision 86.49 → 87.30) and strictly dominates flat α, which pays 3.0 points
-  on the balanced day for the same gains. **Weak dominance is a different kind of
-  fact from a better average**, and it is what round fifteen's +0.26 lacked. The
-  sweep also says the gate is a guard against a degenerate input rather than a
-  dosage: the optimum is any value in (1.01, 1.49] and *both* directions are
-  worse, because every day with any real imbalance wants α and only the day that
-  collected 150/149/150/150/150/150 does not. **It is not shipped yet** —
-  `keyword_signals` resolves α from one `scoring_weights` constant with no
-  per-day branch — and `OPEN.md` carries that migration as its one open item.
-  **Do not retune 1.2**; it is a plateau midpoint. Two properties are worth
-  carrying: **the
+  sixteen turned that sentence from arithmetic into a measured configuration and
+  **migration `0035` ships it**. `analysis.sieve_configs.alpha_min_spread` makes
+  the α slice a function of (configuration, **day**), and on seven days **α 1.00
+  gated at spread ≥ 1.2 loses no day at all** (three better, four identical; mean
+  F1 50.16 → 50.51, precision 86.49 → 87.30) and strictly dominates flat α, which
+  pays 3.0 points on the balanced day for the same gains. **Weak dominance is a
+  different kind of fact from a better average**, and it is what round fifteen's
+  +0.26 lacked. The sweep also says the gate is a guard against a degenerate
+  input rather than a dosage: the optimum is any value in (1.01, 1.49] and *both*
+  directions are worse, because every day with any real imbalance wants α and
+  only the day that collected 150/149/150/150/150/150 does not. **Do not retune
+  1.2**; it is a plateau midpoint.
+
+  **The gate lives in `category_balance_factors`' `alpha` CTE, where α was
+  already resolved, and it applies to the default path only** — an explicit
+  `p_alpha` is honoured verbatim, because the harness builds one
+  `keyword_signals(d, α)` slice per α and chooses between them itself. The day's
+  imbalance is `category_balance_spread(d)`, max/min of its per-section headline
+  counts, and it is **deliberately independent of α**: a threshold on imbalance
+  measured through the exponent it gates would read 1.0 for every day while α is
+  0 and could never turn itself on. Measured on screen: 55 of 63 cells
+  byte-identical, the balanced day identical on all seven views, and every
+  category tab identical on every day — α is the identity inside a tab by
+  construction and that is now checked rather than argued. Two properties are
+  worth carrying: **the
   denominator is the word's own section distribution, not its top category** (a
   single denominator would charge 폭염 the largest divisor and put the day's
   biggest story at risk), and **α is the identity inside a category tab, at every

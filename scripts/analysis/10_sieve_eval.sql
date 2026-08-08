@@ -42,22 +42,25 @@ alphas as (
   )
 ),
 
--- How unequally the day's six sections collected, as one number per day:
--- max/min over `category_balance_factors(d, 1)`. Read at α = 1 on purpose —
--- the function raises (N̄/N_c) to whatever α `scoring_weights` holds, so the
--- default call returns all-1.0 today and would say every day is perfectly
--- balanced. α = 1 is the raw ratio, which is what a *threshold* on imbalance
--- has to be measured against.
+-- How unequally the day's six sections collected, as one number per day.
+--
+-- **`category_balance_spread` (migration 0035), not a max/min computed here**,
+-- and the difference is not stylistic. That function is what the deployed sieve
+-- gates on, so a second formulation would be the harness scoring a screen the
+-- app does not draw — `0028`'s failure in a new place. It was also *checked*
+-- rather than assumed equivalent, and the check is the argument: `max/min` over
+-- `category_balance_factors(d, 1)` agrees with it to six decimal places on all
+-- nine collected days and **is not equal to it**, because numeric division
+-- rounds at different points. Six decimals is far from any threshold today; two
+-- expressions that can straddle one are still two expressions.
 --
 -- Seven days on the live archive: 1.01 / 2.52 / 1.67 / 1.49 / 2.44 / 2.48 /
 -- 2.21. One balanced day and six imbalanced ones — see the judging note in
 -- README.md's round sixteen, because that composition is exactly what a mean
 -- over these days cannot be trusted about.
 day_spread as (
-  select p.d, max(f.factor) / min(f.factor) as spread
+  select p.d, public.category_balance_spread(p.d) as spread
   from params p
-  cross join lateral category_balance_factors(p.d, 1) f
-  group by p.d
 ),
 
 -- `spread` rides along here rather than being joined in passed0, because

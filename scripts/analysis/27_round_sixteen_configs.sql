@@ -88,7 +88,17 @@ insert into analysis.sieve_configs
    demote_head_pos, min_proper, use_dict, render_cap, place_gate, balance_alpha,
    alpha_min_spread)
 values
-  (320, 'r16: alpha 1.00, spread >= 1.2', 3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 70, true, 1.00, 1.2),
+  -- **320 is the shipped sieve since migration 0035**, which is why its name
+  -- says so. It was written as a sweep row and won, and renaming it in place is
+  -- right where round fifteen minted a new row instead: 300 and 200 carry
+  -- *different values* from the rows beside them, so they had to exist
+  -- separately; a 330 here would be 320 twice over, and one row per
+  -- configuration is what makes `active` mean anything.
+  --
+  -- 300 keeps its name and its values as round fifteen's shipped row — several
+  -- recorded comparisons were taken against it, and rewriting it would make
+  -- those numbers unreproducible. Read it as "the sieve before α" from here on.
+  (320, 'r16: SHIPPED (gated α 1.00)',    3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 70, true, 1.00, 1.2),
   (321, 'r16: alpha .50, spread >= 1.2',  3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 70, true, 0.50, 1.2),
   (322, 'r16: alpha 1.00, spread >= 1.6', 3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 70, true, 1.00, 1.6),
   (323, 'r16: alpha 1.00, spread >= 2.0', 3, 0.50, 4, 9.90, -1.0, 0.60, 0.50, true, 70, true, 1.00, 2.0)
@@ -115,14 +125,19 @@ on conflict (ord) do update set
 -- 10_sieve_eval.sql at **48s** across seven days against 19s across five with
 -- the same five α — the day count is what grew, not the α count.
 --
--- **320 is the row that earned promotion and did not get it here**, because
--- turning it on is a database change rather than a harness one: `keyword_signals`
--- resolves α from a single `scoring_weights` constant with no per-day branch.
--- When that migration lands, this row and the shipped row become the same
--- configuration and 300 should be updated in the same breath — the standing
--- rule that a scoring_weights change moves the harness's shipped row with it.
+-- **320 shipped, as migration 0035**, and this line is the other half of that
+-- change rather than a follow-up to it: the standing rule is that a migration
+-- touching `scoring_weights` moves the harness's shipped row **in the same
+-- breath**, because `0028` did not and the harness spent a release cycle scoring
+-- a screen the app does not draw.
+--
+-- The gate itself lives in `category_balance_factors`' `alpha` CTE, which is
+-- where α was already resolved, so the database has one definition of "what α is
+-- in force" and this file has one of "which α slice does this configuration
+-- read". They are different questions; the *formula* is still only in
+-- `keyword_signals`.
 update analysis.sieve_configs
-  set active = (ord in (300));
+  set active = (ord in (320));
 
 -- **How to read the run, and it is not off the mean.** Adding 08-05 and 08-06
 -- makes the day set six imbalanced against one balanced, so a mechanism that

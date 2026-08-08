@@ -47,14 +47,13 @@ alphas as (
   )
 ),
 
--- The day's own imbalance, max/min of `category_balance_factors(d, 1)`. Read at
--- α = 1 because the default call raises the ratio to whatever `scoring_weights`
--- holds — 0 today — and would report every day as perfectly balanced.
+-- The day's own imbalance. `category_balance_spread` (migration 0035) is what
+-- the deployed sieve gates on, so this reads it rather than recomputing a
+-- max/min — 10_sieve_eval.sql's copy of this CTE records why that distinction
+-- earned its place.
 day_spread as (
-  select p.d, max(f.factor) / min(f.factor) as spread
+  select p.d, public.category_balance_spread(p.d) as spread
   from params p
-  cross join lateral category_balance_factors(p.d, 1) f
-  group by p.d
 ),
 
 sig as (
