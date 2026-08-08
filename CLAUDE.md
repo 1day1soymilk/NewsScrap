@@ -678,10 +678,10 @@ rule is the one in bold, not the list.
 
 ### Reading the same view twice costs nothing
 
-`src/lib/queryCache.ts` sits under eight of the query functions (count them —
+`src/lib/queryCache.ts` sits under nine of the query functions (count them —
 `grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
-incremented from a stale one instead of counted — `searchWords` is the eighth,
-added for word-directory search) and holds the
+incremented from a stale one instead of counted, and the nine here was counted —
+`searchWords` was the eighth and `fetchCollectedDates` is the ninth) and holds the
 **promise**, not the result, keyed on the arguments (TTL 5 minutes, 40 entries —
 24 until the headline panel learnt to hold up to `HISTORY_WINDOW` days open at
 once, which alone can exceed the old cap; rejections evicted immediately so
@@ -720,6 +720,19 @@ one layout, not two. It pairs with the `preconnect` in `index.html` — the
 handshake is finished by the time this fires. Without the cache this line would
 simply add a request. The category comes from `parseUrlState` with no slug list
 yet, which is the same "not yet known" path App uses on first paint.
+
+**It fires `collected_dates` too, and that is what made `fetchCollectedDates`
+the ninth cached function.** The day the app opens on is decided from that view
+(see "Which day the app opens on"), so the decision cannot be made until it has
+arrived. Its comment used to say "not cached: read once at mount", which stopped
+being true the moment a second caller existed — measured on a cold dev load, it
+went out **three** times. Cached, the pre-mount call moves the request earlier
+instead of adding one. Cold-load requests, measured before and after: **8 → 7**
+when today is the day shown, **8 → 9** in the morning, the two extra being the
+graph and the section share for the day actually opened. Paying one round trip
+in the morning to not open on a canvas that cannot fill is the trade, and it is
+stated here rather than hidden because the afternoon number improving makes the
+average look free when it is not.
 
 **The skeleton is only raised for a view that actually has to be waited for.**
 `loadGraph` starts the request, then schedules the `setLoading(true)` on a
@@ -1472,6 +1485,50 @@ work the worker waits on — wall clock, not accumulated CPU — the same
 distinction the run-budget section draws about ETRI's old wait. Verified live:
 a deployed run returned `"directory":"ok"` and took the directory from 19,767
 to 19,904 rows.
+
+### Which day the app opens on
+
+With no `?date=` in the URL the app opens on **the newest collected day that has
+filled up**, not on today — `src/lib/openingDate.ts`. **Today is genuinely empty
+in the morning and no collector change reaches it**: at 03:00 KST a day holds
+~200 headlines and its pool of words with `df >= 3` is **59–81, below the
+`render_cap` of 70**, and not one Naver section publishes 150 articles before
+07:00. The day-boundary stop is working correctly; there is simply no news yet.
+Measurements in `supabase/functions/collect-headlines/README.md`.
+
+`RIPE_SHARE` (0.28) is a fraction of the median of up to `BASELINE_DAYS` (7)
+older collected days, and both halves are load-bearing:
+
+- **A share, not a headline count.** Collection depth has changed three times in
+  this archive (six runs a day, `collect_cap` 150 → 300, twelve runs a day) and
+  an absolute floor goes stale on each. A ratio re-bases itself.
+- **A median, not a mean.** The archive holds a 4,218-headline day against a
+  typical 3,077, and one such day would let the mean reject ordinary ones.
+- **0.28 was measured against the drawn canvas, not chosen.** Cached graphs give
+  nodes against pool: 221 → 36, 373 → 68, 530 → 70, 605 → 70, so the canvas
+  fills around a pool of 450, which a filling day reaches at roughly 860
+  headlines. **It is a plateau midpoint** — across three days the 07:00 state is
+  0.19 of the day's final total and the 11:00 state 0.35–0.40 — so do not retune
+  it to the first decimal that reads better on one day.
+
+**A `?date=` link always wins.** It is a claim about which day is meant, and
+second-guessing it would make one link mean different days for the sender and
+the receiver.
+
+**The move is a `replaceState`, and one press of Back cannot prove it.** As a
+push the stack is [today, previous, today] and the first Back still lands on the
+previous day — measured, with the whole e2e file staying green. Only the second
+press reaches the entry nobody navigated to, which is what
+`appControls.spec.ts` asserts.
+
+**The masthead says the app made the choice** (`오늘(…)은 아직 N건 수집 중 →`),
+and it is shown only while today is *still thin* — otherwise an evening reader
+looking at an old date would be told today is filling when it is full. The
+condition calls `pickOpeningDate` again rather than asking a second way, for the
+reason `keyword_signals` is not reimplemented. **A day that has not been
+collected at all gets the sentence and no link**: the date input's own `max`
+does not reach it either, and an offer that lands on an empty canvas is worse
+than a statement.
 
 ### URL state
 

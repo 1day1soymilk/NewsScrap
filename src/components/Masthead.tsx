@@ -6,8 +6,8 @@ import { formatDate } from '../lib/formatDate'
 // one part of the page that gets read rather than scanned.
 //
 // The stepper walks the collected dates rather than the calendar, because the
-// archive has gaps and today is empty until the 07:00 KST cron has run. The
-// native picker stays for jumping further than one step.
+// archive has gaps and today is thin until the day's own news has been
+// published. The native picker stays for jumping further than one step.
 export function Masthead({
   date,
   minDate,
@@ -17,6 +17,7 @@ export function Masthead({
   onDateChange,
   words,
   links,
+  today,
 }: {
   date: string
   minDate?: string
@@ -26,6 +27,22 @@ export function Masthead({
   onDateChange: (date: string) => void
   words: number | null
   links: number | null
+  /**
+   * Set only when the app chose to open on an earlier day than today, and
+   * describing the today it passed over. `headlines` is null when today has not
+   * been collected at all yet.
+   *
+   * **This says out loud that the app made a choice.** `src/lib/openingDate.ts`
+   * opens on the newest day that has filled up, because before roughly 09:00
+   * KST today's pool of words is smaller than the canvas can draw. Silently
+   * showing yesterday under no explanation would read as a stale page.
+   *
+   * **No jump is offered for a day that has not been collected**, because the
+   * date input's own `max` does not reach it either and landing there would
+   * show an empty canvas — an offer that leads nowhere is worse than a
+   * statement.
+   */
+  today?: { date: string; headlines: number | null } | null
 }) {
   const parts = formatDate(date)
   const step =
@@ -86,6 +103,20 @@ export function Masthead({
             />
           </label>
         </div>
+        {today && (
+          <p className="mt-2 pl-1 text-xs text-ink-faint">
+            {today.headlines === null ? (
+              <>오늘({formatDate(today.date).day})은 아직 수집 전입니다</>
+            ) : (
+              <button
+                onClick={() => onDateChange(today.date)}
+                className="rounded underline decoration-line underline-offset-2 hover:text-ink"
+              >
+                오늘({formatDate(today.date).day})은 아직 {today.headlines}건 수집 중 →
+              </button>
+            )}
+          </p>
+        )}
       </div>
     </div>
   )

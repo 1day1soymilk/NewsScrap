@@ -42,20 +42,32 @@ export interface CollectedDate {
 // surge comparison needs it for two days at once and this query is issued on
 // every load anyway; before this it cost two `HEAD ... count=exact` requests.
 //
-// Not cached: this is read once at mount, and the cache exists for views that
-// get revisited.
-export async function fetchCollectedDates(): Promise<CollectedDate[]> {
-  const { data, error } = await supabase
-    .from('collected_dates')
-    .select('collected_date, headline_count')
-    .order('collected_date', { ascending: false })
-  if (error) throw queryError(error)
+// **Cached, and it stopped being "read once at mount" — which is what its
+// comment used to say and what stopped being true.** Two callers want this
+// answer now: App, for the date stepper and the surge denominators, and
+// `main.tsx`, which needs it before React mounts because the day the app opens
+// on is decided from it (`src/lib/openingDate.ts`). Measured on a cold load
+// with the pre-mount call added and no cache, the dev server issued
+// `collected_dates` **three** times.
+//
+// The key is a constant because there are no arguments. That is the whole
+// point: every caller asks the same question and gets the same promise, so the
+// pre-mount call moves the request earlier instead of adding one.
+export const fetchCollectedDates = cachedQuery(
+  () => 'collected-dates',
+  async (): Promise<CollectedDate[]> => {
+    const { data, error } = await supabase
+      .from('collected_dates')
+      .select('collected_date, headline_count')
+      .order('collected_date', { ascending: false })
+    if (error) throw queryError(error)
 
-  // The view groups by collected_date, so unlike the `select distinct` it
-  // replaced it cannot hand back a repeat and there is nothing to dedupe.
-  const rows = (data ?? []) as { collected_date: string; headline_count: number | string }[]
-  return rows.map((row) => ({ date: row.collected_date, headlines: Number(row.headline_count) }))
-}
+    // The view groups by collected_date, so unlike the `select distinct` it
+    // replaced it cannot hand back a repeat and there is nothing to dedupe.
+    const rows = (data ?? []) as { collected_date: string; headline_count: number | string }[]
+    return rows.map((row) => ({ date: row.collected_date, headlines: Number(row.headline_count) }))
+  },
+)
 
 export interface CategoryShare {
   slug: string

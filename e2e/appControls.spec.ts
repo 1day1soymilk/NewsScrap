@@ -97,6 +97,81 @@ test('steps to the previous collected date and back', async ({ page }) => {
   await expect(dateInput).toHaveValue(todayInSeoul())
 })
 
+// A day is not worth opening on until it has filled up, and in the morning
+// today has not. Measured on the live archive: at 03:00 KST a day's pool of
+// words with df >= 3 is 59-81 against a render cap of 70, so the canvas cannot
+// fill however it is drawn. src/lib/openingDate.ts is the rule; these two cover
+// the wiring around it, which no unit test reaches.
+
+/** Today thin against a full previous day — the 07:00 KST state of a real day. */
+const THIN_TODAY = {
+  collected_dates: [
+    { collected_date: todayInSeoul(), headline_count: 300 },
+    { collected_date: previousDayInSeoul(), headline_count: 3000 },
+  ],
+  keyword_graph: ({ body }: { body: { p_date?: string } }) =>
+    body.p_date === previousDayInSeoul() ? YESTERDAY_GRAPH : EMPTY_GRAPH,
+}
+
+test('opens on the previous day when today is still filling, and says so', async ({ page }) => {
+  await mockSupabase(page, THIN_TODAY)
+  await page.goto('/')
+
+  const dateInput = page.locator('input[type="date"]')
+  await expect(dateInput).toHaveValue(previousDayInSeoul())
+  await expect(page.locator('svg text').filter({ hasText: /^개각$/ })).toBeVisible()
+
+  // The reader is told the app made a choice, and can undo it in one press.
+  // Silently showing yesterday would read as a stale page.
+  const line = page.getByRole('button', { name: /아직 300건 수집 중/ })
+  await expect(line).toBeVisible()
+  await line.click()
+  await expect(dateInput).toHaveValue(todayInSeoul())
+
+  // The move the app made on load must be a replaceState, not a push: Back
+  // belongs to the reader's own navigation, and the one click above is the only
+  // thing there is to undo.
+  await page.goBack()
+  await expect(dateInput).toHaveValue(previousDayInSeoul())
+
+  // **The second press is what discriminates, and one press does not.** Pushed,
+  // the stack is [today, previous, today] and the first Back still lands on the
+  // previous day — measured: deleting the replaceState reset left the whole
+  // file green. Only a stack with a third entry survives a second Back, and
+  // that entry is the day nobody chose.
+  await page.goBack()
+  await expect(page).not.toHaveURL(new RegExp(`date=${todayInSeoul()}`))
+})
+
+test('a shared link naming today wins over the opening-date rule', async ({ page }) => {
+  // **Asserting the date input still reads today cannot fail**, and that was
+  // measured rather than guessed: with the URL guard deleted the whole file
+  // still passed, because the input holds today from the first render and the
+  // auto-retrying assertion returns the instant it is true — before
+  // collected_dates has even arrived, let alone the rule that reads it. Same
+  // shape as expect(skeleton).toBeHidden() elsewhere in this suite.
+  //
+  // So record which days were asked for and judge on that, with networkidle as
+  // the barrier: a rule that overrode the link would issue a second
+  // keyword_graph POST, and network idle is exactly "no such request is still
+  // to come".
+  const asked: (string | undefined)[] = []
+  page.on('request', (request) => {
+    if (!request.url().includes('keyword_graph')) return
+    asked.push(JSON.parse(request.postData() ?? '{}').p_date)
+  })
+
+  await mockSupabase(page, THIN_TODAY)
+  await page.goto(`/?date=${todayInSeoul()}`)
+  await page.waitForLoadState('networkidle')
+
+  // A ?date= is a claim about which day is meant. Second-guessing it would make
+  // one link mean different days for the sender and the receiver.
+  expect(asked.length).toBeGreaterThan(0)
+  expect(new Set(asked)).toEqual(new Set([todayInSeoul()]))
+  await expect(page.locator('input[type="date"]')).toHaveValue(todayInSeoul())
+})
+
 test('shows a skeleton in the graph’s place while it loads', async ({ page }) => {
   await mockSupabase(page, { delayOn: { endpoint: 'keyword_graph', ms: 1500 } })
   await page.goto('/')

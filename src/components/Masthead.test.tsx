@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Masthead } from './Masthead'
 
@@ -26,5 +26,30 @@ describe('Masthead', () => {
 
     expect(screen.queryByText(/단어 /)).not.toBeInTheDocument()
     expect(screen.queryByText(/관계 /)).not.toBeInTheDocument()
+  })
+
+  it('오늘을 지나쳐 왔으면 그 사실과 건수를 적고, 눌러서 갈 수 있다', () => {
+    const onDateChange = vi.fn()
+    render(
+      <Masthead {...base} onDateChange={onDateChange} today={{ date: '2026-08-02', headlines: 539 }} />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /아직 539건 수집 중/ }))
+    expect(onDateChange).toHaveBeenCalledWith('2026-08-02')
+  })
+
+  it('수집 전인 오늘은 말만 하고 갈 곳을 내밀지 않는다', () => {
+    // 날짜 입력의 max도 거기까지 못 가고, 가 봐야 빈 캔버스다. 막다른 길로
+    // 부르는 것보다 사실만 적는 편이 낫다.
+    render(<Masthead {...base} today={{ date: '2026-08-02', headlines: null }} />)
+
+    expect(screen.getByText(/아직 수집 전/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /오늘/ })).not.toBeInTheDocument()
+  })
+
+  it('오늘을 보고 있으면 그 줄이 아예 없다', () => {
+    render(<Masthead {...base} today={null} />)
+
+    expect(screen.queryByText(/오늘\(/)).not.toBeInTheDocument()
   })
 })
