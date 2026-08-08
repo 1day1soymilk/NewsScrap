@@ -367,6 +367,11 @@ export function KeywordGraph({
                   opacity={opacity}
                   role="button"
                   tabIndex={0}
+                  // App.tsx가 누른 단어를 하단 시트 위로 올릴 때 이 단어를 다시 찾는
+                  // 손잡이. 글자 내용으로 찾으면 궤적의 축 라벨까지 걸리므로
+                  // (`svg text`가 더 이상 "그려진 단어"를 뜻하지 않는다, CLAUDE.md)
+                  // 표식을 명시적으로 단다.
+                  data-word={node.word}
                   aria-label={`${node.word}, ${node.count}건${surgeLabel(surge)}`}
                   aria-pressed={node.word === selectedWord}
                   onClick={() => onWordClick(node.word)}

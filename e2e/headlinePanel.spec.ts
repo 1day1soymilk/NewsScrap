@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { mockSupabase } from './support/mockSupabase'
-import { dayLabel, previousDayInSeoul, todayInSeoul } from './support/fixtures'
+import { DENSE_GRAPH, dayLabel, previousDayInSeoul, todayInSeoul } from './support/fixtures'
 
 async function openPanel(page: import('@playwright/test').Page) {
   await page.locator('svg text').filter({ hasText: /^예산안$/ }).click()
@@ -169,4 +169,59 @@ test('sits at the bottom of a phone screen instead of over the graph', async ({ 
   // covered most of a 390px-wide graph, hiding the word that was just clicked.
   expect(box!.width).toBeGreaterThan(300)
   expect(box!.y + box!.height).toBeGreaterThan(700)
+})
+
+// 위 테스트의 이름은 겹침을 말하지만 단정하는 것은 "폭이 넓고 바닥에 붙어 있다"
+// 둘뿐이다. 320px 옆서랍이 **가로로** 그래프를 덮던 것은 그것으로 고쳐졌고, 세로는
+// 아무도 안 쟀다 — 실측(2026-08-08)에서 캔버스 아래쪽 단어가 시트 뒤로 들어갔고
+// `scrollY`는 0이었다. 이것이 그 재는 열이다.
+test('phone에서 누른 단어는 하단 시트 위로 올라온다', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSupabase(page, { keyword_graph: DENSE_GRAPH })
+  await page.goto('/')
+  await expect(page.locator('svg text').first()).toBeVisible()
+
+  // **가장 아래 단어를 고른다.** 시트가 덮을 수 있는 것은 거기뿐이므로, 아무 단어나
+  // 누르면 고쳐지지 않은 코드에서도 통과하는 단정이 된다.
+  const words = page.locator('svg[role="group"] text[role="button"]')
+  const placed = await words.evaluateAll((els) =>
+    els.map((el) => ({ word: el.textContent ?? '', bottom: el.getBoundingClientRect().bottom })),
+  )
+  const lowest = placed.reduce((a, b) => (b.bottom > a.bottom ? b : a))
+  const target = words.filter({ hasText: new RegExp(`^${lowest.word}$`) })
+
+  await target.click()
+
+  // **두 상자를 한 프레임에서 한 숫자로 읽는다.** 따로 읽으면 그 사이에 궤적이
+  // 도착해 시트가 자라고(윗변이 올라간다) 그에 맞춰 한 번 더 올려 주므로, 서로 다른
+  // 프레임의 값을 비교하게 된다 — 실제로 세 번 중 두 번 flaky였다. 그리고 `poll`인
+  // 것은 그 두 번째 올림을 기다리기 위해서다.
+  const overlap = () =>
+    page.evaluate((w) => {
+      const word = document.querySelector(`[data-word="${CSS.escape(w)}"]`)
+      const panel = document.querySelector('[data-panel="headlines"]')
+      if (!word || !panel) return null
+      // 양수면 그만큼 시트 뒤로 들어가 있다는 뜻이다.
+      return word.getBoundingClientRect().bottom - panel.getBoundingClientRect().top
+    }, lowest.word)
+
+  await expect.poll(overlap).toBeLessThanOrEqual(0)
+
+  // 시트가 정말 그 자리를 덮는 배치인지 확인한다. 이 줄이 없으면 시트가 화면 밖으로
+  // 나가 버려도 위 단정이 통과한다. 누르기 **전**의 자리로 재므로 안정적이다.
+  const panelTop = (await page.getByRole('complementary').boundingBox())!.y
+  expect(lowest.bottom).toBeGreaterThan(panelTop)
+})
+
+// 반대쪽 절반. 옆서랍에서는 세로로 겹치지 않으므로 스크롤할 이유가 없고, 읽던 화면이
+// 발밑에서 움직이면 안 된다 — 검색이 날짜를 안 옮기는 것과 같은 판단이다.
+test('옆서랍에서는 단어를 눌러도 페이지가 움직이지 않는다', async ({ page }) => {
+  await mockSupabase(page, { keyword_graph: DENSE_GRAPH })
+  await page.goto('/')
+  await expect(page.locator('svg text').first()).toBeVisible()
+
+  const before = await page.evaluate(() => window.scrollY)
+  await page.locator('svg[role="group"] text[role="button"]').last().click()
+  await expect(page.getByRole('complementary')).toBeVisible()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
 })

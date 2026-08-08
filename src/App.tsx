@@ -23,6 +23,7 @@ import {
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
 import { buildHistory, historyWindow } from './lib/history'
 import { pickOpeningDate } from './lib/openingDate'
+import { revealScrollDelta } from './lib/revealWord'
 import type { HistoryPoint } from './lib/history'
 import {
   EVENT_LIST_LIMIT,
@@ -527,6 +528,11 @@ function App() {
     return rest > 0 ? `${shown.join(' · ')} 외 ${rest}` : shown.join(' · ')
   }, [activeEvent])
 
+  // 패널이 열려 있는가. `HeadlinePanel`이 자기 `subject`로 판정하는 것과 같은 식을
+  // <main>의 아래 여백도 읽는다 — 두 벌로 적으면 여백이 없는 채로 시트가 열리는 상태가
+  // 생기고, 그것이 정확히 이 여백이 막으려는 상태다.
+  const panelSubject = selectedWord ?? eventSubject
+
   // 패널이 지금 어느 날들을 펼쳐 놓았는가. **기본은 전부 닫힘**이고, 줄을 누르면
   // 그 날 하나가 토글된다. 캔버스는 움직이지 않는다.
   const panelKey = `${selectedWord ?? ''}|${selectedEvent ?? ''}|${selectedDate}`
@@ -557,6 +563,54 @@ function App() {
   const historyReady =
     selectedWord !== null && history.for === historyKey(selectedWord, selectedDate)
   const historyPoints = historyReady ? history.points : NO_HISTORY.points
+
+  // **누른 단어가 하단 시트 뒤로 들어가지 않게 한다.** phone에서 패널은 바닥에 붙는
+  // 시트이고, 클릭은 브라우저의 초점 스크롤을 일으키지 않으므로(포인터로 준 초점은
+  // 스크롤하지 않는다) 방금 누른 단어가 그대로 가린다 — 실측으로 확인한 자리다.
+  //
+  // 배선이 여기 있는 것은 App이 캔버스와 패널 둘 다를 아는 유일한 자리이기 때문이고,
+  // 산술이 `revealScrollDelta`에 있는 것은 App에 단위 테스트가 없기 때문이다.
+  //
+  // **브레이크포인트를 여기 다시 적지 않는다.** 시트인지 옆서랍인지는 패널 상자를
+  // 재서 판정한다. `sm:`이 바뀌어도 따라오고, 두 벌이 조용히 어긋날 자리가 없다.
+  //
+  // **"패널이 다 자랐다"를 추측하지 않고 관찰한다.** 시트 높이는 내용에 따라 자란다 —
+  // 궤적이 도착하면 스파크라인이 들어오면서 윗변이 올라간다 — 그리고 그것이 언제인지를
+  // 상태로 맞히려던 첫 판(`[selectedWord, historyReady]`)은 **부하가 걸린 전체 스위트에서
+  // 세 번에 한 번꼴로 92px 모자란 채 끝났다.** 캐시 히트면 궤적이 이미 도착해 있어 두 번째
+  // 실행 자체가 없고, 그래도 패널은 그 뒤에 한 번 더 자랐기 때문이다. `ResizeObserver`는
+  // 그 신호를 맞히는 대신 받는다. 되먹임은 없다 — 시트는 `fixed`라 스크롤이 그 크기를
+  // 바꾸지 않으므로 수렴한다.
+  useEffect(() => {
+    if (!selectedWord) return
+    const word = document.querySelector<SVGTextElement>(
+      `[data-word="${CSS.escape(selectedWord)}"]`,
+    )
+    const panel = document.querySelector<HTMLElement>('[data-panel="headlines"]')
+    if (!word || !panel) return
+
+    function reveal() {
+      if (!word || !panel) return
+      // 헤더 높이는 `--header-height`를 읽지 않고 헤더를 잰다. 그 값은 rem이라 px로
+      // 옮기는 계산이 한 겹 더 붙고, 재는 쪽이 CSS와 어긋날 수가 없다.
+      const header = document.querySelector('header')?.getBoundingClientRect().height ?? 0
+      const delta = revealScrollDelta(
+        word.getBoundingClientRect(),
+        panel.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight },
+        header,
+      )
+      // 'smooth'가 아니라 즉시. 이 스위트는 그려진 기하에 단정하므로 애니메이션 중간을
+      // 읽는 단정이 생기고, 그것은 경주에 기대는 시험이다. 탭 직후의 한 번짜리 이동이라
+      // 즉시 움직이는 편이 탭에 대한 응답으로도 읽힌다.
+      if (delta > 0) window.scrollBy({ top: delta, behavior: 'auto' })
+    }
+
+    const observer = new ResizeObserver(reveal)
+    // observe는 첫 콜백을 스스로 한 번 부르므로 여기서 따로 부르지 않는다.
+    observer.observe(panel)
+    return () => observer.disconnect()
+  }, [selectedWord])
 
   // 사건의 헤드라인. 날짜 축이 없으므로 화면의 날짜 하나를 읽는다 — **그것은 데이터의
   // 성질이지 아직 안 만든 기능이 아니다**: 루뱅 분할이 하루짜리라 어제의 같은 사건
@@ -692,7 +746,16 @@ function App() {
           상자 **안에서** 단어를 옆으로 벌리는 것에 대한 것이고 — svg는 자기 크롭 크기로
           그려진 뒤 `max-w-full`로 축소되므로 벌린 만큼 그대로 작아진다 — 여기서는 상자
           자체가 커진다. 배치가 더 넓은 폭에서 돌므로 축소되는 몫이 줄고 선반이 더 들어간다. */}
-      <main className="px-4 pt-6 pb-8 sm:px-6">
+      {/* 시트가 열려 있는 동안 아래에 시트만 한 여백을 둔다. **장식이 아니라 스크롤할
+          자리다** — 누른 단어를 시트 위로 올리는 계산(`revealScrollDelta`)은 올바른 값을
+          내고도 갈 데가 없었다. phone에서 문서가 뷰포트보다 170px밖에 안 길어 페이지가
+          이미 바닥이었기 때문이다. 크기는 `--sheet-max-height` 한 곳에서 오고, `sm:pb-8`이
+          옆서랍 쪽을 원래대로 돌려놓는다 — 거기서는 덮이는 것이 없으므로 여백도 없다. */}
+      <main
+        className={`px-4 pt-6 sm:px-6 sm:pb-8 ${
+          panelSubject === null ? 'pb-8' : 'pb-(--sheet-max-height)'
+        }`}
+      >
         <div className="mx-auto max-w-6xl">
           <Masthead
             date={selectedDate}
@@ -775,7 +838,7 @@ function App() {
       </main>
 
       <HeadlinePanel
-        subject={selectedWord ?? eventSubject}
+        subject={panelSubject}
         isEvent={!selectedWord && eventSubject !== null}
         days={selectedWord ? wordDays.days : eventDays}
         activeDate={selectedDate}

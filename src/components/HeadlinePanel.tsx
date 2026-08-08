@@ -160,8 +160,11 @@ export function HeadlinePanel({
     // because the toolbar wraps to two rows below lg and any single hard-coded
     // value is wrong on one side of that breakpoint.
     <aside
-      className="fixed inset-x-0 bottom-0 z-20 max-h-[70svh] overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-(--header-height) sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
+      className="fixed inset-x-0 bottom-0 z-20 max-h-(--sheet-max-height) overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4 shadow-lg sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-(--header-height) sm:max-h-none sm:w-80 sm:rounded-none sm:border-l sm:border-t-0"
       aria-label={heading}
+      // 시트인지 옆서랍인지는 **이 상자를 재서** 판정한다(`revealScrollDelta`).
+      // 브레이크포인트를 JS에 한 번 더 적으면 여기 클래스와 조용히 어긋난다.
+      data-panel="headlines"
     >
       <div className="mb-4 flex items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">
