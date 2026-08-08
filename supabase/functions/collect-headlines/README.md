@@ -7,8 +7,45 @@ without being read in full, a table is what you open when you are about to move
 the thing it prices.
 
 Every number here is from the live project, and each is dated because the
-collector's own regime has changed twice inside this archive (six runs a day, and
-then `collect_cap` 150 → 300).
+collector's own regime has changed three times inside this archive (six runs a
+day, then `collect_cap` 150 → 300, then twelve runs a day).
+
+## The morning is thin because the news is not written yet
+
+Measured 2026-08-08 against the live archive, three cron-only days (08-05 /
+08-06 / 08-07). `pool` is the words with `df >= 3` — the set the render cap of 70
+picks from — counted using only the rows stored up to that hour:
+
+| KST | headlines so far | pool |
+| --- | --- | --- |
+| 03:00 | 198 / 209 / 237 | **59 / 81 / 74** |
+| 07:00 | 592 / 572 / 587 | 269 / 284 / 269 |
+| 11:00 | 1224 / 1196 / 1160 | 662 / 670 / 646 |
+| day's end | 3077 / 3077 / 3317 | 1640 / 1670 / 1836 |
+
+**At 03:00 the pool is smaller than the render cap.** The canvas cannot fill,
+and no cap raise or extra page can change that — the 08-05 table above already
+says not one section publishes 150 articles before 07:00. This is not a
+collection failure and there is nothing here to fix; it is why the *frontend*
+opens on an earlier day when today is still thin (`src/lib/openingDate.ts`).
+
+New rows per run, same days, which is what the schedule was chosen against:
+
+| KST | 03 | 07 | 11 | 15 | 19 | 23 | 23–24 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 08-05 | 198 | 394 | 632 | 703 | 717 | 433 | **lost** |
+| 08-06 | 209 | 363 | 624 | 738 | 736 | 407 | **lost** |
+
+**The screen lagged publication by up to four hours, worst exactly where the day
+grows fastest** — at 10:59 a reader saw the 07:00 state while the day had gone
+from 592 to 1,224. Hence twelve runs: 03, then every two hours to 23, plus 23:50
+for the band the day boundary was eating (each day's last row was 23:00:07;
+~100 articles a day were never collected at all).
+
+**That makes 2026-08-08 a third regime boundary.** Denser sampling catches
+articles that fell past rank 300 between two four-hour runs, so day totals rise
+and days must not be compared across it on thickness-sensitive numbers. The five
+labelled eval days all predate it.
 
 ## One cap cannot serve both ends of the day
 

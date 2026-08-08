@@ -176,8 +176,8 @@ cron, and **no run stored more than 150 in any category**. A day is the sum of
 six or more runs, so a day-wide count answers a different question than the one
 the flag asks. There is no run id in the schema; `date_trunc('minute',
 created_at)` is the available proxy, since a run writes its six sections in 4–5
-seconds and the crons are four hours apart. Its one blind spot is a run
-straddling :59/:00, which splits a capped run into two uncapped halves.
+seconds and the closest two crons are fifty minutes apart. Its one blind spot is
+a run straddling :59/:00, which splits a capped run into two uncapped halves.
 
 **And `capped` counts rows *stored*, not the window *scraped*, which is the
 larger blind spot and the reason the caption is worded the way it is.**
@@ -678,10 +678,10 @@ rule is the one in bold, not the list.
 
 ### Reading the same view twice costs nothing
 
-`src/lib/queryCache.ts` sits under eight of the query functions (count them —
+`src/lib/queryCache.ts` sits under nine of the query functions (count them —
 `grep -c "= cachedQuery(" src/lib/queries.ts`; this number has twice been
-incremented from a stale one instead of counted — `searchWords` is the eighth,
-added for word-directory search) and holds the
+incremented from a stale one instead of counted, and the nine here was counted —
+`searchWords` was the eighth and `fetchCollectedDates` is the ninth) and holds the
 **promise**, not the result, keyed on the arguments (TTL 5 minutes, 40 entries —
 24 until the headline panel learnt to hold up to `HISTORY_WINDOW` days open at
 once, which alone can exceed the old cap; rejections evicted immediately so
@@ -720,6 +720,19 @@ one layout, not two. It pairs with the `preconnect` in `index.html` — the
 handshake is finished by the time this fires. Without the cache this line would
 simply add a request. The category comes from `parseUrlState` with no slug list
 yet, which is the same "not yet known" path App uses on first paint.
+
+**It fires `collected_dates` too, and that is what made `fetchCollectedDates`
+the ninth cached function.** The day the app opens on is decided from that view
+(see "Which day the app opens on"), so the decision cannot be made until it has
+arrived. Its comment used to say "not cached: read once at mount", which stopped
+being true the moment a second caller existed — measured on a cold dev load, it
+went out **three** times. Cached, the pre-mount call moves the request earlier
+instead of adding one. Cold-load requests, measured before and after: **8 → 7**
+when today is the day shown, **8 → 9** in the morning, the two extra being the
+graph and the section share for the day actually opened. Paying one round trip
+in the morning to not open on a canvas that cannot fill is the trade, and it is
+stated here rather than hidden because the afternoon number improving makes the
+average look free when it is not.
 
 **The skeleton is only raised for a view that actually has to be waited for.**
 `loadGraph` starts the request, then schedules the `setLoading(true)` on a
@@ -964,36 +977,36 @@ The two fixes those splits pointed at:
   candidate that removes the most crossings wins and is then disqualified, taking
   the affordable one with it.
 
-**`PLANAR_AREA_PER_CROSSING` is a threshold, not a dial, and that is the whole
-character of it.** Its sweep is a staircase — 0.15/0.25/0.35 drew the days
-identically to having no planar path at all, 0.5 bought the entire move, 1.0 and
-2.0 are the same picture — so there is no middle setting and **the harness cannot
-settle it; it is a judgement about the picture.** It is 1.0, and it stays 1.0.
+**The budget for a flat drawing is priced in the minimum font size the reader
+actually gets, and getting that unit right is the whole of it.**
+`PLANAR_PX_PER_CROSSING` (0.1) is how many px of rendered `MIN_FONT_SIZE` one
+removed crossing may cost. It replaced `PLANAR_AREA_PER_CROSSING`, which measured
+area against the force layout — **the wrong quantity**, since the svg is drawn at
+its own size and then uniformly scaled to fit, so what a wide region actually
+spends is type size. That rule allowed 46x and refused almost nothing; ten of its
+twelve candidates fell to **overlap** first.
 
-It fired in the costly direction once: 2026-08-02's biggest event grew by one
-word and three edges when the sieve improved, the budget refused it a flat
-drawing, and it now draws 40 crossings against a floor of 2. `layoutCluster`
-verifies a candidate before returning it, so those 40 cannot be a bad flat
-drawing — they are the force layout, which is what a refusal falls back to.
-**Raising the constant was then measured and declined**, and the reason is the
-one this file already states one section down about the canvas, firing here about
-a *region*: **widening buys nothing inside a fixed container.** At any k that
-admits it, the drawing is **2,864px wide on all three views**, and the svg is
-drawn at its own size and then scaled to fit — so `MIN_FONT_SIZE` 14 renders at
-1.8px on a phone, 5.0 on desktop and 7.8 on the wide box. It removes 33 crossings
-from one event and takes the legibility of all 69 words on the day.
+Three things about it are worth not re-deriving:
 
-**The harness could not see that until `scripts/layout/measure.ts` grew a `width`
-column**, which it now has. A change that widens reads as "uses more room" in a
-height-only table and as "shrinks the type" in the real browser, and those are
-different problems. Two more corrections came out of the same instrumenting: ten
-of the twelve candidates are rejected for **overlap** rather than by the budget,
-and `forced` is 52 rather than the 40 the metric reports (`xIn` counts crossings
-among *drawn* edges; `forced` counts every edge in the event), so the budget at
-1.0 already allows **46x** and the flat drawing simply wants 58x. **Whatever is
-tried next, the thing to change is not the constant but what the budget measures**
-— area against the force layout, where the price is actually width against the
-view. Numbers in `scripts/layout/README.md`, "평면화 가격 — 닫힘".
+- **It is relative to the force layout, not an absolute px floor**, and the
+  harness said so the moment it could. `measure.ts`'s `minPx` column shows the
+  phone view already rendering at **5.8–8.8px** with no planar drawing involved,
+  because the packed canvas is wider than 358 — so any "at least N px on screen"
+  bar would condemn the shipped picture. What can be priced is the px this
+  mechanism *takes*.
+- **The same event is drawn differently on different views, by design.** A region
+  inside the view width costs nothing and is flattened free; the budget only
+  bites once a candidate pushes the canvas past the view. `layoutEvent` takes the
+  width for this and nothing else — height is still an output.
+- **The sweep is not a staircase any more, and both of its columns matter.**
+  0.0 through 0.2 draw identically; at 0.5 the flat drawings come back and take
+  the phone's type to 1.7–6.2px. Crossings fall monotonically with k and `minPx`
+  rises against it, so the harness now prints the trade in both paid units rather
+  than only one. 0.1 is mid-plateau and 0.4 clear of the cliff.
+
+Measured on the phone, desktop and wide **byte-identical**: 2026-08-03 gives up
+27 crossings and gets 5.8px → 13.4px and 39% of its height back; the fat day is
+strictly better on every column. Tables in `scripts/layout/README.md`.
 
 **When that table went stale, the first diagnosis was the wrong one, and how it
 was settled is the reusable part.** Migration `0024` had reordered exactly-tied
@@ -1473,6 +1486,50 @@ distinction the run-budget section draws about ETRI's old wait. Verified live:
 a deployed run returned `"directory":"ok"` and took the directory from 19,767
 to 19,904 rows.
 
+### Which day the app opens on
+
+With no `?date=` in the URL the app opens on **the newest collected day that has
+filled up**, not on today — `src/lib/openingDate.ts`. **Today is genuinely empty
+in the morning and no collector change reaches it**: at 03:00 KST a day holds
+~200 headlines and its pool of words with `df >= 3` is **59–81, below the
+`render_cap` of 70**, and not one Naver section publishes 150 articles before
+07:00. The day-boundary stop is working correctly; there is simply no news yet.
+Measurements in `supabase/functions/collect-headlines/README.md`.
+
+`RIPE_SHARE` (0.28) is a fraction of the median of up to `BASELINE_DAYS` (7)
+older collected days, and both halves are load-bearing:
+
+- **A share, not a headline count.** Collection depth has changed three times in
+  this archive (six runs a day, `collect_cap` 150 → 300, twelve runs a day) and
+  an absolute floor goes stale on each. A ratio re-bases itself.
+- **A median, not a mean.** The archive holds a 4,218-headline day against a
+  typical 3,077, and one such day would let the mean reject ordinary ones.
+- **0.28 was measured against the drawn canvas, not chosen.** Cached graphs give
+  nodes against pool: 221 → 36, 373 → 68, 530 → 70, 605 → 70, so the canvas
+  fills around a pool of 450, which a filling day reaches at roughly 860
+  headlines. **It is a plateau midpoint** — across three days the 07:00 state is
+  0.19 of the day's final total and the 11:00 state 0.35–0.40 — so do not retune
+  it to the first decimal that reads better on one day.
+
+**A `?date=` link always wins.** It is a claim about which day is meant, and
+second-guessing it would make one link mean different days for the sender and
+the receiver.
+
+**The move is a `replaceState`, and one press of Back cannot prove it.** As a
+push the stack is [today, previous, today] and the first Back still lands on the
+previous day — measured, with the whole e2e file staying green. Only the second
+press reaches the entry nobody navigated to, which is what
+`appControls.spec.ts` asserts.
+
+**The masthead says the app made the choice** (`오늘(…)은 아직 N건 수집 중 →`),
+and it is shown only while today is *still thin* — otherwise an evening reader
+looking at an old date would be told today is filling when it is full. The
+condition calls `pickOpeningDate` again rather than asking a second way, for the
+reason `keyword_signals` is not reimplemented. **A day that has not been
+collected at all gets the sentence and no link**: the date input's own `max`
+does not reach it either, and an offer that lands on an empty canvas is worse
+than a statement.
+
 ### URL state
 
 Date, category and selected word live in the query string (`src/lib/urlState.ts`),
@@ -1575,11 +1632,24 @@ reach shows a `CHK` line. That is why the two phase timings are in the response
 body as well: `(scrape Xms, process Yms)` per category is the only machine-
 readable statement of where a run's time went.
 
-**It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
-pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
-is not a health signal**: `succeeded` means `net.http_post` queued a request and
-returned a row, and all six jobs read `succeeded` throughout the days when ETRI
-was blocked and nothing was collected. Check `max(created_at)` on `headlines`.
+**It runs twelve times a day** — 03 KST, then every two hours from 05 to 23, plus
+one at 23:50 — twelve pg_cron jobs all calling the same function. Note that
+**`cron.job_run_details` is not a health signal**: `succeeded` means
+`net.http_post` queued a request and returned a row, and every job read
+`succeeded` throughout the days when ETRI was blocked and nothing was collected.
+Check `max(created_at)` on `headlines`.
+
+**The 23:50 job exists because the day boundary was eating the last hour of every
+day.** The run after 23:00 is 03:00 *tomorrow*, which drops 23:00–24:00
+publications as off-day, so each day's last row was 23:00:07 and ~100 articles a
+day were never collected at all. `todayInSeoul()` is read at handler entry, so a
+run started at 23:50 stamps today even if it finishes past midnight.
+
+**Going to twelve runs is a collection-regime boundary, like `collect_cap`
+150 → 300 was.** Denser sampling catches articles that used to fall past rank 300
+between two four-hour runs, so day totals rise, and F1 is not comparable across
+days of different thickness. The five eval days all predate it. Measurements in
+`supabase/functions/collect-headlines/README.md`.
 
 Running more often is the better instrument on its own terms: **a deeper page is
 older news, a later run is newer news.** Measured on 2026-08-03, one run some

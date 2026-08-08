@@ -3,6 +3,7 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force'
 import { mergeCommunities } from '../lib/events'
 import type { GraphEdge } from '../lib/types'
 import { nearPlanarPositions, type PlanarPoint } from './planar'
+import { MIN_FONT_SIZE } from './wordCloudLayout'
 
 // Everything in this file is arithmetic, deliberately separated from
 // KeywordGraph.tsx so it can be tested under jsdom. The one thing jsdom cannot
@@ -367,7 +368,7 @@ export function computeGraphLayout(
   // --- A단계: 사건마다 자기 상자 안에서 --------------------------------------
   const boxes: LaidOutEvent[] = []
   for (const [id, group] of members) {
-    boxes.push(layoutEvent(id, group, linksByEvent.get(id) ?? [], padding, ticks, seed))
+    boxes.push(layoutEvent(id, group, linksByEvent.get(id) ?? [], padding, ticks, seed, width))
   }
   // 넓은 사건부터. 하루의 제일 큰 이야기가 읽기가 시작되는 왼쪽 위에 놓인다.
   // 동수는 첫 단어로 깨서 같은 날이 같은 그림을 낸다.
@@ -507,6 +508,10 @@ function layoutEvent(
   padding: number,
   ticks: number,
   seed: number,
+  // 평면 후보의 값을 화면 기준으로 매기기 위해서만 쓴다 — `layoutCluster`를 볼 것.
+  // 배치 자체는 여전히 폭을 입력으로 받지 않는다: 상자는 제 크기로 잡히고 폭은
+  // `shelfPack`이 쓴다.
+  viewWidth: number,
 ): LaidOutEvent {
   // 멤버 순서를 여기서 못박는다. 호출자가 준 순서는 빈도순이지만, 배치가 그
   // 순서에 기대는 곳이 여럿이라 한 번에 정해 두는 편이 낫다.
@@ -527,7 +532,7 @@ function layoutEvent(
   } else if (isStar(ordered, links)) {
     placeRadially(ordered, links, padding)
   } else {
-    layoutCluster(ordered, links, padding, ticks, seed)
+    layoutCluster(ordered, links, padding, ticks, seed, viewWidth)
   }
 
   const box = crop(ordered)
@@ -665,18 +670,33 @@ function untangle(members: LayoutNode[], links: LayoutLink[], padding: number): 
 }
 
 /**
- * 교차 하나를 없애는 데 상자를 몇 배까지 키워 줄지.
+ * 교차 하나를 없애는 데 **화면에서의 최소 글자 크기를 몇 px까지** 내줄지.
  *
- * 교차를 없애는 값은 자리다. 평면 그림은 라벨이 떨어질 때까지 키워야 하고, 커진
- * 상자는 그 사건이 캔버스에서 먹는 자리이자 하루 전체의 세로 길이다.
+ * **예산의 단위가 바뀌었고, 그것이 이 상수의 전부다.** 예전 형태는
+ * `PLANAR_AREA_PER_CROSSING`으로 "힘 배치 **넓이**의 몇 배까지"였는데, 실제로
+ * 값을 치르는 것은 넓이가 아니다. svg는 제 크기로 그려진 뒤 `max-w-full`로
+ * 컨테이너에 맞춰 **균일 축소**되므로, 구역이 뷰의 폭을 넘으면 넘은 비율만큼
+ * 모든 글자가 같이 작아진다. 2026-08-08에 잰 그 사건이 정확히 그 경우였다:
+ * 평면 그림은 교차 33개를 지우지만 svg를 2,864px로 만들어 phone에서 배율 0.125,
+ * 즉 `MIN_FONT_SIZE` 14px가 **1.8px**가 된다. 넓이 예산은 그것을 볼 수 없었고,
+ * 46배를 이미 허용하면서 사실상 아무것도 안 막고 있었다 — 후보 12개 중 열 개는
+ * 겹침에서 먼저 탈락한다.
  *
- * **정액이 아니라 정률인 이유**는 재고 알았다. "넓이 5배까지"라는 고정 예산은
- * 교차 하나를 없애는 것과 스물셋을 없애는 것에 같은 값을 매긴다. 그래서 정육면체
- * (8점 12선, 교차 23개)가 거부됐다 — 라벨이 다 같은 크기라 힘 배치가 아주 촘촘한
- * 상자를 내놓고, 평면 그림은 그보다 다섯 배가 넘게 필요했다. 23개를 없애는 데
- * 그만큼도 못 쓴다는 것은 말이 안 된다. 얻는 만큼 낸다.
+ * **절대 문턱이 아니라 힘 배치 대비인 이유도 재고 알았다.** 하네스에 `minPx`
+ * 열을 붙이자마자 나온 것은, 평면 경로와 아무 상관 없이 **phone에서 이미 5.8~
+ * 8.8px로 그려지고 있다**는 사실이다(구역들이 선반에 담기면서 캔버스가 358보다
+ * 넓어지기 때문). "화면에서 10px 이상"류의 절대 바는 지금 그림을 통째로
+ * 부정하게 된다. 그래서 이 예산이 재는 것은 **평면으로 그리는 바람에 잃는
+ * px**이고, 그것이 곧 이 장치에 물을 수 있는 유일한 값이다.
+ *
+ * **정률이 아니라 교차당인 것은 예전 형태에서 그대로 가져왔다.** 교차 하나를
+ * 없애는 것과 서른셋을 없애는 것에 같은 값을 매길 수 없다는 그 이유는 단위가
+ * 바뀌어도 그대로다.
+ *
+ * 구역이 뷰 폭 안에 들어가는 동안에는 축소가 없으므로 양쪽 다 14px이고 손실은
+ * 0이다 — 작은 사건은 공짜로 펴진다. 이 조건은 후보가 뷰 폭을 밀어낼 때만 문다.
  */
-const PLANAR_AREA_PER_CROSSING = 1.0
+const PLANAR_PX_PER_CROSSING = 0.1
 
 /**
  * 덩어리 사건 하나를 배치한다 — 힘으로 한 번, 되면 평면으로 한 번, 나은 쪽.
@@ -701,6 +721,7 @@ function layoutCluster(
   padding: number,
   ticks: number,
   seed: number,
+  viewWidth: number,
 ): void {
   simulateLocally(members, links, padding, ticks, seed)
   untangle(members, links, padding)
@@ -720,7 +741,13 @@ function layoutCluster(
   if (!drawing) return
 
   const saved = members.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0 }))
-  const forcedArea = areaOf(members)
+  // 구역이 뷰보다 넓으면 캔버스가 그만큼 넓어지고 svg는 균일 축소되므로, 화면에서의
+  // 최소 글자는 그 배율만큼 작아진다. 구역 폭을 캔버스 폭의 대리로 쓰는 것은
+  // 근사이고 — 선반에 여럿 담기면 캔버스는 제일 넓은 구역보다도 넓다 — 과소평가
+  // 방향이다. 재려는 것이 "이 구역 **때문에** 잃는 px"이므로 그 방향이 맞다.
+  const renderedMin = (width: number) =>
+    MIN_FONT_SIZE * Math.min(1, viewWidth / Math.max(1, width))
+  const forcedRendered = renderedMin(crop(members).width)
 
   // **평면 좌표를 실제 자리로 바꾸는 방법이 둘이고, 둘은 서로 다른 사건을 푼다.**
   // 둘 다 재고 나은 쪽을 쓴다 — 어느 하나가 늘 이긴다는 근거가 없고, 실제로
@@ -740,8 +767,11 @@ function layoutCluster(
     if (anyOverlap(members, padding)) return
     const crossings = countCrossings(members, links)
     if (crossings >= forced) return
-    const area = areaOf(members)
-    if (area > forcedArea * (1 + PLANAR_AREA_PER_CROSSING * (forced - crossings))) return
+    const box = crop(members)
+    if (forcedRendered - renderedMin(box.width) > PLANAR_PX_PER_CROSSING * (forced - crossings)) {
+      return
+    }
+    const area = box.width * box.height
 
     // 교차가 먼저, 같으면 좁은 쪽. 넓이가 값이고 교차가 얻는 것이므로, 더 싼
     // 그림을 찾자고 덜 편 그림을 고를 수는 없다.
@@ -929,12 +959,6 @@ function pointToSegment(p: LayoutNode, a: LayoutNode, b: LayoutNode): number {
   const length = dx * dx + dy * dy
   const t = length === 0 ? 0 : Math.max(0, Math.min(1, (((p.x ?? 0) - ax) * dx + ((p.y ?? 0) - ay) * dy) / length))
   return Math.hypot((p.x ?? 0) - (ax + t * dx), (p.y ?? 0) - (ay + t * dy))
-}
-
-/** 라벨 상자를 다 감싸는 넓이. 상자를 얼마나 키웠는지 재는 자다. */
-function areaOf(members: LayoutNode[]): number {
-  const box = crop(members)
-  return box.width * box.height
 }
 
 /**

@@ -17,7 +17,7 @@
 
 import { computeGraphLayout } from '../../src/components/graphLayout.ts'
 import type { EdgeCurve, MeasuredWord, PlacedEdge, PlacedNode } from '../../src/components/graphLayout.ts'
-import { computeFontSizes } from '../../src/components/wordCloudLayout.ts'
+import { MIN_FONT_SIZE, computeFontSizes } from '../../src/components/wordCloudLayout.ts'
 import { loadFixture } from './fixture.ts'
 import type { FixtureNode } from './fixture.ts'
 
@@ -169,6 +169,20 @@ interface Row {
   width: number
   height: number
   /**
+   * `MIN_FONT_SIZE`가 **화면에서 실제로 몇 px인지.**
+   *
+   * `width`가 그 사실을 담고 있기는 하지만 담고 있는 것과 읽히는 것은 다르다 —
+   * 폭 2,864를 보고 phone에서 1.8px이라고 암산하는 사람은 없다. 파생 열이고
+   * 산수는 `MIN_FONT_SIZE * min(1, 뷰 폭 / width)` 하나다.
+   *
+   * **이 열이 없어서 값을 못 보고 있었던 적이 있다.** `PLANAR_AREA_PER_CROSSING`
+   * 쓸기가 "자리를 더 쓴다"로만 읽히던 자리이고, 실제로는 그날 69개 단어를 전부
+   * 못 읽게 만드는 변화였다. 지금은 평면 후보의 **진입 조건**이 이 값이므로
+   * (`graphLayout.ts`의 `PLANAR_MIN_RENDERED_PX`), 이 열은 관찰이자 그 조건이
+   * 지켜졌는지에 대한 검사다.
+   */
+  minPx: number
+  /**
    * 한 번의 `computeGraphLayout`에 걸린 시간(ms), 세 번 중 제일 짧은 것.
    *
    * CLAUDE.md가 재작성 전의 48ms를 적어 두고 "이후로 다시 안 쟀다"고 스스로
@@ -239,6 +253,10 @@ for (const view of VIEWS) {
       overlap: overlaps(layout.nodes),
       width: Math.round(layout.bounds.width),
       height: layout.bounds.height,
+      minPx:
+        Math.round(
+          MIN_FONT_SIZE * Math.min(1, view.width / Math.max(1, layout.bounds.width)) * 10,
+        ) / 10,
       ms: Math.round(fastest * 10) / 10,
     })
   }
@@ -246,7 +264,7 @@ for (const view of VIEWS) {
 
 const columns: (keyof Row)[] = [
   'view', 'day', 'nodes', 'edges', 'drawn', 'crowded', 'crossings', 'xIn', 'xBr',
-  'bridges', 'lenMed', 'lenMax', 'inRegion', 'overlap', 'width', 'height', 'ms',
+  'bridges', 'lenMed', 'lenMax', 'inRegion', 'overlap', 'width', 'height', 'minPx', 'ms',
 ]
 const widths = columns.map((c) =>
   Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)),

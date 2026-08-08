@@ -17,10 +17,11 @@ export function todayInSeoul(): string {
 /**
  * The nearest collected date on one side of `from`, or null if there is none.
  *
- * "Strictly before/after" rather than "one index along" because the app opens
- * on today whether or not today has been collected — the cron runs at 13:00
- * KST, so until then today is not in the list at all — and because the archive
- * has gaps. Stepping by index would land on an empty day or refuse to move.
+ * "Strictly before/after" rather than "one index along" because `from` need not
+ * be in `dates` at all — a `?date=` link can name any day, and the reader can
+ * step to today from the "오늘은 아직 …" line before today has been collected —
+ * and because the archive has gaps. Stepping by index would land on an empty
+ * day or refuse to move.
  *
  * ISO dates compare correctly as strings, so no Date objects are involved and
  * no timezone can shift the answer.

@@ -22,6 +22,7 @@ import {
 } from './lib/queries'
 import { adjacentDate, todayInSeoul } from './lib/dateNav'
 import { buildHistory, historyWindow } from './lib/history'
+import { pickOpeningDate } from './lib/openingDate'
 import type { HistoryPoint } from './lib/history'
 import {
   EVENT_LIST_LIMIT,
@@ -128,6 +129,20 @@ function App() {
     [collectedDates],
   )
 
+  // 오늘을 지나쳐 왔다는 사실을 화면에 적을 것인지. 두 조건이 다 필요하다: 화면의
+  // 날이 오늘이 아니고, **오늘이 아직 열기에 얇을 것**. 두 번째가 없으면 저녁에
+  // 옛 날짜를 보는 사람에게 "오늘은 아직 3,100건 수집 중"이라는 거짓말을 하게 된다.
+  //
+  // 판정은 `pickOpeningDate`를 그대로 다시 불러서 한다. 이 줄이 설명하는 것이 바로
+  // 그 규칙의 판정이므로, 여기서 다른 식으로 물으면 설명과 행동이 어긋날 수 있다 —
+  // `keyword_signals`를 다시 구현하지 않는 것과 같은 이유다.
+  const untakenToday = useMemo(() => {
+    const today = todayInSeoul()
+    if (collectedDates.length === 0 || selectedDate === today) return null
+    if (pickOpeningDate(collectedDates, today) === today) return null
+    return { date: today, headlines: headlinesByDate.get(today) ?? null }
+  }, [collectedDates, headlinesByDate, selectedDate])
+
   // A slug from a hand-edited or stale link that matches no section would leave
   // every tab unselected while the graph filtered on nothing — a state the UI
   // has no way to produce or to escape from.
@@ -138,10 +153,47 @@ function App() {
     }
   }, [categories, selectedCategory])
 
-  // --- URL state ------------------------------------------------------------
-  // history.pushState and popstate, rather than a router: there is one route.
+  // --- Which day the app opens on -------------------------------------------
+  //
+  // **Today is genuinely empty in the morning, and no amount of collecting
+  // fixes that.** At 03:00 KST a day holds ~200 headlines and its pool of words
+  // with `df >= 3` is 59-81, below the render cap of 70; not one Naver section
+  // publishes 150 articles before 07:00. So with no `?date=` to go by the app
+  // opens on the newest day that has filled up — `src/lib/openingDate.ts` holds
+  // that rule and the measurements behind its threshold.
+  //
+  // **A link always wins.** A shared `?date=` is a claim about which day is
+  // meant, and second-guessing it would make the link mean something different
+  // for the sender and the receiver.
 
   const urlSynced = useRef(false)
+  // Null when the URL named no date, which is the only case this rule applies
+  // to. Read once, at mount, because the URL is rewritten from state below.
+  const urlDateAtMount = useRef(stateFromUrl().date)
+  const openingSettled = useRef(false)
+  // What "no date" resolves to. `onPopState` reads it rather than calling
+  // todayInSeoul() itself, so the two cannot disagree about the default.
+  const openingDate = useRef(todayInSeoul())
+
+  useEffect(() => {
+    if (urlDateAtMount.current !== null || openingSettled.current) return
+    if (collectedDates.length === 0) return
+    openingSettled.current = true
+
+    const opening = pickOpeningDate(collectedDates, todayInSeoul())
+    openingDate.current = opening
+    if (opening === selectedDate) return
+
+    // **This move is still the app deciding what to open on, not navigation.**
+    // Clearing the flag sends the next URL write back through replaceState, so
+    // the reader does not get a Back button that undoes a choice they never
+    // made — the same reasoning as the first write below.
+    urlSynced.current = false
+    setSelectedDate(opening)
+  }, [collectedDates, selectedDate])
+
+  // --- URL state ------------------------------------------------------------
+  // history.pushState and popstate, rather than a router: there is one route.
 
   useEffect(() => {
     const next = {
@@ -163,7 +215,7 @@ function App() {
   useEffect(() => {
     function onPopState() {
       const state = stateFromUrl()
-      setSelectedDate(state.date ?? todayInSeoul())
+      setSelectedDate(state.date ?? openingDate.current)
       setSelectedCategory(state.category)
       setSelectedWord(state.word)
       setSelectedEvent(state.event)
@@ -651,6 +703,7 @@ function App() {
             onDateChange={setSelectedDate}
             words={!error && !loading ? graph.nodes.length : null}
             links={!error && !loading ? graph.edges.length : null}
+            today={untakenToday}
           />
           {/* 전체 보기에서만. 한 섹션 탭 위의 몫 차트는 아무것도 말하지 않는
               꽉 찬 원이다. 산문 쪽 폭에 두는 이유는 이것이 그날의 **수집**에

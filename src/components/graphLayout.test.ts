@@ -507,6 +507,49 @@ describe('사건 구역', () => {
     expect(crossings).toBe(0)
   })
 
+  it('좁은 뷰에서는 값을 치르는 평면 그림을 거절하고, 넓은 뷰에서는 받는다', () => {
+    // **평면화 예산이 재는 것은 넓이가 아니라 화면에서의 글자 크기다.** svg는 제
+    // 크기로 그려진 뒤 균일 축소되므로, 구역이 뷰보다 넓어지면 그 비율만큼 모든
+    // 글자가 작아진다 — `PLANAR_PX_PER_CROSSING`이 그 px에 값을 매긴다.
+    //
+    // 그래서 같은 사건이 뷰마다 다르게 그려지는 것이 **의도한 동작**이고, 이 테스트가
+    // 그것이다. 위 정육면체와 같은 그래프이고 폭만 다르다. 좁은 쪽에서 교차가
+    // 남는 것은 실패가 아니라 값을 안 치른 것이다.
+    const spec = [
+      ['가', '나'], ['나', '다'], ['다', '라'], ['라', '가'],
+      ['마', '바'], ['바', '사'], ['사', '아'], ['아', '마'],
+      ['가', '마'], ['나', '바'], ['다', '사'], ['라', '아'],
+    ]
+    const words = ['가', '나', '다', '라', '마', '바', '사', '아'].map((w) => word(w))
+    const links = spec.map(([a, b]) => edge(a, b, 0.9))
+
+    const straightCrossings = (width: number) => {
+      const { nodes, edges: drawn } = computeGraphLayout(words, links, { width })
+      const at = new Map(nodes.map((n) => [n.word, n]))
+      const side = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
+        (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+      let crossings = 0
+      for (let i = 0; i < drawn.length; i++) {
+        for (let j = i + 1; j < drawn.length; j++) {
+          const p = drawn[i]
+          const q = drawn[j]
+          if (p.a === q.a || p.a === q.b || p.b === q.a || p.b === q.b) continue
+          const [p1, p2, p3, p4] = [at.get(p.a)!, at.get(p.b)!, at.get(q.a)!, at.get(q.b)!]
+          if (side(p3, p4, p1) > 0 !== side(p3, p4, p2) > 0 &&
+              side(p1, p2, p3) > 0 !== side(p1, p2, p4) > 0) {
+            crossings++
+          }
+        }
+      }
+      return crossings
+    }
+
+    // 넓은 쪽은 위 테스트가 이미 0을 못 박고 있다. 여기서 말하는 것은 **좁은 쪽이
+    // 다르다**는 것이고, 그것이 이 예산이 있다는 증거다.
+    expect(straightCrossings(200)).toBeGreaterThan(0)
+    expect(straightCrossings(SIZE.width)).toBe(0)
+  })
+
   it('다리를 든 단어를 상대 구역을 바라보는 쪽에 놓는다', () => {
     // 구역 밖으로 나가는 선이 자기 사건의 내부 선을 자르는 것이, 재어 보니
     // 다리가 낀 교차의 거의 전부였다(데스크톱 2026-08-03은 14개 중 14개).
