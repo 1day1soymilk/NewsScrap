@@ -26,25 +26,35 @@
 -- against the node list and prints `!` on any word the two disagree about.
 -- **A single `!` means this file is wrong, not the sieve.** Fix it here.
 --
--- **What `chk` cannot see, and it is two things.** It compares membership of the
--- drawn set against sieves 1 to 4, so:
+-- **Sieve 6, the place gate, was a blind spot and now is not — and the way it
+-- was found is the reason this paragraph is worth reading.** The bullet that
+-- used to sit here said the gate is invisible to `chk`, that a place the gate
+-- dropped arrives looking exactly like a word that lost on rank, and that
+-- **a later round which turns the gate on must add the clause by hand, because
+-- the cross-check will not demand it.** Migration 0028 turned it on. Nobody
+-- added the clause. The prediction came true to the letter: on 2026-08-08 이
+-- 파일 reported `서울` — mode 'place', labelled good — as `cut: rank` with a
+-- `!` beside it, and a `!` is supposed to mean *this script is wrong*, which it
+-- was, about a word the sieve had handled correctly.
 --
---   * **Sieve 6, the place gate, is invisible to it.** `is_place` is deliberately
---     absent from keyword_graph's JSON (migration 0024's tail comment says why),
---     so a place dropped by the gate arrives here looking exactly like a word
---     that lost on rank, and this file would report `cut: rank` with a clean
---     `chk`. Round fourteen left `place_needs_edge` at 0, so nothing is wrong
---     today; **a later round that turns the gate on must add the clause here by
---     hand, because the cross-check will not demand it.** What does check that
---     copy is the procedure in 10_sieve_eval.sql's `gate_fail` comment.
---   * **The α ordering is invisible to it too.** `rank` is read out of the RPC's
---     own JSON rather than recomputed, so a disagreement about `count_balanced`
---     could not show up as a `!` — it would simply be inherited. That is the
---     right trade for a diagnostic, but it means this file cannot be used to
---     verify migration 0025's ranking key.
+-- The `gate_off` CTE below closes it. **It does not reimplement the gate**, which
+-- would be the third copy of sieve 6 and would drift exactly as this file's copy
+-- of sieve 4d did: `keyword_graph_rank(cands, '{}')` is the shipped ranking
+-- helper with an empty ban list, and an empty ban list is precisely a gate-off
+-- screen. A place present in that ranking and absent from the drawn nodes was
+-- removed by the gate and by nothing else — banning words can only *promote*
+-- what survives, so no survivor can lose its place to the gate's own refill.
 --
--- Both blind spots are membership-vs-order in shape: `chk` tests *whether* a word
--- may be drawn, never *why it placed where it did*.
+-- **What `chk` still cannot see is the α ordering.** `rank` is read out of the
+-- RPC's own JSON rather than recomputed, so a disagreement about
+-- `count_balanced` could not surface as a `!` — it would simply be inherited.
+-- That is the right trade for a diagnostic, but it means this file cannot be
+-- used to verify migration 0025's ranking key.
+--
+-- The remaining blind spot is membership-vs-order in shape, which is the general
+-- form: `chk` tests *whether* a word may be drawn, never *why it placed where it
+-- did*. Sieve 6 was only ever half an exception to that — it decides membership,
+-- which is why it could be brought inside at all.
 
 with
 -- The most recent collected day. Replace with a literal date to look at another
@@ -99,6 +109,25 @@ nodes as (
   cross join json_array_elements(g.j->'nodes') with ordinality as t(n, ord)
 ),
 
+-- Sieve 6's foothold, borrowed rather than rebuilt. `keyword_graph_rank` is the
+-- shipped ranking helper and its second argument is the ban list, so an empty
+-- one is the screen the gate would have drawn had it been off. Its `is_place`
+-- column is the only place this file can read that flag at all — it is
+-- deliberately absent from keyword_graph_compute's JSON (migration 0024's tail
+-- comment says why), which is what made the gate invisible here for a release
+-- cycle.
+--
+-- `keyword_graph_candidates` is the expensive half and is called exactly once,
+-- the same split migration 0024 made so the gate's fixed-point loop would not
+-- pay for keyword_signals eight times.
+gate_off as (
+  select r.word, r.is_place
+  from keyword_graph_rank(
+    array(select c from keyword_graph_candidates((select d from params), null) c),
+    '{}'::text[]
+  ) r
+),
+
 -- The clauses, in the order the sieve applies them. `passes` is what the sieve
 -- would say; `chk` below is what tests it against what the sieve did say.
 annotated as (
@@ -106,6 +135,11 @@ annotated as (
     s.*,
     ov.mode as override_mode,
     n.rank, n.passed_by, n.faded,
+    -- Ranked without the gate, absent from the drawn set, and a place: sieve 6
+    -- took it and nothing else could have. Carried as one boolean so the verdict
+    -- and the cross-check below cannot disagree about what it means.
+    (go.word is not null and coalesce(go.is_place, false) and n.rank is null)
+                                                             as gate_dropped,
     -- Carried out of `w` explicitly: `s.*` is the signals and the cross join
     -- does not put w's columns into `a.*`.
     w.demote_head_pos,
@@ -135,6 +169,7 @@ annotated as (
   cross join w
   left join word_overrides ov on ov.word = s.word
   left join nodes n on n.word = s.word
+  left join gate_off go on go.word = s.word
 ),
 
 verdicts as (
@@ -151,6 +186,11 @@ verdicts as (
       when not a.ok_standalone                then 'cut: fragment'
       when not a.ok_dictionary                then 'cut: dictionary'
       when not a.ok_sieve4                    then 'cut: generic'
+      -- Sieve 6. It sits above the two rank reasons because a gated place has
+      -- cleared every clause *and* earned a rank inside the cap — it is not a
+      -- word that lost, it is a word that was taken. Reporting it as 'cut: rank'
+      -- is what produced the false `!` the header describes.
+      when a.gate_dropped                     then 'cut: place gate'
       -- A word that cleared every clause and still lost its place. Splitting the
       -- two reasons matters: 'cut: rank' means plain frequency, while 'demoted'
       -- means the word trails its headlines and was sorted below everything that
@@ -191,9 +231,17 @@ select
   coalesce(l.passed_by, '')     as by,
   -- Drawn but annotated as cut, or annotated as passing while a free slot went
   -- unused. Either way this file has drifted from keyword_graph.
+  --
+  -- The second branch is the one sieve 6 broke. A gated place passes every
+  -- clause this file knows about and is not drawn, so on a day that does not
+  -- fill the render cap it read as a free slot going unused — which is the
+  -- literal shape of a drift and was not one. `gate_dropped` is the exemption,
+  -- and it is deliberately the *same* boolean the verdict uses: a word can be
+  -- reported 'cut: place gate' or flagged `!`, never both, because the two would
+  -- then be answering the same question differently.
   case
     when l.rank is not null and not l.passes then '!'
-    when l.rank is null and l.passes
+    when l.rank is null and l.passes and not l.gate_dropped
          and (select count(*) from nodes) < (select render_cap from w) then '!'
     else ''
   end                           as chk,
