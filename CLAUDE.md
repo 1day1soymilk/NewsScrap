@@ -1492,47 +1492,59 @@ to 19,904 rows.
 
 ### Which day the app opens on
 
-With no `?date=` in the URL the app opens on **the newest collected day that has
-filled up**, not on today — `src/lib/openingDate.ts`. **Today is genuinely empty
-in the morning and no collector change reaches it**: at 03:00 KST a day holds
-~200 headlines and its pool of words with `df >= 3` is **59–81, below the
-`render_cap` of 70**, and not one Naver section publishes 150 articles before
-07:00. The day-boundary stop is working correctly; there is simply no news yet.
-Measurements in `supabase/functions/collect-headlines/README.md`.
+With no `?date=` in the URL the app opens on **the newest collected day**, which
+is today as soon as the day's first cron (03:00 KST) has run —
+`src/lib/openingDate.ts`. The whole function is "the first row of
+`collected_dates`, or today if the archive is empty". It reads no headline
+counts.
 
-`RIPE_SHARE` (0.28) is a fraction of the median of up to `BASELINE_DAYS` (7)
-older collected days, and both halves are load-bearing:
+**It used to weigh them, and what retired that is a measurement rather than a
+change of mind.** The old rule opened on the newest day that had *filled up*,
+`RIPE_SHARE` (0.28) of the median of the previous week. On 2026-08-08 at 15:07
+KST today held **808 headlines, a `df >= 3` pool of 406, and the canvas drew 66
+of its 70 words** — and the rule opened on the day before, because 808 is 4%
+under the 862 the share worked out to. A reader was shown yesterday in front of
+a page that would have drawn 66 words.
 
-- **A share, not a headline count.** Collection depth has changed three times in
-  this archive (six runs a day, `collect_cap` 150 → 300, twelve runs a day) and
-  an absolute floor goes stale on each. A ratio re-bases itself.
-- **A median, not a mean.** The archive holds a 4,218-headline day against a
-  typical 3,077, and one such day would let the mean reject ordinary ones.
-- **0.28 was measured against the drawn canvas, not chosen.** Cached graphs give
-  nodes against pool: 221 → 36, 373 → 68, 530 → 70, 605 → 70, so the canvas
-  fills around a pool of 450, which a filling day reaches at roughly 860
-  headlines. **It is a plateau midpoint** — across three days the 07:00 state is
-  0.19 of the day's final total and the 11:00 state 0.35–0.40 — so do not retune
-  it to the first decimal that reads better on one day.
+**The share was a proxy for "can the canvas fill", and it lagged the thing it
+stood for.** It was calibrated on the morning, where it was right and where the
+underlying finding still stands: at 03:00 KST a day holds ~200 headlines and a
+pool of **59–81 against a `render_cap` of 70**, so the canvas genuinely cannot
+fill, and no collector change reaches it because not one Naver section publishes
+150 articles before 07:00 (measurements in
+`supabase/functions/collect-headlines/README.md`). What a threshold on the day's
+*eventual* size cannot do is answer a question about the *current* screen — by
+mid-afternoon the canvas fills long before the day's total is in sight. **The
+general form: a proxy calibrated at one end of a range keeps being applied at the
+other, and the sign of it is a rule that is right when it was measured and
+conservative everywhere else.**
+
+So the morning is now handled by the one fact that is never a proxy — **whether
+today has been collected at all.** Before the first cron today is absent from
+`collected_dates`, there is nothing to draw, and the app falls back to the newest
+day there is.
 
 **A `?date=` link always wins.** It is a claim about which day is meant, and
 second-guessing it would make one link mean different days for the sender and
 the receiver.
 
 **The move is a `replaceState`, and one press of Back cannot prove it.** As a
-push the stack is [today, previous, today] and the first Back still lands on the
+push the stack is [today, previous, older] and the first Back still lands on the
 previous day — measured, with the whole e2e file staying green. Only the second
 press reaches the entry nobody navigated to, which is what
-`appControls.spec.ts` asserts.
+`appControls.spec.ts` asserts, and it now gets its one real history entry by
+stepping a day rather than by clicking the masthead link, which no longer exists
+in the case being tested.
 
-**The masthead says the app made the choice** (`오늘(…)은 아직 N건 수집 중 →`),
-and it is shown only while today is *still thin* — otherwise an evening reader
-looking at an old date would be told today is filling when it is full. The
-condition calls `pickOpeningDate` again rather than asking a second way, for the
-reason `keyword_signals` is not reimplemented. **A day that has not been
-collected at all gets the sentence and no link**: the date input's own `max`
-does not reach it either, and an offer that lands on an empty canvas is worse
-than a statement.
+**The masthead says the app made the choice**, and the rule change narrowed that
+to a single case: today absent from `collected_dates`, i.e. between midnight and
+the first cron. The condition calls `pickOpeningDate` again rather than asking a
+second way, for the reason `keyword_signals` is not reimplemented. **A day that
+has not been collected at all gets the sentence and no link**
+(`오늘(…)은 아직 수집 전입니다`): the date input's own `max` does not reach it
+either, and an offer that lands on an empty canvas is worse than a statement. The
+`오늘(…)은 아직 N건 수집 중 →` branch survives in `Masthead.tsx` for a `?date=`
+link to an old day while today is thin — the only way left to reach it.
 
 ### URL state
 

@@ -29,20 +29,23 @@ export function Masthead({
   links: number | null
   /**
    * Set only when the app chose to open on an earlier day than today, and
-   * describing the today it passed over. `headlines` is null when today has not
-   * been collected at all yet.
+   * describing the today it passed over.
    *
    * **This says out loud that the app made a choice.** `src/lib/openingDate.ts`
-   * opens on the newest day that has filled up, because before roughly 09:00
-   * KST today's pool of words is smaller than the canvas can draw. Silently
-   * showing yesterday under no explanation would read as a stale page.
+   * opens on the newest *collected* day, so the only way to be here is that
+   * today is not in `collected_dates` yet — between midnight and the day's first
+   * cron at 03:00 KST. Silently showing yesterday under no explanation would
+   * read as a stale page.
    *
-   * **No jump is offered for a day that has not been collected**, because the
-   * date input's own `max` does not reach it either and landing there would
-   * show an empty canvas — an offer that leads nowhere is worse than a
-   * statement.
+   * **No jump is offered**, and that is now the only branch rather than one of
+   * two. The day has no rows at all, the date input's own `max` does not reach
+   * it, and landing there would show an empty canvas — an offer that leads
+   * nowhere is worse than a statement. A headline count came with this prop
+   * while the rule weighed counts; it was unreachable the moment the rule
+   * stopped, because "the rule passed today over" and "today has no rows" became
+   * the same condition.
    */
-  today?: { date: string; headlines: number | null } | null
+  today?: { date: string } | null
 }) {
   const parts = formatDate(date)
   const step =
@@ -105,16 +108,7 @@ export function Masthead({
         </div>
         {today && (
           <p className="mt-2 pl-1 text-xs text-ink-faint">
-            {today.headlines === null ? (
-              <>오늘({formatDate(today.date).day})은 아직 수집 전입니다</>
-            ) : (
-              <button
-                onClick={() => onDateChange(today.date)}
-                className="rounded underline decoration-line underline-offset-2 hover:text-ink"
-              >
-                오늘({formatDate(today.date).day})은 아직 {today.headlines}건 수집 중 →
-              </button>
-            )}
+            오늘({formatDate(today.date).day})은 아직 수집 전입니다
           </p>
         )}
       </div>

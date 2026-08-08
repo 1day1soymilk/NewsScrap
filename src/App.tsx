@@ -131,8 +131,14 @@ function App() {
   )
 
   // 오늘을 지나쳐 왔다는 사실을 화면에 적을 것인지. 두 조건이 다 필요하다: 화면의
-  // 날이 오늘이 아니고, **오늘이 아직 열기에 얇을 것**. 두 번째가 없으면 저녁에
-  // 옛 날짜를 보는 사람에게 "오늘은 아직 3,100건 수집 중"이라는 거짓말을 하게 된다.
+  // 날이 오늘이 아니고, **규칙이 오늘을 고르지 않았을 것**. 두 번째가 없으면 저녁에
+  // 옛 날짜를 보는 사람에게 "오늘은 아직 수집 중"이라는 거짓말을 하게 된다.
+  //
+  // 규칙이 "가장 최근 수집일"로 바뀌면서 이 줄이 뜨는 경우가 **하나로 줄었다**:
+  // 자정과 그날 첫 크론(03:00 KST) 사이, 오늘이 `collected_dates`에 아예 없을 때다.
+  // 그래서 건수를 같이 넘기던 것이 죽은 코드가 됐다 — "규칙이 오늘을 지나쳤다"와
+  // "오늘이 한 건도 없다"가 같은 조건이 되었으므로 건수는 언제나 없다. Masthead는
+  // 링크 없이 문장만 적는다: 빈 캔버스로 데려가는 링크는 문장보다 나쁘다.
   //
   // 판정은 `pickOpeningDate`를 그대로 다시 불러서 한다. 이 줄이 설명하는 것이 바로
   // 그 규칙의 판정이므로, 여기서 다른 식으로 물으면 설명과 행동이 어긋날 수 있다 —
@@ -141,8 +147,8 @@ function App() {
     const today = todayInSeoul()
     if (collectedDates.length === 0 || selectedDate === today) return null
     if (pickOpeningDate(collectedDates, today) === today) return null
-    return { date: today, headlines: headlinesByDate.get(today) ?? null }
-  }, [collectedDates, headlinesByDate, selectedDate])
+    return { date: today }
+  }, [collectedDates, selectedDate])
 
   // A slug from a hand-edited or stale link that matches no section would leave
   // every tab unselected while the graph filtered on nothing — a state the UI

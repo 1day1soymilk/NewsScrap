@@ -4,6 +4,7 @@ import {
   ECONOMY_GRAPH,
   EMPTY_GRAPH,
   dayLabel,
+  daysBackInSeoul,
   previousDayInSeoul,
   todayInSeoul,
 } from './support/fixtures'
@@ -97,48 +98,78 @@ test('steps to the previous collected date and back', async ({ page }) => {
   await expect(dateInput).toHaveValue(todayInSeoul())
 })
 
-// A day is not worth opening on until it has filled up, and in the morning
-// today has not. Measured on the live archive: at 03:00 KST a day's pool of
-// words with df >= 3 is 59-81 against a render cap of 70, so the canvas cannot
-// fill however it is drawn. src/lib/openingDate.ts is the rule; these two cover
-// the wiring around it, which no unit test reaches.
+// The app opens on the newest **collected** day, which is today as soon as the
+// day's first cron (03:00 KST) has run. Between midnight and then today is not
+// in `collected_dates` at all and there is genuinely nothing to draw, so it
+// falls back. src/lib/openingDate.ts is the rule; these three cover the wiring
+// around it, which no unit test reaches.
 
-/** Today thin against a full previous day — the 07:00 KST state of a real day. */
+/** Today collected but still thin — the 15:00 KST state that retired the old rule. */
 const THIN_TODAY = {
   collected_dates: [
-    { collected_date: todayInSeoul(), headline_count: 300 },
+    { collected_date: todayInSeoul(), headline_count: 808 },
     { collected_date: previousDayInSeoul(), headline_count: 3000 },
+  ],
+}
+
+/** Before the day's first cron: today is absent from the view entirely. */
+const TODAY_UNCOLLECTED = {
+  collected_dates: [
+    { collected_date: previousDayInSeoul(), headline_count: 3000 },
+    { collected_date: daysBackInSeoul(2), headline_count: 3100 },
   ],
   keyword_graph: ({ body }: { body: { p_date?: string } }) =>
     body.p_date === previousDayInSeoul() ? YESTERDAY_GRAPH : EMPTY_GRAPH,
 }
 
-test('opens on the previous day when today is still filling, and says so', async ({ page }) => {
+test('opens on today even while today is still thin', async ({ page }) => {
+  // **The case the old rule got wrong**, kept as a test rather than a memory.
+  // On 2026-08-08 at 15:07 KST today held 808 headlines and drew 66 of the
+  // canvas's 70 words, and the share rule opened on the day before because 808
+  // is 4% under the 862 it worked out to.
   await mockSupabase(page, THIN_TODAY)
+  await page.goto('/')
+
+  await expect(page.locator('input[type="date"]')).toHaveValue(todayInSeoul())
+  // Nothing to explain: the reader is on the day they asked for by default.
+  await expect(page.getByText(/오늘\(.*\)은 아직/)).toHaveCount(0)
+})
+
+test('falls back to the newest collected day before the first cron, and says so', async ({
+  page,
+}) => {
+  await mockSupabase(page, TODAY_UNCOLLECTED)
   await page.goto('/')
 
   const dateInput = page.locator('input[type="date"]')
   await expect(dateInput).toHaveValue(previousDayInSeoul())
   await expect(page.locator('svg text').filter({ hasText: /^개각$/ })).toBeVisible()
 
-  // The reader is told the app made a choice, and can undo it in one press.
-  // Silently showing yesterday would read as a stale page.
-  const line = page.getByRole('button', { name: /아직 300건 수집 중/ })
-  await expect(line).toBeVisible()
-  await line.click()
-  await expect(dateInput).toHaveValue(todayInSeoul())
+  // The reader is told the app made a choice. Silently showing yesterday would
+  // read as a stale page.
+  //
+  // **A sentence and not a link**, which is the one thing that changed here: a
+  // day that has not been collected at all has an empty canvas behind it, and
+  // an offer that lands there is worse than a statement. The date input's own
+  // `max` does not reach today either.
+  await expect(page.getByText(/오늘\(.*\)은 아직 수집 전입니다/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /오늘\(.*\)은 아직/ })).toHaveCount(0)
+  await expect(dateInput).toHaveAttribute('max', previousDayInSeoul())
 
   // The move the app made on load must be a replaceState, not a push: Back
-  // belongs to the reader's own navigation, and the one click above is the only
-  // thing there is to undo.
+  // belongs to the reader's own navigation, and it has nothing to undo yet.
+  // Stepping a day gives the stack its one real entry.
+  await page.getByRole('button', { name: '이전 수집일' }).click()
+  await expect(dateInput).toHaveValue(daysBackInSeoul(2))
+
   await page.goBack()
   await expect(dateInput).toHaveValue(previousDayInSeoul())
 
   // **The second press is what discriminates, and one press does not.** Pushed,
-  // the stack is [today, previous, today] and the first Back still lands on the
-  // previous day — measured: deleting the replaceState reset left the whole
-  // file green. Only a stack with a third entry survives a second Back, and
-  // that entry is the day nobody chose.
+  // the stack is [today, previous, older] and the first Back still lands on the
+  // previous day — measured: deleting the replaceState reset left the whole file
+  // green. Only a stack with a third entry survives a second Back, and that
+  // entry is the day nobody chose.
   await page.goBack()
   await expect(page).not.toHaveURL(new RegExp(`date=${todayInSeoul()}`))
 })
@@ -161,7 +192,10 @@ test('a shared link naming today wins over the opening-date rule', async ({ page
     asked.push(JSON.parse(request.postData() ?? '{}').p_date)
   })
 
-  await mockSupabase(page, THIN_TODAY)
+  // **The fixture has to be one the rule would actually move**, or the test
+  // passes for free. With today collected the rule picks today anyway and this
+  // proves nothing about the link; with today absent it would pick yesterday.
+  await mockSupabase(page, TODAY_UNCOLLECTED)
   await page.goto(`/?date=${todayInSeoul()}`)
   await page.waitForLoadState('networkidle')
 

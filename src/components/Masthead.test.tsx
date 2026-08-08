@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Masthead } from './Masthead'
 
@@ -28,20 +28,11 @@ describe('Masthead', () => {
     expect(screen.queryByText(/관계 /)).not.toBeInTheDocument()
   })
 
-  it('오늘을 지나쳐 왔으면 그 사실과 건수를 적고, 눌러서 갈 수 있다', () => {
-    const onDateChange = vi.fn()
-    render(
-      <Masthead {...base} onDateChange={onDateChange} today={{ date: '2026-08-02', headlines: 539 }} />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /아직 539건 수집 중/ }))
-    expect(onDateChange).toHaveBeenCalledWith('2026-08-02')
-  })
-
-  it('수집 전인 오늘은 말만 하고 갈 곳을 내밀지 않는다', () => {
-    // 날짜 입력의 max도 거기까지 못 가고, 가 봐야 빈 캔버스다. 막다른 길로
-    // 부르는 것보다 사실만 적는 편이 낫다.
-    render(<Masthead {...base} today={{ date: '2026-08-02', headlines: null }} />)
+  it('지나쳐 온 오늘은 말만 하고 갈 곳을 내밀지 않는다', () => {
+    // 여는 규칙이 "가장 최근 수집일"이 된 뒤로 이 줄이 뜨는 경우는 하나뿐이다 —
+    // 오늘이 아직 한 건도 수집 안 된 때. 날짜 입력의 max도 거기까지 못 가고, 가
+    // 봐야 빈 캔버스다. 막다른 길로 부르는 것보다 사실만 적는 편이 낫다.
+    render(<Masthead {...base} today={{ date: '2026-08-02' }} />)
 
     expect(screen.getByText(/아직 수집 전/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /오늘/ })).not.toBeInTheDocument()

@@ -23,11 +23,16 @@ export function todayInSeoul(): string {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
 }
 
+/** `back` days before today. 1 is the archive's other collected date here. */
+export function daysBackInSeoul(back: number): string {
+  const day = new Date(`${todayInSeoul()}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() - back)
+  return day.toISOString().slice(0, 10)
+}
+
 /** The day before that, which is the archive's other collected date here. */
 export function previousDayInSeoul(): string {
-  const today = new Date(`${todayInSeoul()}T00:00:00Z`)
-  today.setUTCDate(today.getUTCDate() - 1)
-  return today.toISOString().slice(0, 10)
+  return daysBackInSeoul(1)
 }
 
 /**
