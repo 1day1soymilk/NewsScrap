@@ -128,12 +128,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "서울",
-        "count": 8,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
         "word": "정몽규",
         "count": 8,
         "faded": false,
@@ -350,12 +344,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "제주",
-        "count": 4,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "중간선거",
         "count": 4,
         "faded": false,
@@ -420,6 +408,18 @@
         "count": 3,
         "faded": false,
         "category_slug": "politics"
+      },
+      {
+        "word": "경계작전",
+        "count": 3,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "공화당",
+        "count": 3,
+        "faded": false,
+        "category_slug": "world"
       }
     ],
     "edges": [
@@ -446,6 +446,18 @@
         "b": "패트리엇",
         "cooc": 4,
         "npmi": 0.855
+      },
+      {
+        "a": "공화당",
+        "b": "머스크",
+        "cooc": 3,
+        "npmi": 0.851
+      },
+      {
+        "a": "공화당",
+        "b": "중간선거",
+        "cooc": 2,
+        "npmi": 0.82
       },
       {
         "a": "이스라엘",
@@ -854,12 +866,6 @@
         "category_slug": "world"
       },
       {
-        "word": "강남",
-        "count": 8,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "경남",
         "count": 8,
         "faded": false,
@@ -1040,12 +1046,6 @@
         "category_slug": "it"
       },
       {
-        "word": "울산",
-        "count": 4,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "정몽규",
         "count": 4,
         "faded": false,
@@ -1116,6 +1116,18 @@
         "count": 3,
         "faded": false,
         "category_slug": "world"
+      },
+      {
+        "word": "단일종목",
+        "count": 3,
+        "faded": false,
+        "category_slug": "economy"
+      },
+      {
+        "word": "반도체주",
+        "count": 3,
+        "faded": false,
+        "category_slug": "economy"
       }
     ],
     "edges": [
@@ -1724,12 +1736,6 @@
         "category_slug": "world"
       },
       {
-        "word": "부산",
-        "count": 3,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
         "word": "삼성",
         "count": 3,
         "faded": false,
@@ -2198,12 +2204,6 @@
         "category_slug": "politics"
       },
       {
-        "word": "서울",
-        "count": 61,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
         "word": "이란",
         "count": 54,
         "faded": false,
@@ -2378,12 +2378,6 @@
         "category_slug": "it"
       },
       {
-        "word": "인천",
-        "count": 11,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "일본",
         "count": 11,
         "faded": false,
@@ -2436,12 +2430,6 @@
         "count": 10,
         "faded": false,
         "category_slug": "politics"
-      },
-      {
-        "word": "포항",
-        "count": 10,
-        "faded": false,
-        "category_slug": "society"
       },
       {
         "word": "경북",
@@ -2522,12 +2510,6 @@
         "category_slug": "it"
       },
       {
-        "word": "울산",
-        "count": 8,
-        "faded": false,
-        "category_slug": "society"
-      },
-      {
         "word": "최고기온",
         "count": 8,
         "faded": false,
@@ -2558,18 +2540,6 @@
         "category_slug": "economy"
       },
       {
-        "word": "강원",
-        "count": 7,
-        "faded": false,
-        "category_slug": "politics"
-      },
-      {
-        "word": "광주",
-        "count": 7,
-        "faded": false,
-        "category_slug": "culture"
-      },
-      {
         "word": "데이터센터",
         "count": 7,
         "faded": false,
@@ -2590,6 +2560,42 @@
       {
         "word": "하마스",
         "count": 7,
+        "faded": false,
+        "category_slug": "world"
+      },
+      {
+        "word": "한반도",
+        "count": 7,
+        "faded": false,
+        "category_slug": "culture"
+      },
+      {
+        "word": "고속도로",
+        "count": 6,
+        "faded": false,
+        "category_slug": "it"
+      },
+      {
+        "word": "김동관",
+        "count": 6,
+        "faded": false,
+        "category_slug": "economy"
+      },
+      {
+        "word": "김병기",
+        "count": 6,
+        "faded": false,
+        "category_slug": "society"
+      },
+      {
+        "word": "김용",
+        "count": 6,
+        "faded": false,
+        "category_slug": "politics"
+      },
+      {
+        "word": "대공습",
+        "count": 6,
         "faded": false,
         "category_slug": "world"
       }
@@ -2698,6 +2704,12 @@
         "npmi": 0.694
       },
       {
+        "a": "돌핀",
+        "b": "한반도",
+        "cooc": 3,
+        "npmi": 0.689
+      },
+      {
         "a": "이란",
         "b": "트럼프",
         "cooc": 32,
@@ -2750,12 +2762,6 @@
         "b": "현대차",
         "cooc": 2,
         "npmi": 0.57
-      },
-      {
-        "a": "경남",
-        "b": "울산",
-        "cooc": 2,
-        "npmi": 0.559
       },
       {
         "a": "강선우",
@@ -2854,6 +2860,12 @@
         "npmi": 0.467
       },
       {
+        "a": "대공습",
+        "b": "트럼프",
+        "cooc": 4,
+        "npmi": 0.461
+      },
+      {
         "a": "노무현",
         "b": "정청래",
         "cooc": 11,
@@ -2914,6 +2926,18 @@
         "npmi": 0.393
       },
       {
+        "a": "대공습",
+        "b": "이란",
+        "cooc": 2,
+        "npmi": 0.372
+      },
+      {
+        "a": "폭염",
+        "b": "한반도",
+        "cooc": 4,
+        "npmi": 0.371
+      },
+      {
         "a": "노무현",
         "b": "돌려차기",
         "cooc": 2,
@@ -2926,6 +2950,12 @@
         "npmi": 0.35
       },
       {
+        "a": "김민석",
+        "b": "김용",
+        "cooc": 2,
+        "npmi": 0.344
+      },
+      {
         "a": "민주당",
         "b": "부울경",
         "cooc": 2,
@@ -2936,12 +2966,6 @@
         "b": "李대통령",
         "cooc": 2,
         "npmi": 0.335
-      },
-      {
-        "a": "광주",
-        "b": "서울",
-        "cooc": 2,
-        "npmi": 0.333
       },
       {
         "a": "노무현",

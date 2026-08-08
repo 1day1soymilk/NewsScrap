@@ -19,24 +19,13 @@
 // 총계가 내려간 것만으로는 원인을 맞혔는지 알 수 없으므로, `xBr`를 움직이는
 // 작업은 measure.ts의 표와 **이 표를 같이** 남긴다.
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import { computeGraphLayout } from '../../src/components/graphLayout.ts'
 import type { EdgeCurve, MeasuredWord, PlacedEdge } from '../../src/components/graphLayout.ts'
 import { computeFontSizes } from '../../src/components/wordCloudLayout.ts'
-import type { GraphEdge } from '../../src/lib/types.ts'
+import { loadFixture } from './fixture.ts'
+import type { FixtureNode } from './fixture.ts'
 
-interface FixtureNode {
-  word: string
-  count: number
-  faded: boolean
-  category_slug: string | null
-}
-type Fixture = Record<string, { nodes: FixtureNode[]; edges: GraphEdge[] }>
-
-const here = dirname(fileURLToPath(import.meta.url))
-const fixture: Fixture = JSON.parse(readFileSync(join(here, 'graphDays.json'), 'utf8'))
+const { fixture, path: fixturePath } = loadFixture()
 
 const VIEWS = [
   { name: 'desktop', width: 1024 },
@@ -187,6 +176,7 @@ const columns: (keyof Row)[] = ['view', 'day', 'bridges', 'brBr', 'brOwn', 'brOt
 const widths = columns.map((c) => Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)))
 const render = (cells: string[]) => cells.map((cell, i) => cell.padStart(widths[i])).join('  ')
 
+console.log(`fixture: ${fixturePath}  (${Object.keys(fixture).length} days)`)
 console.log(render(columns.map(String)))
 console.log(widths.map((w) => '-'.repeat(w)).join('  '))
 for (const row of rows) console.log(render(columns.map((c) => String(row[c]))))

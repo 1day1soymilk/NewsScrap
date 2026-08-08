@@ -21,25 +21,14 @@
 // 사건 구분(루뱅 + 병합)은 폭과 무관하므로 사건 목록은 한 번만 구한다. 교차는
 // 좌표에서 나오므로 뷰마다 따로 센다.
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import { computeGraphLayout } from '../../src/components/graphLayout.ts'
 import type { EdgeCurve, MeasuredWord, PlacedEdge } from '../../src/components/graphLayout.ts'
 import { isPlanar, skewness } from '../../src/components/planar.ts'
 import { computeFontSizes } from '../../src/components/wordCloudLayout.ts'
-import type { GraphEdge } from '../../src/lib/types.ts'
+import { loadFixture } from './fixture.ts'
+import type { FixtureNode } from './fixture.ts'
 
-interface FixtureNode {
-  word: string
-  count: number
-  faded: boolean
-  category_slug: string | null
-}
-type Fixture = Record<string, { nodes: FixtureNode[]; edges: GraphEdge[] }>
-
-const here = dirname(fileURLToPath(import.meta.url))
-const fixture: Fixture = JSON.parse(readFileSync(join(here, 'graphDays.json'), 'utf8'))
+const { fixture, path: fixturePath } = loadFixture()
 
 const VIEWS = [
   { name: 'desktop', width: 1024 },
@@ -161,6 +150,7 @@ const columns: (keyof Row)[] = ['day', 'event', 'words', 'edges', 'planar', 'ske
 const widths = columns.map((c) => Math.max(String(c).length, ...rows.map((r) => String(r[c]).length)))
 const render = (cells: string[]) => cells.map((cell, i) => cell.padEnd(widths[i])).join('  ')
 
+console.log(`fixture: ${fixturePath}  (${Object.keys(fixture).length} days)`)
 console.log(render(columns.map(String)))
 console.log(widths.map((w) => '-'.repeat(w)).join('  '))
 for (const row of rows) console.log(render(columns.map((c) => String(row[c]))))

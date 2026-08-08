@@ -1,5 +1,15 @@
-// Pulls the four archived days' keyword_graph into a fixture file.
+// Pulls a set of archived days' keyword_graph into a fixture file.
 // Uses the anon key against the RPC, same path the frontend takes.
+//
+//   node scripts/layout/pullFixture.mjs scripts/layout/graphDays.json
+//   node scripts/layout/pullFixture.mjs scripts/layout/graphDays.fat.json 2026-08-04
+//
+// The days are an argument, defaulting to the four the main table has always
+// been measured on. **That default is load-bearing rather than convenience:**
+// changing which days the main fixture holds mixes a day effect into every
+// before/after comparison taken on it, and edges exist only between drawn
+// words, so the mix cannot be unpicked afterwards (migration 0007's recorded
+// trap). A day worth measuring separately gets its own file — see fixture.ts.
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const env = Object.fromEntries(
@@ -16,8 +26,15 @@ const url = env.VITE_SUPABASE_URL
 const key = env.VITE_SUPABASE_ANON_KEY
 if (!url || !key) throw new Error('missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
 
-const days = ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03']
-const out = {}
+const out = process.argv[2]
+if (!out) throw new Error('usage: pullFixture.mjs <out.json> [day …]')
+
+const days =
+  process.argv.length > 3
+    ? process.argv.slice(3)
+    : ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03']
+
+const graphs = {}
 
 for (const day of days) {
   // **`keyword_graph_compute`, never `keyword_graph`.** Since migration 0032 the
@@ -37,7 +54,7 @@ for (const day of days) {
   })
   if (!res.ok) throw new Error(`${day}: ${res.status} ${await res.text()}`)
   const graph = await res.json()
-  out[day] = {
+  graphs[day] = {
     nodes: graph.nodes.map((n) => ({
       word: n.word,
       count: n.count,
@@ -46,8 +63,8 @@ for (const day of days) {
     })),
     edges: graph.edges.map((e) => ({ a: e.a, b: e.b, cooc: e.cooc, npmi: e.npmi })),
   }
-  console.log(day, out[day].nodes.length, 'nodes', out[day].edges.length, 'edges')
+  console.log(day, graphs[day].nodes.length, 'nodes', graphs[day].edges.length, 'edges')
 }
 
-writeFileSync(process.argv[2], JSON.stringify(out, null, 2))
-console.log('wrote', process.argv[2])
+writeFileSync(out, JSON.stringify(graphs, null, 2))
+console.log('wrote', out)

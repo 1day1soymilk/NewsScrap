@@ -15,24 +15,13 @@
 // 전후 비교는 같은 식 위에서 이뤄지므로 유효하다 — 이 자는 두 배치를 서로
 // 비교하기 위한 것이지 화면을 예측하기 위한 것이 아니다.
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import { computeGraphLayout } from '../../src/components/graphLayout.ts'
 import type { EdgeCurve, MeasuredWord, PlacedEdge, PlacedNode } from '../../src/components/graphLayout.ts'
 import { computeFontSizes } from '../../src/components/wordCloudLayout.ts'
-import type { GraphEdge } from '../../src/lib/types.ts'
+import { loadFixture } from './fixture.ts'
+import type { FixtureNode } from './fixture.ts'
 
-interface FixtureNode {
-  word: string
-  count: number
-  faded: boolean
-  category_slug: string | null
-}
-type Fixture = Record<string, { nodes: FixtureNode[]; edges: GraphEdge[] }>
-
-const here = dirname(fileURLToPath(import.meta.url))
-const fixture: Fixture = JSON.parse(readFileSync(join(here, 'graphDays.json'), 'utf8'))
+const { fixture, path: fixturePath } = loadFixture()
 
 // `desktop` 1024는 캔버스가 `max-w-5xl` 안에 있을 때 실제로 받던 폭이고, 그 상한이
 // 풀린 지금도 **그대로 둔다** — 이 README의 모든 옛 표가 그 폭 위에서 쟀으므로,
@@ -265,6 +254,9 @@ const widths = columns.map((c) =>
 const line = (cells: string[]) =>
   cells.map((cell, i) => cell.padStart(widths[i])).join('  ')
 
+// 어느 픽스처인지를 표 위에 찍는다. 이 자의 숫자는 픽스처에 매여 있는데 숫자만
+// 봐서는 어느 것인지 알 수 없고, 이 가지는 그 때문에 이미 세 번 물렸다.
+console.log(`fixture: ${fixturePath}  (${Object.keys(fixture).length} days)`)
 console.log(line(columns.map(String)))
 console.log(widths.map((w) => '-'.repeat(w)).join('  '))
 for (const row of rows) console.log(line(columns.map((c) => String(row[c]))))
