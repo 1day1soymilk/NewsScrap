@@ -751,7 +751,11 @@ realtime-js eagerly, so no bundler can drop them: they were 443 kB of the built
 JS. The two headers supabase-js used to add — `apikey` and the `Bearer` token,
 both the same anon key — are set by hand, and nothing about the access model
 moves. Bundle went to 251 kB (gzip 130 → 81). The Edge Function still uses
-`npm:@supabase/supabase-js` and is unaffected.
+`npm:@supabase/supabase-js` and is unaffected. **That pair is the measurement of
+this change and not a current reading** — the app has grown since and builds at
+280 kB / gzip 92 (2026-08-08). What the swap bought is the difference, and it is
+still bought; if the absolute number is ever the question, run `npm run build`
+rather than quoting this line.
 
 ### Design tokens
 
@@ -2002,7 +2006,7 @@ current date between midnight and the day's first cron at 03:00 KST.
 
 `e2e/smoke.spec.ts` needs a real `.env` (recoverable with
 `npx vercel env pull .env --environment=development`); on a fresh clone without
-one, `npm run test:e2e` fails 1 of 43 with a bare count mismatch. Also note
+one, `npm run test:e2e` fails 1 of 54 with a bare count mismatch. Also note
 `playwright.config.ts` sets `reuseExistingServer: true`, so a dev server started
 before `.env` existed will be silently reused with stale environment variables —
 stop it first. It also pins the viewport to 1280×900, so **the suite says nothing

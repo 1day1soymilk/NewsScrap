@@ -14,8 +14,8 @@ test('reaches the real Supabase project', async ({ page }) => {
 
   // categories is seeded by migration 0001 and never changes, so this holds
   // regardless of what the collector did that day. Asserting on collected words
-  // instead would fail every day between midnight and 13:00 KST, when the cron
-  // has not yet run for the date the app asks for.
+  // instead would fail every day between midnight and the day's first cron at
+  // 03:00 KST, when nothing has been collected for the date the app asks for.
   await expect(page.getByRole('navigation').getByRole('button')).toHaveCount(7)
 
   // App.tsx fetches categories/dates and word counts in separate effects that

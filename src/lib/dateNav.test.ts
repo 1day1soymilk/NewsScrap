@@ -28,8 +28,10 @@ describe('adjacentDate', () => {
     expect(adjacentDate(DATES, '2026-08-01', 'next')).toBeNull()
   })
 
-  // The app opens on today whether or not today has been collected — the cron
-  // runs at 13:00 KST, so between midnight and then it has not been.
+  // The day on screen can be one that was never collected. With no `?date=` the
+  // app now opens on the newest day that has filled up (src/lib/openingDate.ts),
+  // but a `?date=` link always wins and may name any day at all, and with nothing
+  // collected yet the rule falls back to today.
   it('finds the neighbours of a date that was never collected', () => {
     expect(adjacentDate(DATES, '2026-07-30', 'prev')).toBe('2026-07-28')
     expect(adjacentDate(DATES, '2026-07-30', 'next')).toBe('2026-07-31')
