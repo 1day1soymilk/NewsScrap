@@ -808,15 +808,215 @@ patch, checked row by row.
 **It still has no sieve 6**, so every row in it is gate-free. That is sound for
 this round's question, where both arms are equally gate-free and the comparison
 is internal, but it is not the shipped screen. The gate's own tab numbers came
-from the deployed RPC for that reason, and still would.
+from the deployed RPC for that reason, and still would. That limitation is now
+stated in `11_category_eval.sql`'s own header rather than only here.
+
+## Round sixteen — α earns its place, and two silent holes turn up on the way
+
+`OPEN.md`'s one reopenable item was α gated on the day's own imbalance. Round
+fifteen scored it **56.14 / 87.92** against the shipped 55.88 / 87.36 and
+declined it, on two grounds worth restating because only one of them survives:
+the figure was *arithmetic over rows measured for another question*, and +0.26
+mean F1 looked too thin to buy a threshold.
+
+Both grounds are answerable now, and the answers came in the order the objection
+was made. 2026-08-05 (spread 2.48) and 08-06 (2.21) joined `analysis.eval_days` —
+closed days, same `collect_cap` 150 regime — and `analysis.sieve_configs` gained
+`alpha_min_spread`, which makes the α slice a function of (configuration, **day**)
+so a gated row is **run** rather than inferred.
+
+`unlab` is 0 on every row quoted here: `10_sieve_eval.sql`'s 63 rows, all 378
+cells of `11_category_eval.sql`, and both worklists, after `28_labels_round_sixteen.sql`
+(304 words).
+
+### The measurement
+
+Seven days. Configurations 310-313 are round fifteen's flat sweep, reactivated so
+this run carries its own control; 320-323 gate it. Balance spread per day —
+`max/min` over `category_balance_factors(d, 1)` — is on the last line.
+
+| configuration | 07-31 | 08-01 | 08-02 | 08-03 | 08-04 | 08-05 | 08-06 | mean F1 | mean prec |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **300 SHIPPED (α 0)** | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 38.1 | 35.8 | 50.20 | 86.49 |
+| 310 flat α .25 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 38.7 | 35.8 | 49.86 | 86.07 |
+| 311 flat α .50 | **64.3** | 64.3 | 77.1 | 42.0 | 26.3 | 39.4 | 35.8 | 49.89 | 86.07 |
+| 312 flat α .75 | **64.3** | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 35.8 | 49.96 | 86.29 |
+| 313 flat α 1.00 | **64.3** | 64.3 | 77.1 | 42.7 | 26.8 | 39.4 | 36.4 | 50.14 | 86.69 |
+| **320 α 1.00, spread ≥ 1.2** | 67.3 | 64.3 | 77.1 | **42.7** | 26.8 | **39.4** | **36.4** | **50.57** | **87.30** |
+| 321 α .50, spread ≥ 1.2 | 67.3 | 64.3 | 77.1 | 42.0 | 26.3 | 39.4 | 35.8 | 50.31 | 86.69 |
+| 322 α 1.00, spread ≥ 1.6 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 36.4 | 50.47 | 87.10 |
+| 323 α 1.00, spread ≥ 2.0 | 67.3 | 64.3 | 77.1 | 42.0 | 26.8 | 39.4 | 36.4 | 50.47 | 87.10 |
+| *spread* | *1.01* | *2.52* | *1.67* | *1.49* | *2.44* | *2.48* | *2.21* | | |
+
+`shown` is 69.7 for every row — α reorders and removes nothing — and
+`story_rank` is 1 on all 63 rows, so rule 5 is clear throughout.
+
+### The verdict is not the mean, and saying why matters more than the number
+
+**Adding two imbalanced days makes the day set six-to-one imbalanced, so any
+mechanism that helps on imbalanced days and is the identity elsewhere will lift a
+seven-day mean almost by construction.** That number is close to tautological and
+is not what this round rests on. Three things are:
+
+- **320 equals 300 exactly on 2026-07-31.** By construction it must — spread 1.01
+  is below every threshold here, so the gated rows fall back to α = 0 that day —
+  and a single word of difference would have meant the fallback was miswired.
+  It is the implementation check, and it passes.
+- **320 does not lose a single day.** Per-day against the shipped row:
+  +0.0 / +0.0 / +0.0 / **+0.7** / +0.0 / **+1.3** / **+0.6**. Three days better,
+  four identical, none worse. **Weak dominance is a different kind of fact from a
+  better average**, and round fifteen never had one — its flat α lost 3.0 points
+  on 07-31 to buy its gains.
+- **It strictly dominates flat α too.** 320 against 313 is +3.0 on 07-31 and
+  identical on all six other days. So the gain is the *gating*, not the exponent.
+
+### The threshold is not "how imbalanced" — it is "imbalanced at all"
+
+The sweep says something sharper than "1.2 works". 322 and 323 lift the threshold
+to 1.6 and 2.0 and both score **50.47**, below 320's 50.57, because they take
+2026-08-03 (spread 1.49) out of α and α is worth +0.7 there. Meanwhile anything
+at or below 1.01 is flat α, which is worse again.
+
+So the optimum is any value in **(1.01, 1.49]** and it is an interior one in the
+sense rule 2 asks for: **both directions are worse.** 1.2 is mid-plateau, the same
+way `min_standalone` sits at 0.10 because .05–.30 are identical — it is a plateau
+midpoint and must not be quoted as a tuned number.
+
+What that shape means is the finding: the only day α damages is the one whose six
+sections collected 150/149/150/150/150/150 in a single capped run, where the
+balance factors span 0.6% and α does nothing but perturb a `df` tie in the third
+decimal — at a cost of three good words. **Every day with any real imbalance at
+all wants α, including the mildest one in the archive.** The gate is a guard
+against a degenerate input, not a dosage.
+
+α .50 gated (321) scores 50.31 and loses 0.5 on 08-04, so the magnitude is not
+free either: gated **α = 1.00** is the configuration, not gating on its own.
+
+### It is earned and it is not shipped yet — deliberately
+
+No `scoring_weights` value moves in this round. Turning it on means the gating
+has to exist **database-side**, where `keyword_signals`' α default is a single
+constant with no per-day branch, and that is its own change with its own
+migration: a `category_balance_alpha_min_spread` key, an α resolution that reads
+`category_balance_factors(p_date, 1)`, and — by this file's own standing rule —
+the harness's shipped configuration row moved in the same breath. `OPEN.md`
+carries it as the one open item this round leaves.
+
+### Two silent holes, both found by instruments rather than by reading
+
+Neither was what the round was looking for, and both are the same species: a
+derived thing that did not follow the thing it derives from.
+
+**`analysis.day_edges` did not follow `analysis.eval_days`.** It is a base table
+built from that day list, and round fifteen added 2026-08-04 without rebuilding
+it. Sieve 6 reads "no edge" as "drop this place", so on that day every gated
+configuration dropped all three of its places and promoted three deeper words.
+Measured by deleting the day again to reproduce the state exactly: **6 of 45 cells
+move, all 08-04, each by one word.** The shipped row does not move at all — 55.88
+either way — and neither of round fifteen's conclusions changes; α still loses
+flat, by slightly more once corrected. The table is built at the foot of
+`12_eval_days.sql` now, beside the list it derives from, so the two cannot part
+company again.
+
+**`21_unlabeled_category.sql` did not follow `11_category_eval.sql`.** Round
+fifteen added the head_pos axis (`max_hp` / `demote_hp`, variants 10-13) to the
+harness and not to its worklist, so the worklist could not see the cut variants'
+screens. **The harness reported `unlab` 6 on variant 13 while the worklist
+returned nothing** — which is the only way this is findable, because *a worklist
+cannot report its own blind spot.* Five words came out once the axis was
+restored, all bad, one of them (`비즈360`) another bracketed section tag.
+
+The general form is worth more than either case: **the instrument that detects a
+missing worklist entry is the harness's own `unlab` column, not the worklist.**
+Read `unlab` on the harness even when the worklist is empty — an empty worklist
+is evidence about the worklist.
+
+### The tabs, on seven days
+
+`11_category_eval.sql` is this round's control and not its measurement: α is the
+identity inside a category tab at every α by construction, so the file carries no
+α axis. What it does say is that round fifteen's other conclusion survives two
+more days — the demotion still beats the cut on the tabs.
+
+| variant | cells | prec | F1 | shown |
+| --- | --- | --- | --- | --- |
+| **sieve1 day >= 3 (ships)** | 42 | 77.55 | **70.94** | 50.7 |
+| ships, standalone >= .50 | 42 | 77.55 | 70.94 | 50.7 |
+| ships, standalone off | 42 | 76.35 | 70.92 | 51.7 |
+| r15: cut .70, no demote | 42 | 78.49 | 70.36 | 49.3 |
+| r15: cut .65, no demote | 42 | 78.91 | 69.82 | 48.4 |
+| r15: cut .60, no demote | 42 | 79.83 | 69.66 | 47.4 |
+| r15: head_pos off entirely | 42 | 75.57 | 69.25 | 50.7 |
+| sieve1 day >= 3 and scoped >=2 | 42 | 77.47 | 60.83 | 42.5 |
+| sieve1 scoped >= 3 (pre-0004) | 42 | 77.74 | 53.21 | 35.4 |
+
+**These are gate-free numbers and are not the shipped tab** — see the next
+section for that.
+
+### The shipped tab, measured for the first time
+
+`29_gate_on_category.sql` reads `keyword_graph_compute(d, cat)` for every eval
+day and section and scores the result with **the metric formulas above,
+unchanged**, so the two tables are the same measurement of two different screens.
+This is what a reader of a category tab actually sees.
+
+| section | cells | shown | prec | recall | F1 |
+| --- | --- | --- | --- | --- | --- |
+| world | 7 | 52.7 | 84.97 | 73.42 | **78.65** |
+| it | 7 | 47.1 | 71.78 | 72.19 | 71.83 |
+| culture | 7 | 37.7 | 76.41 | 63.81 | 68.76 |
+| politics | 7 | 54.0 | 78.94 | 59.82 | 67.96 |
+| economy | 7 | 50.7 | 73.13 | 59.50 | 64.96 |
+| society | 7 | 53.3 | 74.93 | 48.09 | **58.50** |
+| **all 42 cells** | 42 | 49.3 | **76.69** | 62.80 | **68.44** |
+
+**Do not put this table beside the one above it, or beside round fourteen's
+78.58 → 75.22.** Different screen in the first case; a label set that has grown
+twice in the second. The rule is unchanged — compare configurations inside one
+run, never against a number someone wrote down.
+
+What it does support, because it is internal to one run, is the spread across
+sections: **world scores 78.65 and society 58.50**, and the gap is recall
+(73.42 against 48.09) rather than precision (84.97 against 74.93). Society is
+the section that collects most — 1,019 headlines on 2026-08-04 against `it`'s
+417 — so its good pool is largest while its tab still holds at most 70 words.
+That is the same thickness effect this file already records for F1 across days,
+appearing across *sections* within a day. It is not evidence that the sieve is
+worse at society.
+
+### It needed a third worklist, and finding that out was the third instance
+
+The first run reported `unlab` **6** while both existing worklists returned
+nothing. Neither can cover this screen, and the reason is structural rather than
+an oversight: **the gate does not only remove places — freeing a slot under the
+render cap promotes a deeper word into it**, and a promoted word can be one no
+gate-free screen has ever drawn. `23_unlabeled_gate_on.sql` is that worklist. It
+returned five words (구로, 변희재, 현대百 good; 위기상황, 정년연장 bad), and
+`unlab` is 0 on all 42 cells above.
+
+Three holes of one species in one round — `day_edges` not following `eval_days`,
+`21` not following `11`, and now no worklist following the gated screen — is
+enough to state the rule plainly: **every screen the harness scores needs a
+worklist that draws the same screen, and the thing that detects a missing one is
+the harness's own `unlab` column.** An empty worklist is evidence about the
+worklist.
 
 ## Labels
 
-891 words, covering everything drawn by every **active** configuration in
-`02_sieve_configs.sql` and every variant in `11_category_eval.sql`, across the
-four days in `analysis.eval_days` — 2026-07-31, 08-01, 08-02 and 08-03.
-`20_unlabeled.sql` and `21_unlabeled_category.sql` both return nothing, so rule 4
-is satisfied.
+**1,532 words as of round sixteen** (608 good, 924 bad), covering everything
+drawn by every **active** configuration in `analysis.sieve_configs`, every
+variant in `11_category_eval.sql`, and the deployed gated screen, across the
+seven days in `analysis.eval_days` — 2026-07-31 through 08-06. All three
+worklists — `20_unlabeled.sql`, `21_unlabeled_category.sql` and
+`23_unlabeled_gate_on.sql` — return nothing, so rule 4 is satisfied.
+
+Round sixteen alone added 304, which is what two new days plus two worklists
+that had never run against those screens cost.
+
+The paragraph below is kept as written, at 891 and four days, because the
+figures it explains were taken then. **That is the rule this section is about:
+every percentage in this file moves when the label set grows, so a number is only
+comparable to others from its own run.**
 
 **The harness measured two days until 2026-08-03**, and widening it to four cost
 139 labels (`09_labels_four_days.sql`). Two things made it worth paying for.
@@ -872,11 +1072,32 @@ what it finds before trusting the harness.** That happened three times here:
 | `09_labels_four_days.sql` | Labels the widening to four days and round four exposed |
 | `10_sieve_eval.sql` | The harness: precision, recall, F1 and the day's top-story rank per configuration |
 | `11_category_eval.sql` | The same for one category tab at a time |
-| `12_eval_days.sql` | The days under test and each one's biggest story — **apply before 10, 11, 20 and 21**, all four read it |
-| `20_unlabeled.sql` | Words on screen with no label — must be empty before the harness counts |
-| `21_unlabeled_category.sql` | The same worklist for `11_category_eval.sql` |
+| `12_eval_days.sql` | The days under test, each one's biggest story, **and `analysis.day_edges` derived from that list** — apply before everything below it |
+| `13_labels_wider_collection.sql` | Labels the six-runs-a-day collection promoted, and the four ambiguous ones re-decided |
+| `14_labels_after_reanalysis.sql` | Labels the garu re-analysis of the whole archive promoted |
+| `15_labels_category_after_reanalysis.sql` | The same for the category variants |
+| `16_proper_noun_configs.sql` | Round ten: the `min_proper` rescue, and the column it needed |
+| `17_labels_two_character.sql` | Labels the two-character control (`min_word_len` 2) exposed |
+| `18_labels_two_character_category.sql` | The same for the category variants |
+| `19_rounds_ten_to_twelve_configs.sql` | Rounds ten to twelve, and the old sieve kept as a live row so the decomposition stays measurable |
+| `20_unlabeled.sql` | Words on the all-categories screens with no label — must be empty before the harness counts |
+| `21_unlabeled_category.sql` | The same worklist for `11_category_eval.sql`'s tab variants |
+| `22_labels_after_demotion_fix.sql` | Labels the head_pos demotion fix promoted |
+| `23_unlabeled_gate_on.sql` | The same worklist for the **gated** screen `29` scores — the other two cannot see it |
+| `24_cap_and_place_configs.sql` | Round fourteen: the render cap, the place gate and α, and the columns they needed |
+| `25_round_fifteen_configs.sql` | Round fifteen: head_pos as a cut on a fat day, α re-run, and the shipped-row correction |
+| `26_labels_round_fifteen.sql` | Labels round fifteen exposed |
+| `27_round_sixteen_configs.sql` | Round sixteen: `alpha_min_spread`, and α gated on the day's own imbalance |
+| `28_labels_round_sixteen.sql` | Labels round sixteen exposed — two new days and three worklists |
+| `29_gate_on_category.sql` | The **shipped** tab, read from the deployed RPC because sieve 6 must not be copied a third time |
 | `30_word_scores.sql` | One day's words with every signal and the sieve's verdict beside each |
 | `31_fragments.sql` | Words that look like pieces of longer words, with the longer word beside them |
+
+**The three worklists are not interchangeable and each covers a screen the others
+cannot.** `20` covers `analysis.sieve_configs`' all-categories screens, `21`
+covers `11_category_eval.sql`'s gate-free tabs, `23` covers the deployed gated
+screen. Round sixteen found all three of those boundaries the hard way, each time
+by reading `unlab` on a harness while the worklist beside it said nothing.
 
 ## The two dumps are diagnostics, not evidence
 

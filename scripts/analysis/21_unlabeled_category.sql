@@ -85,12 +85,28 @@ day_pass as (
 -- spot rule 4 exists to close. Rows 5 and 6 are the standalone arm, and 5 in
 -- particular reaches words the other four never draw, which is the whole reason
 -- this list has to be re-run after the variants change.
-variants (ord, mode, min_h, min_sa) as (values
-  (1, 'scoped', 3, null::numeric),
-  (3, 'day',    3, null::numeric),
-  (4, 'both',   3, null::numeric),
-  (5, 'day',    3, 0.00),
-  (6, 'day',    3, 0.50)
+--
+-- **Rows 10-13 were missing and that comment was describing a hole rather than
+-- guarding one.** Round fifteen added the head_pos axis (`max_hp` / `demote_hp`)
+-- to 11_category_eval.sql and did not add it here, so for a release cycle this
+-- worklist could not see the variants that cut on head_pos. Round sixteen found
+-- it the only way it can be found — by reading `unlab` on the harness rather
+-- than on the worklist: **row 13 reported 6 unlabelled words while this file
+-- returned nothing.** A worklist cannot report its own blind spot.
+--
+-- Both nulls mean "whatever ships", so rows 1 and 3-6 rank exactly as they did
+-- and only 10-13 move the axis. Verified by re-running: those five rows return
+-- the same words as before the axis was added.
+variants (ord, mode, min_h, min_sa, max_hp, demote_hp) as (values
+  (1, 'scoped', 3, null::numeric, null::numeric, null::numeric),
+  (3, 'day',    3, null::numeric, null::numeric, null::numeric),
+  (4, 'both',   3, null::numeric, null::numeric, null::numeric),
+  (5, 'day',    3, 0.00,          null::numeric, null::numeric),
+  (6, 'day',    3, 0.50,          null::numeric, null::numeric),
+  (10,'day',    3, null::numeric, 0.60,          9.90),
+  (11,'day',    3, null::numeric, 0.65,          9.90),
+  (12,'day',    3, null::numeric, 0.70,          9.90),
+  (13,'day',    3, null::numeric, 9.90,          9.90)
 ),
 
 shown as (
@@ -100,13 +116,17 @@ shown as (
       partition by v.ord, sd.d, sd.cat
       -- 강등이 첫 키인 것은 keyword_graph와 같다. 상한이 안 걸리는 셀에서는
       -- 아무것도 바꾸지 않고, 걸리는 셀에서만 자리를 갈아 끼운다.
-      order by (dp.head_pos > w.demote_head_pos) asc, sd.df desc, sd.word
+      order by (dp.head_pos > coalesce(v.demote_hp, w.demote_head_pos)) asc,
+               sd.df desc, sd.word
     ) as rank
   from variants v
   cross join scoped_df sd
   cross join w
   join day_pass dp on dp.d = sd.d and dp.word = sd.word
   where dp.standalone >= coalesce(v.min_sa, w.min_standalone)
+    -- Sieve 5 as a cut, the arm rows 10-13 are about. Missing here until round
+    -- sixteen, which is what let row 13's screen go unlabelled.
+    and dp.head_pos <= coalesce(v.max_hp, w.max_head_pos)
     and case v.mode
           when 'scoped' then sd.df >= v.min_h
           when 'day'    then dp.day_df >= v.min_h

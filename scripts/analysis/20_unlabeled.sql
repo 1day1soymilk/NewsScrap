@@ -36,11 +36,31 @@ params as (select d from analysis.eval_days),
 -- it to be long.
 alphas as (
   select distinct balance_alpha as a from analysis.sieve_configs where active
+  union
+  -- Round sixteen's gated α falls back to 0 on a balanced day, so that slice
+  -- must exist. 10_sieve_eval.sql carries the same union for the same reason,
+  -- and the two must not drift: a slice missing here is a screen the worklist
+  -- cannot see, which is rule 4's blind spot arriving by the back door.
+  select 0 where exists (
+    select 1 from analysis.sieve_configs
+    where active and alpha_min_spread is not null
+  )
+),
+
+-- The day's own imbalance, max/min of `category_balance_factors(d, 1)`. Read at
+-- α = 1 because the default call raises the ratio to whatever `scoring_weights`
+-- holds — 0 today — and would report every day as perfectly balanced.
+day_spread as (
+  select p.d, max(f.factor) / min(f.factor) as spread
+  from params p
+  cross join lateral category_balance_factors(p.d, 1) f
+  group by p.d
 ),
 
 sig as (
-  select p.d, a.a as balance_alpha, s.*
+  select p.d, a.a as balance_alpha, ds.spread, s.*
   from params p
+  join day_spread ds on ds.d = p.d
   cross join alphas a
   cross join lateral keyword_signals(p.d, a.a) s
 ),
@@ -66,8 +86,17 @@ passed0 as (
       order by (s.head_pos > c.demote_head_pos) asc,
                s.df_balanced desc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
-  -- The α slice this configuration asked for, rather than a cross join.
-  join sig s on s.balance_alpha = c.balance_alpha
+  -- The α slice this configuration asked for **on this day**, rather than a
+  -- cross join. `alpha_min_spread` null is the old single-α behaviour exactly;
+  -- with it set the configuration uses its α only where the day is imbalanced
+  -- enough to want one. Kept identical to 10_sieve_eval.sql's copy — a worklist
+  -- that ranks a different screen than the harness scores is short exactly
+  -- where rule 4 needs it long.
+  join sig s on s.balance_alpha = case
+    when c.alpha_min_spread is null           then c.balance_alpha
+    when s.spread >= c.alpha_min_spread       then c.balance_alpha
+    else 0
+  end
   left join word_overrides ov on ov.word = s.word
   where c.active
     and s.df >= c.min_headlines

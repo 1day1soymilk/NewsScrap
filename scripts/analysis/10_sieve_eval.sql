@@ -29,11 +29,44 @@ params as (select d from analysis.eval_days),
 -- configurations join onto this instead and each α is paid for once.
 alphas as (
   select distinct balance_alpha as a from analysis.sieve_configs where active
+  union
+  -- Round sixteen. A configuration with `alpha_min_spread` set falls back to
+  -- α = 0 on a day below its threshold, so that slice has to exist even when no
+  -- configuration asks for α = 0 outright. Cheap insurance: if some active row
+  -- already carries α 0 this union adds nothing, and if none does, a gated
+  -- configuration would otherwise produce no rows at all on its balanced days —
+  -- which reads as "that day drew nothing", not as an error.
+  select 0 where exists (
+    select 1 from analysis.sieve_configs
+    where active and alpha_min_spread is not null
+  )
 ),
 
-sig as (
-  select p.d, a.a as balance_alpha, s.*
+-- How unequally the day's six sections collected, as one number per day:
+-- max/min over `category_balance_factors(d, 1)`. Read at α = 1 on purpose —
+-- the function raises (N̄/N_c) to whatever α `scoring_weights` holds, so the
+-- default call returns all-1.0 today and would say every day is perfectly
+-- balanced. α = 1 is the raw ratio, which is what a *threshold* on imbalance
+-- has to be measured against.
+--
+-- Seven days on the live archive: 1.01 / 2.52 / 1.67 / 1.49 / 2.44 / 2.48 /
+-- 2.21. One balanced day and six imbalanced ones — see the judging note in
+-- README.md's round sixteen, because that composition is exactly what a mean
+-- over these days cannot be trusted about.
+day_spread as (
+  select p.d, max(f.factor) / min(f.factor) as spread
   from params p
+  cross join lateral category_balance_factors(p.d, 1) f
+  group by p.d
+),
+
+-- `spread` rides along here rather than being joined in passed0, because
+-- passed0's α slice is chosen *by* the spread and a join cannot reference a
+-- table that comes after it in the same FROM list.
+sig as (
+  select p.d, a.a as balance_alpha, ds.spread, s.*
+  from params p
+  join day_spread ds on ds.d = p.d
   cross join alphas a
   cross join lateral keyword_signals(p.d, a.a) s
 ),
@@ -71,8 +104,25 @@ passed0 as (
                s.df_balanced desc, s.df desc, s.word) as rank0
   from analysis.sieve_configs c
   -- The α slice this configuration asked for, rather than a cross join: sig
-  -- holds one row per (day, α, word) and a configuration reads exactly one α.
-  join sig s on s.balance_alpha = c.balance_alpha
+  -- holds one row per (day, α, word) and a configuration reads exactly one α
+  -- **per day**.
+  --
+  -- Round sixteen makes that "per day" real. `alpha_min_spread` null is the
+  -- old behaviour exactly — one α for every day — so every configuration
+  -- written before this round is untouched, which was checked row by row
+  -- rather than argued. With it set, the configuration applies its α only on
+  -- days whose sections actually collected unequally and falls back to 0
+  -- elsewhere, because round fifteen found α's entire loss sitting on the one
+  -- day that had nothing to correct.
+  --
+  -- Note what this is *not*: it is not a new signal and not a second copy of
+  -- the formula. `df_balanced` still comes out of keyword_signals(d, α); all
+  -- that moves here is which of the already-computed α slices this row reads.
+  join sig s on s.balance_alpha = case
+    when c.alpha_min_spread is null           then c.balance_alpha
+    when s.spread >= c.alpha_min_spread       then c.balance_alpha
+    else 0
+  end
   left join word_overrides ov on ov.word = s.word
   where c.active
     and s.df >= c.min_headlines
