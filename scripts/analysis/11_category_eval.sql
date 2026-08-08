@@ -58,6 +58,34 @@
 -- to a scoped count somewhere it should not have been, or a day-wide one where
 -- the tab's ranking reads it — migration 0025's header states which is which.
 -- 21_unlabeled_category.sql carries no α for the same reason.
+--
+-- **Sieve 6, the place gate, is absent too — and unlike α that absence is a
+-- limitation rather than a proof.** Every row this file prints is a gate-free
+-- screen. The app has drawn with the gate on since migration 0028, so these
+-- numbers are not the shipped tab and must never be quoted as it.
+--
+-- It is absent because it cannot be added cheaply enough to be worth it. The
+-- gate asks whether a place holds an edge to a drawn non-place, which needs the
+-- edge set of a **(day, category)** pair; `analysis.day_edges` is day-wide.
+-- Building a scoped variant would make this file the **third** copy of sieve 6,
+-- after the deployed keyword_graph_compute and 10_sieve_eval.sql's `gate_fail`
+-- — and the cost of a second copy is already written across this directory:
+-- 30_word_scores.sql's copy of sieve 4d silently drifted for four rounds, and
+-- this file's own ranking disagreed with the RPC's until round thirteen. A
+-- third copy of the one clause needing a circular fixed point is the worst
+-- candidate for that treatment there is.
+--
+-- **So the gate's tab numbers come from the deployed RPC instead, and they must
+-- keep coming from there** — 29_gate_on_category.sql does exactly that, reusing
+-- the metric formulas at the foot of this file rather than restating them.
+--
+-- **This does not invalidate the comparisons taken here**, and the distinction
+-- is worth keeping. Round fifteen's cut-versus-demotion arms were *equally*
+-- gate-free, so the comparison between them is internally valid; what is not
+-- valid is reading one of those absolute numbers as the screen a reader sees.
+-- Same rule this harness already applies to F1 across days and across label-set
+-- revisions: **compare configurations against each other inside one run, never
+-- against a number someone wrote down.**
 
 with
 params as (select d from analysis.eval_days),
