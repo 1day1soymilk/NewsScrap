@@ -366,6 +366,19 @@ disagreement invisible only while a tab draws everything that qualifies.
 of 70**; seven of the 24 cells bind. Fixing it moved the shipped tab number from
 71.80 to 73.21 — a measurement error, not an improvement.
 
+**`11_category_eval.sql` still has no sieve 6, so every row it prints is a
+gate-free screen and none of them is the shipped tab.** Adding one would need a
+(day, category) edge set where `analysis.day_edges` is day-wide, making that file
+the third copy of the clause that needs a circular fixed point — so the shipped
+tab is read from the deployed function instead, by `29_gate_on_category.sql`.
+Measured there for the first time in round sixteen: **F1 68.44 and precision
+76.69 over 42 cells**, world 78.65 down to society 58.50, and the spread is
+recall rather than precision — the thickest section has the largest good pool
+against the same 70-word tab, which is the day-thickness effect appearing across
+sections. **Do not put that table beside `11_category_eval.sql`'s**; they are
+different screens, not two measurements of one. What the absence does *not* cost
+is an internal comparison: round fifteen's two arms were equally gate-free.
+
 **That undercut the stated reason head_pos ships as a demotion rather than a
 cut**, and round fifteen re-measured it on a fat day. The argument had been "a
 tab draws at most 46 words, the cap never binds, so a cut there is loss with
@@ -502,11 +515,22 @@ its own knob:
   decimal, at a cost of three good words. On the three days with real imbalance
   (spread 1.49 to 2.52) α is neutral or **positive**.
 
-  **So α is not wrong; applying it to days that do not need it is.** Gating it on
-  the day's own spread scores 56.14 / 87.92 against the shipped 55.88 / 87.36 —
-  arithmetic over rows already measured, not a run of its own — and **+0.26 F1
-  does not buy a new threshold**, which would need tuning and carry its own
-  permanent rule-4 obligation. Two properties are worth carrying: **the
+  **So α is not wrong; applying it to days that do not need it is** — and round
+  sixteen turned that sentence from arithmetic into a measured configuration.
+  `analysis.sieve_configs.alpha_min_spread` makes the α slice a function of
+  (configuration, **day**), and on seven days **α 1.00 gated at spread ≥ 1.2
+  loses no day at all** (three better, four identical; mean F1 50.20 → 50.57,
+  precision 86.49 → 87.30) and strictly dominates flat α, which pays 3.0 points
+  on the balanced day for the same gains. **Weak dominance is a different kind of
+  fact from a better average**, and it is what round fifteen's +0.26 lacked. The
+  sweep also says the gate is a guard against a degenerate input rather than a
+  dosage: the optimum is any value in (1.01, 1.49] and *both* directions are
+  worse, because every day with any real imbalance wants α and only the day that
+  collected 150/149/150/150/150/150 does not. **It is not shipped yet** —
+  `keyword_signals` resolves α from one `scoring_weights` constant with no
+  per-day branch — and `OPEN.md` carries that migration as its one open item.
+  **Do not retune 1.2**; it is a plateau midpoint. Two properties are worth
+  carrying: **the
   denominator is the word's own section distribution, not its top category** (a
   single denominator would charge 폭염 the largest divisor and put the day's
   biggest story at risk), and **α is the identity inside a category tab, at every
@@ -630,7 +654,13 @@ called the RPC itself, and both were switched.
   three meanings and two symbols is not a check.
 - `scripts/layout/pullFixture.mjs` — a layout fixture has to be the graph the
   current configuration draws, or every number `scripts/layout/measure.ts`
-  prints is measured against a picture the sieve no longer produces.
+  prints is measured against a picture the sieve no longer produces. **The days
+  are an argument with the main table's four as the default, and a day worth
+  measuring separately gets its own file** (`graphDays.fat.json`, 2026-08-04) —
+  putting a fifth day into `graphDays.json` mixes a day effect into every
+  before/after taken on it, and edges exist only between drawn words, so the mix
+  cannot be unpicked afterwards. `fixture.ts` holds that choice once for all
+  three harness scripts and each prints the path it read.
 
 `10_sieve_eval.sql`, `11_category_eval.sql` and the worklists were already safe:
 they call `keyword_signals` and the ranking helpers, never the RPC. The general
@@ -1934,12 +1964,26 @@ collected unequally. **They are not comparable to each other on F1** and never
 were; configurations are compared inside one run.
 
 **The days and the configurations under measurement are each named in one
-place.** `analysis.eval_days` (`12_eval_days.sql`) holds the days, and the
-`active` flag in `analysis.sieve_configs` scopes the round without deleting its
-history — `10_sieve_eval.sql`, `11_category_eval.sql`, `20_unlabeled.sql` and
-`21_unlabeled_category.sql` all read both. A second copy is how rule 4 returns
-silently: a day the harness scores but the worklist does not cover is a day
-whose promoted words are never put in front of anyone to label.
+place.** `analysis.eval_days` (`12_eval_days.sql`) holds the days — **and builds
+`analysis.day_edges` from that list in the same file**, because it is derived
+from it and round fifteen proved what happens when the two part company: a day
+added to the list and not to the table is a day on which sieve 6 sees no edges,
+reads that as "drop this place", and silently drops every place. The `active`
+flag in `analysis.sieve_configs` scopes the round without deleting its history.
+A second copy is how rule 4 returns silently: a day the harness scores but the
+worklist does not cover is a day whose promoted words are never put in front of
+anyone to label.
+
+**There are three worklists and they are not interchangeable**, because each
+covers a screen the others structurally cannot: `20_unlabeled.sql` the
+all-categories configurations, `21_unlabeled_category.sql` the gate-free tab
+variants of `11_category_eval.sql`, and `23_unlabeled_gate_on.sql` the deployed
+**gated** screen — the gate frees slots under the render cap and promotes deeper
+words into them, so a gated screen reaches words no gate-free screen draws. Round
+sixteen found all three boundaries the same way and the method is the lesson:
+**the instrument that detects a missing worklist is the harness's own `unlab`
+column, never the worklist. An empty worklist is evidence about the worklist.**
+Read `unlab` even when the worklist says nothing.
 
 **A round's rows are cheap to leave behind and are not free.** Round fourteen's
 live in `24_cap_and_place_configs.sql`, which also carries the `render_cap` and
@@ -1966,11 +2010,20 @@ script is wrong, not the sieve.
 long a drift can hide.** `30`'s copy of sieve 4 never gained the `min_proper`
 clause when migration `0018` shipped it, so for four rounds it reported every
 proper-noun rescue as "cut: generic" — a `!` on every word admitted by
-`passed_by = 'proper'`. Fixed in that file; the sieve was never touched. **Note
-what `chk` still cannot see**: it asks whether a word *may* be drawn, never why
-it placed where it did, so sieve 6 and the α ordering are both invisible to it. A
-round that turns the place gate on has to add that clause by hand, because the
-cross-check will not demand it.
+`passed_by = 'proper'`. Fixed in that file; the sieve was never touched.
+
+**Its third catch was the one it predicted.** That file's own header warned that
+a round turning the place gate on would have to add sieve 6 by hand *because the
+cross-check will not demand it*; migration `0028` turned it on and nobody did, so
+gate-dropped places came out as `cut: rank` with a `!` beside them. Round sixteen
+closed it **without a second copy of the gate**: `keyword_graph_rank(cands, '{}')`
+is the shipped helper with an empty ban list, and an empty ban list *is* a
+gate-off screen, so a place in that ranking and absent from the drawn nodes was
+taken by sieve 6 and nothing else — banning can only promote what survives.
+Checked on five days: everything ranked without the gate and not drawn is a
+place, every time. **What `chk` still cannot see is the α ordering**, since
+`rank` is read out of the RPC's JSON rather than recomputed; the general form is
+that it tests whether a word *may* be drawn, never why it placed where it did.
 
 Two things they found on the first run, both recorded in
 `scripts/analysis/README.md`. The compound merge did not restore 반도체, 무인기,
