@@ -46,7 +46,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // the ladder in the 2026-08-04 analyser probe (reps=1 → 200, reps=2,3,5,7,10,40
 // → 546, in that order and not in order of work) is the same artefact: once a
 // worker's budget is spent every later request in it dies whatever its size.
-// By the same logic a cron four hours apart should never share a worker — but
+// By the same logic a cron two hours apart should never share a worker — but
 // that is reasoning about the schedule, not a measurement: nothing here
 // observed how long a worker survives, only that rapid repeated invocation
 // trips this. **A collect-now button has to expect a 546 that says nothing
@@ -132,8 +132,12 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // The reason to prefer running more often is unaffected and is about freshness
 // rather than cost: **a deeper page is older news, a later run is newer news.**
 // Measured on 2026-08-03, one manual run some hours after the 07:00 cron found
-// 404 new headlines inside the same 150-per-section window. There are six cron
-// jobs (03, 07, 11, 15, 19, 23 KST), all calling this same function.
+// 404 new headlines inside the same 150-per-section window. There are **twelve**
+// cron jobs — 03 KST, every two hours from 05 to 23, and one at 23:50 — all
+// calling this same function. The 23:50 one exists because the next run after
+// 23:00 is 03:00 *tomorrow*, so the day-boundary stop below was dropping every
+// article published in the last hour of the day: ~100 a day, permanently. See
+// this function's README for the per-run and per-hour tables.
 //
 // There is no external call limit any more — the analyser is in-process — so
 // nothing outside this function constrains how often or how deep it runs.
@@ -144,25 +148,18 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 // ~440, past any cap this function has been measured at. Nothing else reads it.
 const MAX_LIST_PAGES = 12
 
-// **What the next version of this file is for**, written down because all three
-// of the numbers around here lost their justification on the same day:
+// **What the next version of this file is for.**
 //
-// 1. **Raise `collect_cap` to 300, once one day has run with the boundary stop
-//    deployed.** The check is `off-day` in the response, per section: it should
-//    be large on the 03:00 and 07:00 runs and near zero at 11:00 and after.
-//    Then re-run the classification that produced the numbers above — every row
-//    of a fresh `collected_date` matched against the live lists — and it should
-//    return 0 published-before-today where it returned 129.
+// The cap raise this list used to head is **done** — `collect_cap` went to 300
+// on 2026-08-07, and the before/after inside that day is in the README: 141 of
+// 1,821 rows mis-dated under the old code against 0 of 937 after. Two left:
 //
-//    The cap is a `scoring_weights` value, so the raise is an `update` and not
-//    a deploy. **The boundary stop has to be deployed first**: at 150 the early
-//    runs already overshoot into yesterday, and at 300 they would overshoot
-//    twice as far.
-// 2. **A collect-now button** in the frontend, so a collection can be taken on
-//    demand instead of waiting for the next of six crons. Note the worker budget
-//    is cumulative: pressing it repeatedly is exactly the shape that returns 546
-//    with no body.
-// 3. **Filter duplicate headlines by title.** `UNIQUE (category_id, link)` plus
+// 1. **A collect-now button** in the frontend, so a collection can be taken on
+//    demand instead of waiting for the next cron. Note the worker budget is
+//    cumulative: pressing it repeatedly is exactly the shape that returns 546
+//    with no body. Twelve runs a day has made this less pressing than it was at
+//    six — the longest wait is now two hours rather than four.
+// 2. **Filter duplicate headlines by title.** `UNIQUE (category_id, link)` plus
 //    `canonicalLink` stop one article arriving twice, but the same story from a
 //    different outlet is not caught — 2026-08-01 holds 190 such rows.
 //    Duplicates inflate co-occurrence, so `edge_min_cooc = 2` can be satisfied

@@ -176,8 +176,8 @@ cron, and **no run stored more than 150 in any category**. A day is the sum of
 six or more runs, so a day-wide count answers a different question than the one
 the flag asks. There is no run id in the schema; `date_trunc('minute',
 created_at)` is the available proxy, since a run writes its six sections in 4–5
-seconds and the crons are four hours apart. Its one blind spot is a run
-straddling :59/:00, which splits a capped run into two uncapped halves.
+seconds and the closest two crons are fifty minutes apart. Its one blind spot is
+a run straddling :59/:00, which splits a capped run into two uncapped halves.
 
 **And `capped` counts rows *stored*, not the window *scraped*, which is the
 larger blind spot and the reason the caption is worded the way it is.**
@@ -1575,11 +1575,24 @@ reach shows a `CHK` line. That is why the two phase timings are in the response
 body as well: `(scrape Xms, process Yms)` per category is the only machine-
 readable statement of where a run's time went.
 
-**It runs six times a day, four hours apart** (03, 07, 11, 15, 19, 23 KST — six
-pg_cron jobs, all calling the same function). Note that **`cron.job_run_details`
-is not a health signal**: `succeeded` means `net.http_post` queued a request and
-returned a row, and all six jobs read `succeeded` throughout the days when ETRI
-was blocked and nothing was collected. Check `max(created_at)` on `headlines`.
+**It runs twelve times a day** — 03 KST, then every two hours from 05 to 23, plus
+one at 23:50 — twelve pg_cron jobs all calling the same function. Note that
+**`cron.job_run_details` is not a health signal**: `succeeded` means
+`net.http_post` queued a request and returned a row, and every job read
+`succeeded` throughout the days when ETRI was blocked and nothing was collected.
+Check `max(created_at)` on `headlines`.
+
+**The 23:50 job exists because the day boundary was eating the last hour of every
+day.** The run after 23:00 is 03:00 *tomorrow*, which drops 23:00–24:00
+publications as off-day, so each day's last row was 23:00:07 and ~100 articles a
+day were never collected at all. `todayInSeoul()` is read at handler entry, so a
+run started at 23:50 stamps today even if it finishes past midnight.
+
+**Going to twelve runs is a collection-regime boundary, like `collect_cap`
+150 → 300 was.** Denser sampling catches articles that used to fall past rank 300
+between two four-hour runs, so day totals rise, and F1 is not comparable across
+days of different thickness. The five eval days all predate it. Measurements in
+`supabase/functions/collect-headlines/README.md`.
 
 Running more often is the better instrument on its own terms: **a deeper page is
 older news, a later run is newer news.** Measured on 2026-08-03, one run some
